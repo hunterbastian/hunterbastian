@@ -1,5 +1,7 @@
 ## Hi there! 👋 I am a current student studying Interaction Design at Utah Valley University.
 
+## I’m currently learning Figma and front-end coding!
+
 <!--
 **hunterbastian/hunterbastian** is a ✨ _special_ ✨ repository because its `README.md` (this file) appears on your GitHub profile.
 
