@@ -4,6 +4,7 @@
 
 ### current projects:
 - I’m currently working on:
+  - design project
   - minimalist tic-tac-to
   - (secret for now) game 🧊
 
