@@ -6,6 +6,8 @@
 - I’m currently working on:
   - design project
   - minimalist tic-tac-to
+  - minimalist gem mining game
+ 
   - (secret for now) game 🧊
 
 <!--
