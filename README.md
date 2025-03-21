@@ -8,7 +8,7 @@
   - minimalist tic-tac-to
   - minimalist gem mining game
  
-  - (secret for now) game 🧊
+  - (secret for now) game 
 
 <!--
 **hunterbastian/hunterbastian** is a ✨ _special_ ✨ repository because its `README.md` (this file) appears on your GitHub profile.
