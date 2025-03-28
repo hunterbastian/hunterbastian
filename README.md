@@ -1,7 +1,5 @@
 ## 🦕 Hi there! I am a current student studying Interaction Design at Utah Valley University.
 
-## 📚 I’m learning Figma, design systems, and coding!
-
 ### current projects:
 - I’m currently working on:
   - design project
