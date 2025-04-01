@@ -1,4 +1,4 @@
-## 🦕 Hi there! I am a current student studying Interaction Design at Utah Valley University.
+### hello there! I am a current student studying Interaction Design at Utah Valley University.
 
 ### current projects:
 - I’m currently working on:
