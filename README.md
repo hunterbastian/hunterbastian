@@ -1,6 +1,6 @@
-### hello there! I am a current student studying Interaction Design at Utah Valley University.
+### Hello there! I am a current student studying Interaction Design at Utah Valley University.
 
-### current projects:
+### Current projects:
 - I’m currently working on:
   - minimalist tic-tac-to 
   - (secret for now) game 
