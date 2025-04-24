@@ -3,7 +3,8 @@
 ### Current projects:
 - I’m currently working on:
   - minimalist tic-tac-to 
-  - (secret for now) game 
+  - upcoming game
+  - habit tracker
 
 <!--
 **hunterbastian/hunterbastian** is a ✨ _special_ ✨ repository because its `README.md` (this file) appears on your GitHub profile.
