@@ -3,8 +3,8 @@
 ### Current projects:
 - I’m currently working on:
   - minimalist tic-tac-to 
-  - upcoming game
-  - habit tracker
+  - work in progress mindfulness application
+  [Minimalist Tic Tac Toe](https://github.com/hunterbastian/minimalist-tictactoe)  
 
 <!--
 **hunterbastian/hunterbastian** is a ✨ _special_ ✨ repository because its `README.md` (this file) appears on your GitHub profile.
