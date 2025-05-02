@@ -1,10 +1,14 @@
-### Hello there! I am a current student studying Interaction Design at Utah Valley University.
+### Hello there! I am a current student studying Interaction Design at Utah Valley University. Designers and front end developer who loves hiking.
 
 ### Current projects:
 - I’m currently working on:
-  - minimalist tic-tac-to 
+  -  [minimalist tic-tac-toe](https://github.com/hunterbastian/minimalist-tictactoe)  
   - work in progress mindfulness application
-  [Minimalist Tic Tac Toe](https://github.com/hunterbastian/minimalist-tictactoe)  
+ 
+
+
+
+
 
 <!--
 **hunterbastian/hunterbastian** is a ✨ _special_ ✨ repository because its `README.md` (this file) appears on your GitHub profile.
