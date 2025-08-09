@@ -3,7 +3,7 @@ Designer and front end developer who loves hiking.
 
 ### Current projects:
 - I’m currently working on:
-  -  [minimalist tic-tac-toe](https://github.com/hunterbastian/minimalist-tictactoe)
+  - [minimalist tic-tac-toe](https://github.com/hunterbastian/minimalist-tictactoe) · [Live](https://minimalist-tic-tac-toe.netlify.app)
   - [GlassNet](https://github.com/hunterbastian/glassnet) · [Live](https://glassnet.vercel.app)
 
 
