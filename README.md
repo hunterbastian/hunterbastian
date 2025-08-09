@@ -1,5 +1,5 @@
 ### Hello there! I am a current student studying Interaction Design at Utah Valley University. 
-Designer and front end developer who loves hiking.
+Interaaction Designer and front end developer.
 
 ### Current projects:
 - I’m currently working on:
