@@ -1,5 +1,5 @@
 ### Hi, I'm Hunter. Interaction Design Student at Utah Valley University. 
-Interaction & front-end craft
+Interaction & front-end craft.
 
 ### Current projects:
 - I’m currently working on:
