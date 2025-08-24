@@ -1,5 +1,4 @@
-### Hello there! I am a current student studying Interaction Design at Utah Valley University. 
-Interaction Designer and front end developer.
+### Hi, I'm Hunter. Interaction Design Student at Utah Valley University. 
 
 ### Current projects:
 - I’m currently working on:
