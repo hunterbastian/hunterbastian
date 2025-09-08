@@ -1,14 +1,13 @@
-### Hi, I'm Hunter. Interaction Design Student at Utah Valley University. 
-Interaction & front-end craft.
+# Hunter Bastian  
+*Interaction Design · Utah Valley University*  
+Crafting interfaces with detail and craft  
 
-### Current projects:
-- I’m currently working on:
-  - [minimalist tic-tac-toe](https://github.com/hunterbastian/minimalist-tictactoe) · [Live](https://minimalist-tic-tac-toe.netlify.app)
+🌐 [Portfolio](https://portfolio-six-phi-5wvazty0n0.vercel.app/)
 
+---
 
-
-
-
+## Current Work  
+- [Minimalist Tic-Tac-Toe](https://github.com/hunterbastian/minimalist-tictactoe) · [Live Demo](https://minimalist-tic-tac-toe.netlify.app/)
 
 
 <!--
