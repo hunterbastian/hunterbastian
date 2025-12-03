@@ -2,7 +2,7 @@
 *Interaction Design · Utah Valley University*  
 Crafting interfaces with detail and craft
 
-🌐 hunterbastian.com
+🌐 **[hunterbastian.com](https://hunterbastian.com)**  
 
 ---
 
