@@ -4,8 +4,10 @@ Crafting interfaces with detail and craft
 
 🌐 **[hunterbastian.com](https://hunterbastian.com)**  
 
-- **Tova** 
-- **Minimal Tic-Tac-Toe** 
-- **Minimal Snake**
+- **tova** 
 - **ambientworld**
-- **snowgame** 
+- **mini-tictactoe** 
+- **mini-mapmaker**
+
+other
+- **snow-game** to be incorporated in tova
