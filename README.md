@@ -9,3 +9,4 @@ Crafting interfaces with detail and craft
 - **mini-tictactoe** 
 - **mini-mapmaker**
 - **mini-fossils**
+- various other projects and tools coming soon
