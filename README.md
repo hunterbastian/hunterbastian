@@ -6,8 +6,8 @@ Crafting interfaces with detail and craft
 
 - **tova** 
 - **ambientworld**
-- **mini-tictactoe** 
-- **mini-mapmaker**
+- **micro-tictactoe** 
+- **micro-mapmaker**
 
 other
 - **snow-game** to be incorporated in tova
