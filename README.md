@@ -8,5 +8,5 @@ Crafting interfaces with detail and craft
 - **ambientworld** - needs a new name
 - **mini-tictactoe** 
 - **mini-mapmaker**
-- **mini-fossils**
+- **mini-lands**
 - various other projects and tools coming soon
