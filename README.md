@@ -8,6 +8,7 @@ Crafting interfaces with detail and craft
 - **ambientworld**
 - **mini-tictactoe** 
 - **mini-mapmaker**
+- **mini-fossils**
 
 other
 - **snow-game** to be incorporated in tova
