@@ -4,11 +4,8 @@ Crafting interfaces with detail and craft
 
  **[hunterbastian.com](https://hunterbastian.com)**  
 
-- **tova** 
-- **ambientworld**
+- **tova** - open world rpg
+- **ambientworld** - needs a new name
 - **mini-tictactoe** 
 - **mini-mapmaker**
 - **mini-fossils**
-
-other
-- **snow-game** to be incorporated in tova
