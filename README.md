@@ -6,13 +6,13 @@ Crafting interfaces with detail
 
 ---
 
-- **[tova](https://github.com/hunterbastian/tova)** Open world rpg
-- **ambientworld** - (Renaming soon)
-- **mini-tictactoe** - Minimal tictactoe game
-- **mini-mapmaker** - Prodedural sandbox creator
-- **mini-lands** - Tiny world generator
+- **[tova](https://github.com/hunterbastian/tova)** - open world rpg
+- **ambientworld** - (renaming soon)
+- **mini-tictactoe** - minimal tictactoe game
+- **mini-mapmaker** - prodedural sandbox creator
+- **mini-lands** - tiny world generator
 
-- Various other projects and tools coming soon
+Various other projects and tools coming soon.
 
 
 
