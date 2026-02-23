@@ -8,6 +8,8 @@ Portfolio - **[hunterbastian.com](https://hunterbastian.com)**
 
 - **[tova](https://github.com/hunterbastian/tova)** - open world rpg
 - dala - farm game
+- fjell - wip
+- aune - wip
 - **ambientworld** - (renaming soon)
 - **mini-tictactoe** - minimal tictactoe game
 - **mini-mapmaker** - prodedural sandbox creator
