@@ -7,11 +7,11 @@ Portfolio - **[hunterbastian.com](https://hunterbastian.com)**
 ---
 
 - **[tova](https://github.com/hunterbastian/tova)** - open world rpg
-- dala-farm - farm game
-- fjell - idle game
-- aune - survivor game
-- tide-pool - evolution sim
-- fjordlings - monster collector game
+- **dala-farm **- farm game
+- **fjell** - idle game
+- **aune** - survivor game
+- **tide-pool** - evolution sim
+- **fjordlings** - monster collector game
 - **ambientworld** - (renaming soon)
 - **mini-tictactoe** - minimal tictactoe game
 - **mini-mapmaker** - prodedural sandbox creator
