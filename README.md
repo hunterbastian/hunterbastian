@@ -7,7 +7,7 @@ Portfolio - **[hunterbastian.com](https://hunterbastian.com)**
 ---
 
 - **[tova](https://github.com/hunterbastian/tova)** - open world rpg
-- **dala-farm **- farm game
+- **dala-farm** - farm game
 - **fjell** - idle game
 - **aune** - survivor game
 - **tide-pool** - evolution sim
