@@ -10,6 +10,7 @@ Portfolio - **[hunterbastian.com](https://hunterbastian.com)**
 - dala-farm - farm game
 - fjell - idle game
 - aune - survivor game
+- tide-pool - evolution sim
 - **ambientworld** - (renaming soon)
 - **mini-tictactoe** - minimal tictactoe game
 - **mini-mapmaker** - prodedural sandbox creator
