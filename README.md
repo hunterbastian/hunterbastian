@@ -12,11 +12,11 @@ Portfolio - **[hunterbastian.com](https://hunterbastian.com)**
 - **tide-pool** - evolution sim
 - **dala-farm** - farm game
 - **fjordlings** - monster collector game
-- **mini-lands** - tiny world generator
 - **ambientworld** - (renaming soon)
 - **mini-mapmaker** - prodedural sandbox creator
 - **mini-tictactoe** - minimal tictactoe game
 - **[mini-pomodoro](https://github.com/hunterbastian/mini-pomodoro)** — minimal focus timer app
+- **mini-lands** - tiny world generator
 
 Various other projects and tools coming soon.
 
