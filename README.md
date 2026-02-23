@@ -7,7 +7,7 @@ Portfolio - **[hunterbastian.com](https://hunterbastian.com)**
 ---
 
 - **[tova](https://github.com/hunterbastian/tova)** - open world rpg
-- dala - farm game
+- dala-farm - farm game
 - fjell - wip
 - aune - wip
 - **ambientworld** - (renaming soon)
