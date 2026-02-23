@@ -11,6 +11,7 @@ Portfolio - **[hunterbastian.com](https://hunterbastian.com)**
 - fjell - idle game
 - aune - survivor game
 - tide-pool - evolution sim
+- fjordlings - monster collector game
 - **ambientworld** - (renaming soon)
 - **mini-tictactoe** - minimal tictactoe game
 - **mini-mapmaker** - prodedural sandbox creator
