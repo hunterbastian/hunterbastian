@@ -7,6 +7,7 @@ Portfolio - **[hunterbastian.com](https://hunterbastian.com)**
 ---
 
 - **[tova](https://github.com/hunterbastian/tova)** - open world rpg
+- dala - farm game
 - **ambientworld** - (renaming soon)
 - **mini-tictactoe** - minimal tictactoe game
 - **mini-mapmaker** - prodedural sandbox creator
