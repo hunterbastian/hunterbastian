@@ -7,15 +7,15 @@ Portfolio - **[hunterbastian.com](https://hunterbastian.com)**
 ---
 
 - **[tova](https://github.com/hunterbastian/tova)** - open world rpg
-- **dala-farm** - farm game
 - **fjell** - idle game
 - **aune** - survivor game
 - **tide-pool** - evolution sim
+- **dala-farm** - farm game
 - **fjordlings** - monster collector game
-- **ambientworld** - (renaming soon)
-- **mini-tictactoe** - minimal tictactoe game
-- **mini-mapmaker** - prodedural sandbox creator
 - **mini-lands** - tiny world generator
+- **ambientworld** - (renaming soon)
+- **mini-mapmaker** - prodedural sandbox creator
+- **mini-tictactoe** - minimal tictactoe game
 - **[mini-pomodoro](https://github.com/hunterbastian/mini-pomodoro)** — minimal focus timer app
 
 Various other projects and tools coming soon.
