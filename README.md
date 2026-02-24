@@ -17,6 +17,8 @@ Portfolio - **[hunterbastian.com](https://hunterbastian.com)**
 - **mini-tictactoe** - minimal tictactoe game
 - **[mini-pomodoro](https://github.com/hunterbastian/mini-pomodoro)** — minimal focus timer app
 - **mini-lands** - tiny world generator
+- **world-gen** - wip
+
 
 Various other projects and tools coming soon.
 
