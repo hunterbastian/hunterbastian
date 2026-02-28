@@ -19,6 +19,8 @@ Portfolio - **[hunterbastian.com](https://hunterbastian.com)**
 - **mini-lands** - tiny world generator
 - **planet-garden** - wip
 - **world-gen** - wip
+- mini-ui
+- gradients.pixels
 
 
 Various other projects and tools coming soon.
