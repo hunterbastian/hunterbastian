@@ -1,6 +1,6 @@
 # Hunter Bastian  
 *Interaction Design · Utah Valley University*  
-Crafting and building.
+Crafting, designing and building.
 
 Portfolio - **[hunterbastian.com](https://hunterbastian.com)**  
 
