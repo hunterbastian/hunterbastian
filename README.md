@@ -20,6 +20,7 @@ Portfolio - **[hunterbastian.com](https://hunterbastian.com)**
 - **planet-garden** - wip
 - **world-gen** - wip
 - **pixels**
+- minimal-frog
 
 
 Various other projects and tools coming soon.
