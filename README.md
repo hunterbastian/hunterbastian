@@ -6,7 +6,7 @@ Portfolio - **[hunterbastian.com](https://hunterbastian.com)**
 
 <u><a href="mailto:bastiantthunter@gmail.com">Email</a></u> · 
 <u><a href="https://x.com/thestudioalpine">Twitter</a></u> · 
-<u><a href="https://linkedin.com/in/yourusername">LinkedIn</a></u>
+<u><a href="https://linkedin.com/in/hunterbastian">LinkedIn</a></u>
 
 ---
 
