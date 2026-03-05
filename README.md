@@ -4,9 +4,9 @@ Crafting, designing and building.
 
 Portfolio - **[hunterbastian.com](https://hunterbastian.com)**
 
-<u><a href="mailto:bastiantthunter@gmail.com">Email</a></u> · 
-<u><a href="https://x.com/thestudioalpine">Twitter</a></u> · 
-<u><a href="https://linkedin.com/in/hunterbastian">LinkedIn</a></u>
+<u><a href="mailto:bastiantthunter@gmail.com">email</a></u> · 
+<u><a href="https://x.com/thestudioalpine">twitter</a></u> · 
+<u><a href="https://linkedin.com/in/hunterbastian">linkedin</a></u>
 
 ---
 
