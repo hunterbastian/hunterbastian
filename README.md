@@ -5,7 +5,7 @@ Studio Alpine
 
 Portfolio - **[hunterbastian.com](https://hunterbastian.com)**
 
-<img src="assets/sky-farm-icon.svg" width="18" height="18" style="vertical-align: middle;" /> **[Sky Farm](https://sky-farm.vercel.app)** — pixel farming game above the clouds
+**[Sky Farm](https://sky-farm.vercel.app)** — pixel farming game above the clouds
 
 <u><a href="mailto:bastiantthunter@gmail.com">email</a></u> · 
 <u><a href="https://x.com/thestudioalpine">twitter</a></u> · 
