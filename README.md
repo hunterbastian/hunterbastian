@@ -3,9 +3,9 @@
 Crafting, designing and building.
 Studio Alpine
 
-Portfolio - **[hunterbastian.com](https://hunterbastian.com)**
+Portfolio : **[hunterbastian.com](https://hunterbastian.com)**
 
-**[sky farm](https://sky-farm.vercel.app)** — pixel farming game above the clouds
+**[sky farm](https://sky-farm.vercel.app)** : pixel farming game above the clouds
 
 <u><a href="mailto:bastiantthunter@gmail.com">email</a></u> · 
 <u><a href="https://x.com/thestudioalpine">twitter</a></u> · 
