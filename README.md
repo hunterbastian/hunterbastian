@@ -1,5 +1,5 @@
 # Hunter Bastian  
-*Interaction Design · Utah Valley University*  
+Interaction Design · Utah Valley University
 Crafting, designing, building.
 Studio Alpine
 
