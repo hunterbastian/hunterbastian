@@ -1,5 +1,5 @@
 # Hunter Bastian  
-UX Designer · Utah Valley University
+Product Designer · Utah Valley University
 
 Portfolio : **[hunterbastian.com](https://hunterbastian.com)**
 
