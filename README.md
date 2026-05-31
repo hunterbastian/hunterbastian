@@ -1,5 +1,5 @@
 # Hunter Bastian  
-Design Engineer · Utah Valley University
+design engineer · utah valley university
 
 Portfolio : **[hunterbastian.com](https://hunterbastian.com)**
 
