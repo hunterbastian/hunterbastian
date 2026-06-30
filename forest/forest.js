@@ -44,16 +44,17 @@ function css(c, alpha = 1) {
 /* ----------------------------------------------------------------------- */
 /* Sky palette keyframes across a full day (phase 0..1, wrapping).         */
 /* ----------------------------------------------------------------------- */
+// Tuned toward Studio Ghibli skies: vivid cerulean days, warm peach golden hours.
 const SKY_KEYS = [
-  { p: 0.0, top: hex("#05070f"), bot: hex("#0d1430") },
-  { p: 0.22, top: hex("#1b1838"), bot: hex("#4a3358") },
-  { p: 0.27, top: hex("#3a5d86"), bot: hex("#f0926b") },
-  { p: 0.34, top: hex("#5fa8d6"), bot: hex("#d7eeff") },
-  { p: 0.5, top: hex("#4a90d9"), bot: hex("#c4e6ff") },
-  { p: 0.68, top: hex("#5b84c5"), bot: hex("#ffe6c2") },
-  { p: 0.74, top: hex("#2f3f73"), bot: hex("#f2794b") },
-  { p: 0.8, top: hex("#161a3c"), bot: hex("#3c2c5e") },
-  { p: 1.0, top: hex("#05070f"), bot: hex("#0d1430") },
+  { p: 0.0, top: hex("#070a17"), bot: hex("#11193a") },
+  { p: 0.22, top: hex("#1f1c40"), bot: hex("#5a3a60") },
+  { p: 0.27, top: hex("#436a96"), bot: hex("#ffa873") },
+  { p: 0.34, top: hex("#5fb4e4"), bot: hex("#eaf6ff") },
+  { p: 0.5, top: hex("#3f9ce6"), bot: hex("#d6f1ff") },
+  { p: 0.68, top: hex("#6aa3d8"), bot: hex("#ffedcb") },
+  { p: 0.74, top: hex("#374a86"), bot: hex("#ff8a4e") },
+  { p: 0.8, top: hex("#181c40"), bot: hex("#432f63") },
+  { p: 1.0, top: hex("#070a17"), bot: hex("#11193a") },
 ];
 
 function skyAt(phase) {
@@ -184,6 +185,10 @@ const state = {
   fireflies: [],
   stars: [],
   hills: [],
+  clouds: [],
+  grass: [],
+  kodama: [],
+  spiritsOn: true,
   pointer: { x: 0.5, y: 0.5 },
   seed: (Math.random() * 1e9) >>> 0,
 };
@@ -237,6 +242,77 @@ function buildHills() {
   }
 }
 
+function makeCloud(r, scatter) {
+  const scale = rand(r, 0.7, 1.7);
+  const count = Math.round(rand(r, 4, 7));
+  const puffs = [];
+  for (let i = 0; i < count; i++) {
+    const f = count === 1 ? 0 : i / (count - 1);
+    puffs.push({
+      dx: (f - 0.5) * rand(r, 60, 84),
+      dy: -Math.sin(f * Math.PI) * rand(r, 12, 30) + rand(r, -5, 8),
+      rx: rand(r, 30, 54),
+      ry: rand(r, 24, 40),
+    });
+  }
+  const span = 200 * scale;
+  return {
+    x: scatter ? rand(r, -span, state.w) : -span,
+    y: rand(r, state.h * 0.05, state.horizon * 0.5),
+    scale,
+    speed: rand(r, 4, 11) * (0.6 + scale * 0.4),
+    depth: rand(r, 0.45, 1),
+    puffs,
+  };
+}
+
+function buildClouds() {
+  const r = makeRng(state.seed ^ 0xc10d);
+  state.clouds = [];
+  const n = Math.max(4, Math.floor(state.w / 280));
+  for (let i = 0; i < n; i++) state.clouds.push(makeCloud(r, true));
+}
+
+function buildGrass() {
+  const r = makeRng(state.seed ^ 0x6213a);
+  state.grass = [];
+  const n = Math.floor(state.w / 6);
+  for (let i = 0; i < n; i++) {
+    const depth = r();
+    state.grass.push({
+      x: r() * state.w,
+      baseY: state.horizon + (state.h - state.horizon) * lerp(0.45, 1.0, depth),
+      h: rand(r, 16, 30) + depth * 34,
+      lean: rand(r, -0.25, 0.25),
+      phase: r() * TAU,
+      hue: rand(r, 92, 134),
+      sat: rand(r, 40, 64),
+      w: rand(r, 1.4, 3),
+    });
+  }
+  // draw nearer (lower) blades last so they sit in front
+  state.grass.sort((a, b) => a.baseY - b.baseY);
+}
+
+function buildKodama() {
+  const r = makeRng(state.seed ^ 0x0d0a);
+  state.kodama = [];
+  const n = Math.max(3, Math.floor(state.w / 340));
+  for (let i = 0; i < n; i++) {
+    state.kodama.push({
+      x: r() * state.w,
+      y: state.horizon + (state.h - state.horizon) * rand(r, 0.12, 0.7),
+      s: rand(r, 8, 15),
+      bob: r() * TAU,
+      bobSpeed: rand(r, 0.6, 1.3),
+      turn: 0,
+      turnTarget: 0,
+      t: r() * 4,
+      nextTurn: rand(r, 2, 6),
+    });
+  }
+}
+
 function buildTrees(keep) {
   const existing = keep ? state.trees : [];
   state.trees = [];
@@ -269,6 +345,9 @@ function buildWeather() {
 function buildWorld(regenTrees) {
   buildStars();
   buildHills();
+  buildClouds();
+  buildGrass();
+  buildKodama();
   if (regenTrees || state.trees.length === 0) buildTrees(false);
   buildWeather();
 }
@@ -359,17 +438,72 @@ function drawBody(pos, core, glow, radius, alpha) {
   ctx.restore();
 }
 
+function updateClouds(dt) {
+  const drift = 1 + state.wind * 2.2;
+  for (const cl of state.clouds) {
+    cl.x += cl.speed * dt * drift;
+    const span = 220 * cl.scale;
+    if (cl.x - span > state.w) cl.x = -span;
+  }
+}
+
+function drawClouds(cel) {
+  const light = cel.dayAmount;
+  // warm rim during golden hours (sun low on the horizon)
+  const warmth = clamp(1 - Math.abs(cel.elevation) / 0.4, 0, 1);
+  let top = mix(hex("#2c3760"), hex("#ffffff"), 0.12 + light * 0.88);
+  top = mix(top, hex("#fff0d2"), warmth * 0.5);
+  let bottom = mix(hex("#1b2440"), hex("#c6d6ee"), 0.18 + light * 0.82);
+  bottom = mix(bottom, hex("#f6c98c"), warmth * 0.45);
+  const alpha = 0.4 + light * 0.55;
+
+  for (const cl of state.clouds) {
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const p of cl.puffs) {
+      minY = Math.min(minY, cl.y + (p.dy - p.ry) * cl.scale);
+      maxY = Math.max(maxY, cl.y + (p.dy + p.ry) * cl.scale);
+    }
+    // one gradient for the whole cloud => seamless overlaps
+    const g = ctx.createLinearGradient(0, minY, 0, maxY);
+    g.addColorStop(0, css(top));
+    g.addColorStop(1, css(bottom));
+    ctx.save();
+    ctx.globalAlpha = alpha * cl.depth;
+    ctx.fillStyle = g;
+    for (const p of cl.puffs) {
+      ctx.beginPath();
+      ctx.ellipse(
+        cl.x + p.dx * cl.scale,
+        cl.y + p.dy * cl.scale,
+        p.rx * cl.scale,
+        p.ry * cl.scale,
+        0,
+        0,
+        TAU
+      );
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+}
+
 function drawGround(cel) {
   const { bot } = skyAt(state.phase);
-  const groundTop = mix(hex("#1d3326"), bot, 0.25);
-  const groundBot = hex("#0a1410");
+  const meadow = mix(hex("#3f7a45"), hex("#9fd06a"), cel.dayAmount * 0.8);
+  const groundTop = mix(hex("#22381f"), meadow, 0.4 + cel.dayAmount * 0.4);
+  const groundBot = mix(hex("#0a160d"), hex("#21401f"), cel.dayAmount * 0.5);
   const lightFar = mix(groundBot, groundTop, 0.6 + cel.dayAmount * 0.3);
 
-  // distant hills
+  // lush rolling hills, lighter and hazier toward the back
+  const skyBot = skyAt(state.phase).bot;
   for (const hill of state.hills) {
-    const shade = mix(skyAt(state.phase).bot, hex("#15241b"), 0.4 + hill.z * 0.4);
-    const fade = lerp(0.5, 1, hill.z);
-    ctx.fillStyle = css(mix(skyAt(state.phase).bot, shade, fade));
+    // far hill (z~0) = soft yellow-green, near hill = deep green
+    let green = mix(hex("#2f5d39"), hex("#8ec56a"), 1 - hill.z);
+    green = mix(hex("#16271c"), green, 0.35 + cel.dayAmount * 0.65);
+    const fade = lerp(0.55, 0.1, hill.z); // distant hills blend into sky
+    ctx.fillStyle = css(mix(green, skyBot, fade));
     ctx.beginPath();
     ctx.moveTo(0, state.h);
     ctx.lineTo(0, hill.pts[0].y);
@@ -468,6 +602,106 @@ function drawFoliage(tree, node, x, y, scale, light, haze, skyBot) {
   ctx.beginPath();
   ctx.arc(x + size * 0.4, y - size * 0.2, size * 0.6, 0, TAU);
   ctx.fill();
+  // sun-side highlight for a soft, painterly canopy
+  ctx.globalAlpha = 0.34 * (1 - haze * 0.6);
+  ctx.fillStyle = `hsl(${hue}, ${tree.sat}%, ${clamp(lum + 16, 12, 84)}%)`;
+  ctx.beginPath();
+  ctx.arc(x - size * 0.32, y - size * 0.42, size * 0.55, 0, TAU);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawGrass(cel) {
+  const light = 0.25 + cel.dayAmount * 0.6;
+  const wind = state.wind * (reduceMotion ? 0.2 : 1);
+  ctx.lineCap = "round";
+  for (const b of state.grass) {
+    const sway = Math.sin(state.time * 1.8 + b.phase) * wind * b.h * 0.5;
+    const tipX = b.x + b.lean * b.h + sway;
+    const tipY = b.baseY - b.h;
+    const ctrlX = b.x + b.lean * b.h * 0.5 + sway * 0.5;
+    const ctrlY = b.baseY - b.h * 0.55;
+    const lum = clamp(14 + light * 34, 8, 60);
+    ctx.strokeStyle = `hsl(${b.hue}, ${b.sat}%, ${lum}%)`;
+    ctx.lineWidth = b.w;
+    ctx.beginPath();
+    ctx.moveTo(b.x, b.baseY);
+    ctx.quadraticCurveTo(ctrlX, ctrlY, tipX, tipY);
+    ctx.stroke();
+  }
+}
+
+function drawKodama(dt, cel) {
+  if (!state.spiritsOn) return;
+  const vis = 0.42 + (1 - cel.dayAmount) * 0.45;
+  for (const k of state.kodama) {
+    k.bob += k.bobSpeed * dt;
+    k.t += dt;
+    if (k.t > k.nextTurn) {
+      k.t = 0;
+      k.nextTurn = rand(rng, 2, 6);
+      k.turnTarget = rand(rng, -0.5, 0.5);
+    }
+    k.turn += (k.turnTarget - k.turn) * Math.min(1, dt * 4);
+    const bobY = Math.sin(k.bob) * 2.2;
+    const x = k.x;
+    const y = k.y + bobY;
+    const s = k.s;
+
+    ctx.save();
+    ctx.globalAlpha = vis;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, s * 3);
+    g.addColorStop(0, "rgba(236,246,255,0.5)");
+    g.addColorStop(1, "rgba(236,246,255,0)");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, s * 3, 0, TAU);
+    ctx.fill();
+
+    ctx.fillStyle = "rgba(245,249,253,0.96)";
+    ctx.beginPath();
+    ctx.ellipse(x, y + s * 0.7, s * 0.6, s * 0.82, 0, 0, TAU);
+    ctx.fill();
+
+    ctx.save();
+    ctx.translate(x, y - s * 0.15);
+    ctx.rotate(k.turn);
+    ctx.beginPath();
+    ctx.arc(0, 0, s, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = "rgba(44,58,74,0.85)";
+    ctx.beginPath();
+    ctx.arc(-s * 0.32, -s * 0.05, s * 0.15, 0, TAU);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(s * 0.32, -s * 0.05, s * 0.15, 0, TAU);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(0, s * 0.34, s * 0.17, s * 0.22, 0, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawBloom(cel) {
+  if (!cel.sun || cel.dayAmount < 0.05) return;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  const r = state.h * 0.6;
+  const g = ctx.createRadialGradient(
+    cel.sun.x,
+    cel.sun.y,
+    0,
+    cel.sun.x,
+    cel.sun.y,
+    r
+  );
+  g.addColorStop(0, `rgba(255,240,200,${0.12 * cel.dayAmount})`);
+  g.addColorStop(1, "rgba(255,240,200,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, state.w, state.h);
   ctx.restore();
 }
 
@@ -568,15 +802,20 @@ function frame(now) {
     if (t.grow < 1) t.grow = clamp(t.grow + dt * 1.6, 0, 1);
   }
 
+  updateClouds(dt);
   const cel = celestial();
 
   ctx.clearRect(0, 0, state.w, state.h);
   drawSky(cel);
+  drawClouds(cel);
   drawGround(cel);
   drawMist(cel);
   for (const tree of state.trees) drawTree(tree, cel);
+  drawGrass(cel);
   drawLeaves(dt);
+  drawKodama(dt, cel);
   drawFireflies(dt, cel);
+  drawBloom(cel);
   drawVignette(cel);
 
   requestAnimationFrame(frame);
@@ -619,6 +858,7 @@ const autoTime = $("autoTime");
 const windRange = $("windRange");
 const densityRange = $("densityRange");
 const leavesToggle = $("leaves");
+const spiritsToggle = $("spirits");
 const treeCount = $("treeCount");
 
 function timeLabel(p) {
@@ -669,6 +909,10 @@ leavesToggle.addEventListener("change", () => {
   state.leavesOn = leavesToggle.checked;
 });
 
+spiritsToggle.addEventListener("change", () => {
+  state.spiritsOn = spiritsToggle.checked;
+});
+
 $("plant").addEventListener("click", () => {
   const burst = Math.max(4, Math.floor(state.density / 3));
   for (let i = 0; i < burst; i++) {
@@ -702,6 +946,7 @@ window.addEventListener("resize", resize);
 state.wind = Number(windRange.value) / 100;
 state.density = Number(densityRange.value);
 state.leavesOn = leavesToggle.checked;
+state.spiritsOn = spiritsToggle.checked;
 state.autoTime = autoTime.checked;
 state.phase = Number(timeRange.value) / 1000;
 

@@ -1,9 +1,10 @@
 # Digital Forest
 
-An interactive, procedurally generated forest that lives in your browser. Every
-tree is grown from a recursive branching algorithm, the sky moves through a full
-day/night cycle, and the world breathes with wind, drifting leaves, and fireflies
-at dusk.
+An interactive, procedurally generated forest that lives in your browser, with a
+soft, Studio Ghibli–influenced aesthetic. Every tree is grown from a recursive
+branching algorithm, big fluffy clouds drift over lush rolling hills, the sky
+moves through a full day/night cycle, and the world breathes with wind, swaying
+grass, drifting leaves, fireflies, and little kodama forest spirits.
 
 No build step, no dependencies — just open it.
 
@@ -20,12 +21,19 @@ python3 -m http.server 8000
 ## What's inside
 
 - **Procedural trees** — each tree is a recursive branch structure with its own
-  seed, scale, hue, and wind phase. No two are alike.
+  seed, scale, hue, and wind phase, with soft sun-side canopy highlights. No two
+  are alike.
+- **Ghibli skies** — vivid cerulean days and warm peach golden hours, with big
+  billowing cumulus clouds that drift on the wind and catch warm light at sunset.
+- **Lush rolling hills** — layered green hills, hazier toward the horizon, over a
+  soft meadow ground plane.
 - **Living day/night cycle** — an interpolated sky palette with sun, moon, stars,
-  drifting mist, and atmospheric haze on distant trees.
+  drifting mist, sun bloom, and atmospheric haze on distant trees.
 - **Depth & parallax** — trees are placed across depth layers; far ones sit near
   the horizon, fade into the sky, and shift gently as you move the pointer.
-- **Weather** — falling leaves and fireflies that wake up after dark.
+- **Life everywhere** — swaying foreground grass, falling leaves, fireflies after
+  dark, and **kodama** forest spirits that bob, turn their heads, and glow softly
+  in low light.
 
 ## Play with it
 
@@ -33,7 +41,7 @@ python3 -m http.server 8000
   trees, low for big foreground ones.
 - **Time of day** slider scrubs through dawn → midday → dusk → night, or let
   *auto day / night* run the cycle for you.
-- **Wind**, **density**, and **falling leaves** are all live.
+- **Wind**, **density**, **falling leaves**, and **forest spirits** are all live.
 - **Plant a grove** drops a burst of saplings; **reset** regenerates the whole
   world from a fresh seed.
 
