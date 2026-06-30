@@ -25,6 +25,25 @@ python3 -m http.server 8000
 # then visit http://localhost:8000
 ```
 
+## Deploy (Vercel)
+
+Aria is a self-contained static site, so no build step is needed.
+
+**Dashboard (recommended):** import the repo at [vercel.com/new](https://vercel.com/new),
+then set **Root Directory → `aria`** and **Framework Preset → Other**. Deploy.
+Once the repo is connected, Vercel publishes a preview URL for every branch/PR and
+a production URL from `main`.
+
+**CLI:**
+
+```bash
+cd aria
+npx vercel        # preview deploy
+npx vercel --prod # production deploy
+```
+
+The included `vercel.json` enables clean URLs and sensible caching.
+
 ## What's inside
 
 - **Procedural trees** — each tree is a recursive branch structure with its own
