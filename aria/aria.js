@@ -1,4 +1,4 @@
-// Digital Forest — a procedurally generated, living canvas world.
+// Aria — a procedurally generated, living little world you can scroll around in.
 // No dependencies. Everything (trees, sky, weather) is drawn frame by frame.
 
 const TAU = Math.PI * 2;
@@ -168,7 +168,7 @@ function spawnFirefly(rng, w, h, horizon) {
 /* ----------------------------------------------------------------------- */
 /* Main app.                                                               */
 /* ----------------------------------------------------------------------- */
-const canvas = document.getElementById("forest");
+const canvas = document.getElementById("aria");
 const ctx = canvas.getContext("2d");
 
 const reduceMotion = window.matchMedia(

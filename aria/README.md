@@ -1,13 +1,13 @@
-# Digital Forest
+# Aria
 
-An interactive, procedurally generated forest that lives in your browser, with a
-soft, Studio Ghibli–influenced aesthetic. It's **one little world you can scroll
-around in**: drag, scroll, or use the arrow keys to wander across a diorama that's
-wider than your screen, with depth parallax across every layer. Every tree is
-grown from a recursive branching algorithm, big fluffy clouds drift over lush
-rolling hills, the sky moves through a full day/night cycle, and the world
-breathes with wind, swaying grass, drifting leaves, fireflies, and little kodama
-forest spirits.
+**Aria** is an interactive, procedurally generated little world that lives in your
+browser, with a soft, Studio Ghibli–influenced aesthetic. It's **one little world
+you can scroll around in**: drag, scroll, or use the arrow keys to wander across a
+diorama that's wider than your screen, with depth parallax across every layer.
+Every tree is grown from a recursive branching algorithm, big fluffy clouds drift
+over lush rolling hills, the sky moves through a full day/night cycle, and the
+world breathes with wind, swaying grass, drifting leaves, fireflies, and little
+kodama spirits.
 
 No build step, no dependencies — just open it.
 
@@ -16,7 +16,7 @@ No build step, no dependencies — just open it.
 Open `index.html` directly, or serve the folder:
 
 ```bash
-cd forest
+cd aria
 python3 -m http.server 8000
 # then visit http://localhost:8000
 ```
@@ -54,7 +54,7 @@ Respects `prefers-reduced-motion`: animation calms down for those who ask for it
 
 ## Mobile
 
-The forest is built to feel native on phones, not just shrunk down:
+Aria is built to feel native on phones, not just shrunk down:
 
 - **Touch-first** — tap to grow trees; bigger, easier-to-hit sliders and toggles
   on touch devices.
@@ -80,7 +80,7 @@ and combine them: `index.html?t=0.73&cam=0.4`.
 
 Everything renders to a single `<canvas>`:
 
-- `forest.js` — world state, a seeded RNG (mulberry32), tree generation, the
-  celestial model, and the render loop.
+- `aria.js` — world state, a seeded RNG (mulberry32), tree generation, the
+  camera/parallax, the celestial model, and the render loop.
 - `style.css` — the glass control panel and overlays.
 - `index.html` — markup and controls.

@@ -23,7 +23,7 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
-#forest {
+#aria {
   position: fixed;
   inset: 0;
   width: 100%;
@@ -32,7 +32,7 @@ html, body {
   cursor: grab;
   touch-action: none;
 }
-#forest:active { cursor: grabbing; }
+#aria:active { cursor: grabbing; }
 
 /* Overlays ---------------------------------------------------------------- */
 .overlay {
