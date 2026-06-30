@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b1220" />
+  <title>Digital Forest</title>
+  <meta name="description" content="An interactive, procedurally generated digital forest — grow trees, wander through a living day/night cycle." />
+  <link rel="icon" href="../assets/sky-farm-icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <canvas id="forest" aria-label="A procedurally generated digital forest"></canvas>
+
+  <header class="overlay overlay--top">
+    <h1 class="title">digital&nbsp;forest</h1>
+    <p class="subtitle">click to grow a tree &middot; a living, procedural world</p>
+  </header>
+
+  <aside class="panel" id="panel" aria-label="Forest controls">
+    <button class="panel__toggle" id="panelToggle" aria-expanded="true" aria-controls="panelBody" title="Hide / show controls">
+      <span class="panel__chevron"></span>
+    </button>
+    <div class="panel__body" id="panelBody">
+      <div class="control">
+        <label for="timeRange">time of day</label>
+        <input type="range" id="timeRange" min="0" max="1000" value="180" />
+        <span class="control__value" id="timeValue">dawn</span>
+      </div>
+
+      <div class="control control--switch">
+        <label for="autoTime">auto day / night</label>
+        <input type="checkbox" id="autoTime" checked />
+      </div>
+
+      <div class="control">
+        <label for="windRange">wind</label>
+        <input type="range" id="windRange" min="0" max="100" value="35" />
+      </div>
+
+      <div class="control">
+        <label for="densityRange">density</label>
+        <input type="range" id="densityRange" min="3" max="40" value="16" />
+      </div>
+
+      <div class="control control--switch">
+        <label for="leaves">falling leaves</label>
+        <input type="checkbox" id="leaves" checked />
+      </div>
+
+      <div class="panel__actions">
+        <button class="btn" id="plant">plant a grove</button>
+        <button class="btn btn--ghost" id="reset">reset</button>
+      </div>
+
+      <p class="panel__hint" id="treeCount">0 trees</p>
+    </div>
+  </aside>
+
+  <footer class="overlay overlay--bottom">
+    <span>made with canvas &amp; a little wind</span>
+  </footer>
+
+  <script src="forest.js" type="module"></script>
+</body>
+</html>
