@@ -1,10 +1,13 @@
 # Digital Forest
 
 An interactive, procedurally generated forest that lives in your browser, with a
-soft, Studio Ghibli–influenced aesthetic. Every tree is grown from a recursive
-branching algorithm, big fluffy clouds drift over lush rolling hills, the sky
-moves through a full day/night cycle, and the world breathes with wind, swaying
-grass, drifting leaves, fireflies, and little kodama forest spirits.
+soft, Studio Ghibli–influenced aesthetic. It's **one little world you can scroll
+around in**: drag, scroll, or use the arrow keys to wander across a diorama that's
+wider than your screen, with depth parallax across every layer. Every tree is
+grown from a recursive branching algorithm, big fluffy clouds drift over lush
+rolling hills, the sky moves through a full day/night cycle, and the world
+breathes with wind, swaying grass, drifting leaves, fireflies, and little kodama
+forest spirits.
 
 No build step, no dependencies — just open it.
 
@@ -37,8 +40,10 @@ python3 -m http.server 8000
 
 ## Play with it
 
-- **Click anywhere** to grow a new tree. Click high (near the horizon) for distant
-  trees, low for big foreground ones.
+- **Drag / scroll / arrow keys** to roam the little world. It pans with momentum,
+  parallax gives it depth, and soft shadows hint when you reach the edges.
+- **Tap (or click)** to grow a new tree at that spot. Aim high (near the horizon)
+  for distant trees, low for big foreground ones.
 - **Time of day** slider scrubs through dawn → midday → dusk → night, or let
   *auto day / night* run the cycle for you.
 - **Wind**, **density**, **falling leaves**, and **forest spirits** are all live.
@@ -67,6 +72,9 @@ The forest is built to feel native on phones, not just shrunk down:
 Share a specific moment by appending `?t=` (a value from `0` to `1`) to the URL,
 e.g. `index.html?t=0.5` opens at midday, `?t=0.27` at dawn. This pauses the
 auto cycle so the scene holds still.
+
+Share a specific spot in the world with `?cam=` (`0` = far left, `1` = far right),
+and combine them: `index.html?t=0.73&cam=0.4`.
 
 ## How it works
 

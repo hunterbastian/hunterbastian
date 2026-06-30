@@ -29,9 +29,10 @@ html, body {
   width: 100%;
   height: 100%;
   display: block;
-  cursor: crosshair;
+  cursor: grab;
   touch-action: none;
 }
+#forest:active { cursor: grabbing; }
 
 /* Overlays ---------------------------------------------------------------- */
 .overlay {

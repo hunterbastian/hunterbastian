@@ -194,11 +194,33 @@ const state = {
   grass: [],
   kodama: [],
   spiritsOn: true,
-  pointer: { x: 0.5, y: 0.5 },
+  // The little world is wider than the screen; a camera pans across it.
+  worldW: 0,
+  camMax: 0,
+  camera: { x: 0, vx: 0 },
+  cameraInit: false,
   seed: (Math.random() * 1e9) >>> 0,
 };
 
 let rng = makeRng(state.seed);
+
+// Parallax factors per layer: 0 = infinitely far (barely moves), 1 = foreground.
+const STAR_P = 0.06;
+const CLOUD_P = 0.22;
+const GRASS_P = 1.05;
+const KODAMA_P = 0.8;
+const treeParallax = (z) => lerp(0.45, 1.0, z);
+const hillParallax = (z) => lerp(0.18, 0.5, z);
+
+// How wide a given parallax layer must be so it always fills the screen as the
+// camera pans the full [0, camMax] range.
+function coverW(p) {
+  return state.w + state.camMax * p;
+}
+
+function clampCam(x) {
+  return clamp(x, 0, state.camMax);
+}
 
 function resize() {
   state.w = window.innerWidth;
@@ -209,6 +231,15 @@ function resize() {
   // cap pixel ratio harder on mobile to keep the fill-rate manageable
   state.dpr = Math.min(window.devicePixelRatio || 1, MOBILE ? 1.5 : 2);
   state.horizon = state.h * 0.66;
+  // The world extends a couple of screens wide — a little diorama to roam.
+  state.worldW = state.w * (MOBILE ? 1.9 : 2.5);
+  state.camMax = Math.max(0, state.worldW - state.w);
+  if (!state.cameraInit) {
+    state.camera.x = state.camMax / 2; // start in the middle of the world
+    state.cameraInit = true;
+  } else {
+    state.camera.x = clampCam(state.camera.x);
+  }
   canvas.width = Math.floor(state.w * state.dpr);
   canvas.height = Math.floor(state.h * state.dpr);
   canvas.style.width = state.w + "px";
@@ -220,10 +251,11 @@ function resize() {
 function buildStars() {
   const r = makeRng(state.seed ^ 0x9e3779b9);
   state.stars = [];
-  const n = Math.floor((state.w * state.h) / (MOBILE ? 9000 : 6000));
+  const cw = coverW(STAR_P);
+  const n = Math.floor((cw * state.horizon) / (MOBILE ? 9000 : 6000));
   for (let i = 0; i < n; i++) {
     state.stars.push({
-      x: r() * state.w,
+      x: r(), // normalized across the star layer
       y: r() * state.horizon,
       r: rand(r, 0.4, 1.5),
       tw: r() * TAU,
@@ -237,17 +269,20 @@ function buildHills() {
   state.hills = [];
   const layers = 3;
   for (let l = 0; l < layers; l++) {
+    const z = l / layers;
+    const p = hillParallax(z);
+    const cw = coverW(p);
     const pts = [];
-    const segs = 8;
+    const segs = Math.max(10, Math.round(cw / 160));
     const base = state.horizon - (layers - l) * state.h * 0.05;
     const amp = state.h * (0.04 + l * 0.02);
     for (let i = 0; i <= segs; i++) {
       pts.push({
-        x: (i / segs) * state.w,
+        fx: i / segs, // normalized across this hill layer
         y: base + Math.sin(i * 1.3 + l * 2 + r() * 2) * amp - r() * amp * 0.5,
       });
     }
-    state.hills.push({ pts, z: l / layers });
+    state.hills.push({ pts, z, p });
   }
 }
 
@@ -265,8 +300,9 @@ function makeCloud(r, scatter) {
     });
   }
   const span = 200 * scale;
+  const cw = coverW(CLOUD_P);
   return {
-    x: scatter ? rand(r, -span, state.w) : -span,
+    x: scatter ? rand(r, -span, cw) : -span, // world px across the cloud layer
     y: rand(r, state.h * 0.05, state.horizon * 0.5),
     scale,
     speed: rand(r, 4, 11) * (0.6 + scale * 0.4),
@@ -278,18 +314,18 @@ function makeCloud(r, scatter) {
 function buildClouds() {
   const r = makeRng(state.seed ^ 0xc10d);
   state.clouds = [];
-  const n = Math.max(3, Math.floor(state.w / (MOBILE ? 340 : 280)));
+  const n = Math.max(3, Math.floor(coverW(CLOUD_P) / (MOBILE ? 340 : 280)));
   for (let i = 0; i < n; i++) state.clouds.push(makeCloud(r, true));
 }
 
 function buildGrass() {
   const r = makeRng(state.seed ^ 0x6213a);
   state.grass = [];
-  const n = Math.floor(state.w / (MOBILE ? 9 : 6));
+  const n = Math.floor(coverW(GRASS_P) / (MOBILE ? 9 : 6));
   for (let i = 0; i < n; i++) {
     const depth = r();
     state.grass.push({
-      x: r() * state.w,
+      x: r(), // normalized across the grass layer
       baseY: state.horizon + (state.h - state.horizon) * lerp(0.45, 1.0, depth),
       h: rand(r, 16, 30) + depth * 34,
       lean: rand(r, -0.25, 0.25),
@@ -306,10 +342,10 @@ function buildGrass() {
 function buildKodama() {
   const r = makeRng(state.seed ^ 0x0d0a);
   state.kodama = [];
-  const n = Math.max(2, Math.floor(state.w / (MOBILE ? 420 : 340)));
+  const n = Math.max(2, Math.floor(coverW(KODAMA_P) / (MOBILE ? 420 : 340)));
   for (let i = 0; i < n; i++) {
     state.kodama.push({
-      x: r() * state.w,
+      x: r(), // normalized across the kodama layer
       y: state.horizon + (state.h - state.horizon) * rand(r, 0.12, 0.7),
       s: rand(r, 8, 15),
       bob: r() * TAU,
@@ -325,7 +361,8 @@ function buildKodama() {
 function buildTrees(keep) {
   const existing = keep ? state.trees : [];
   state.trees = [];
-  const n = state.density;
+  // scale count with world width so density stays consistent per screen
+  const n = Math.round(state.density * (state.worldW / state.w));
   for (let i = 0; i < n; i++) {
     const z = Math.pow(rng(), 0.7); // bias toward more far trees
     const x = rng();
@@ -406,12 +443,14 @@ function drawSky(cel) {
 
   // stars
   if (cel.starAlpha > 0.01) {
+    const cw = coverW(STAR_P);
+    const off = state.camera.x * STAR_P;
     for (const s of state.stars) {
       const tw = 0.6 + 0.4 * Math.sin(state.time * s.tws + s.tw);
       ctx.globalAlpha = cel.starAlpha * tw;
       ctx.fillStyle = "#ffffff";
       ctx.beginPath();
-      ctx.arc(s.x, s.y, s.r, 0, TAU);
+      ctx.arc(s.x * cw - off, s.y, s.r, 0, TAU);
       ctx.fill();
     }
     ctx.globalAlpha = 1;
@@ -449,10 +488,11 @@ function drawBody(pos, core, glow, radius, alpha) {
 
 function updateClouds(dt) {
   const drift = 1 + state.wind * 2.2;
+  const cw = coverW(CLOUD_P);
   for (const cl of state.clouds) {
     cl.x += cl.speed * dt * drift;
     const span = 220 * cl.scale;
-    if (cl.x - span > state.w) cl.x = -span;
+    if (cl.x - span > cw) cl.x = -span;
   }
 }
 
@@ -465,8 +505,10 @@ function drawClouds(cel) {
   let bottom = mix(hex("#1b2440"), hex("#c6d6ee"), 0.18 + light * 0.82);
   bottom = mix(bottom, hex("#f6c98c"), warmth * 0.45);
   const alpha = 0.4 + light * 0.55;
+  const camOff = state.camera.x * CLOUD_P;
 
   for (const cl of state.clouds) {
+    const baseX = cl.x - camOff;
     let minY = Infinity;
     let maxY = -Infinity;
     for (const p of cl.puffs) {
@@ -483,7 +525,7 @@ function drawClouds(cel) {
     for (const p of cl.puffs) {
       ctx.beginPath();
       ctx.ellipse(
-        cl.x + p.dx * cl.scale,
+        baseX + p.dx * cl.scale,
         cl.y + p.dy * cl.scale,
         p.rx * cl.scale,
         p.ry * cl.scale,
@@ -513,11 +555,16 @@ function drawGround(cel) {
     green = mix(hex("#16271c"), green, 0.35 + cel.dayAmount * 0.65);
     const fade = lerp(0.55, 0.1, hill.z); // distant hills blend into sky
     ctx.fillStyle = css(mix(green, skyBot, fade));
+    const cw = coverW(hill.p);
+    const off = state.camera.x * hill.p;
+    const pts = hill.pts;
+    const x0 = pts[0].fx * cw - off;
+    const xN = pts[pts.length - 1].fx * cw - off;
     ctx.beginPath();
-    ctx.moveTo(0, state.h);
-    ctx.lineTo(0, hill.pts[0].y);
-    for (const p of hill.pts) ctx.lineTo(p.x, p.y);
-    ctx.lineTo(state.w, state.h);
+    ctx.moveTo(x0, state.h);
+    ctx.lineTo(x0, pts[0].y);
+    for (const p of pts) ctx.lineTo(p.fx * cw - off, p.y);
+    ctx.lineTo(xN, state.h);
     ctx.closePath();
     ctx.fill();
   }
@@ -544,9 +591,9 @@ function drawMist(cel) {
 }
 
 function drawTree(tree, cel) {
-  const px = tree.x * state.w;
-  // parallax: nearer trees shift more with pointer
-  const parX = (state.pointer.x - 0.5) * tree.z * 40;
+  // nearer trees (higher z) parallax more as the camera pans the world
+  const tp = treeParallax(tree.z);
+  const px = tree.x * coverW(tp) - state.camera.x * tp;
   const baseY = state.horizon + (state.h - state.horizon) * (0.05 + tree.z * 0.9);
   const scale = tree.scale;
 
@@ -589,7 +636,7 @@ function drawTree(tree, cel) {
     for (const c of node.children) drawNode(c, ex, ey, ang);
   };
 
-  drawNode(tree.root, px + parX, baseY, -HALF_PI);
+  drawNode(tree.root, px, baseY, -HALF_PI);
 }
 
 function drawFoliage(tree, node, x, y, scale, light, haze, skyBot) {
@@ -623,18 +670,21 @@ function drawFoliage(tree, node, x, y, scale, light, haze, skyBot) {
 function drawGrass(cel) {
   const light = 0.25 + cel.dayAmount * 0.6;
   const wind = state.wind * (reduceMotion ? 0.2 : 1);
+  const cw = coverW(GRASS_P);
+  const off = state.camera.x * GRASS_P;
   ctx.lineCap = "round";
   for (const b of state.grass) {
+    const bx = b.x * cw - off;
     const sway = Math.sin(state.time * 1.8 + b.phase) * wind * b.h * 0.5;
-    const tipX = b.x + b.lean * b.h + sway;
+    const tipX = bx + b.lean * b.h + sway;
     const tipY = b.baseY - b.h;
-    const ctrlX = b.x + b.lean * b.h * 0.5 + sway * 0.5;
+    const ctrlX = bx + b.lean * b.h * 0.5 + sway * 0.5;
     const ctrlY = b.baseY - b.h * 0.55;
     const lum = clamp(14 + light * 34, 8, 60);
     ctx.strokeStyle = `hsl(${b.hue}, ${b.sat}%, ${lum}%)`;
     ctx.lineWidth = b.w;
     ctx.beginPath();
-    ctx.moveTo(b.x, b.baseY);
+    ctx.moveTo(bx, b.baseY);
     ctx.quadraticCurveTo(ctrlX, ctrlY, tipX, tipY);
     ctx.stroke();
   }
@@ -643,6 +693,8 @@ function drawGrass(cel) {
 function drawKodama(dt, cel) {
   if (!state.spiritsOn) return;
   const vis = 0.42 + (1 - cel.dayAmount) * 0.45;
+  const cw = coverW(KODAMA_P);
+  const off = state.camera.x * KODAMA_P;
   for (const k of state.kodama) {
     k.bob += k.bobSpeed * dt;
     k.t += dt;
@@ -653,7 +705,7 @@ function drawKodama(dt, cel) {
     }
     k.turn += (k.turnTarget - k.turn) * Math.min(1, dt * 4);
     const bobY = Math.sin(k.bob) * 2.2;
-    const x = k.x;
+    const x = k.x * cw - off;
     const y = k.y + bobY;
     const s = k.s;
 
@@ -788,6 +840,25 @@ function drawVignette(cel) {
   g.addColorStop(1, `rgba(0,0,0,${dark})`);
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, state.w, state.h);
+
+  // soft shadow at the world's edges, fading in as you reach them
+  const ew = Math.min(140, state.w * 0.18);
+  const leftNear = clamp(1 - state.camera.x / 160, 0, 1);
+  const rightNear = clamp(1 - (state.camMax - state.camera.x) / 160, 0, 1);
+  if (leftNear > 0.01) {
+    const lg = ctx.createLinearGradient(0, 0, ew, 0);
+    lg.addColorStop(0, `rgba(0,0,0,${0.35 * leftNear})`);
+    lg.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = lg;
+    ctx.fillRect(0, 0, ew, state.h);
+  }
+  if (rightNear > 0.01) {
+    const rg = ctx.createLinearGradient(state.w, 0, state.w - ew, 0);
+    rg.addColorStop(0, `rgba(0,0,0,${0.35 * rightNear})`);
+    rg.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = rg;
+    ctx.fillRect(state.w - ew, 0, ew, state.h);
+  }
 }
 
 /* ----------------------------------------------------------------------- */
@@ -810,6 +881,17 @@ function frame(now) {
   // grow newly planted trees
   for (const t of state.trees) {
     if (t.grow < 1) t.grow = clamp(t.grow + dt * 1.6, 0, 1);
+  }
+
+  // camera inertia after a flick
+  if (!dragging && Math.abs(state.camera.vx) > 0.1) {
+    state.camera.x += state.camera.vx;
+    state.camera.vx *= 0.92;
+    const c = clampCam(state.camera.x);
+    if (c !== state.camera.x) {
+      state.camera.x = c;
+      state.camera.vx = 0;
+    }
   }
 
   updateClouds(dt);
@@ -835,7 +917,6 @@ function frame(now) {
 /* Interaction + UI wiring.                                                */
 /* ----------------------------------------------------------------------- */
 function plantAt(clientX, clientY) {
-  const x = clientX / state.w;
   // y position controls depth: higher up (near horizon) = farther away
   const groundFrac = clamp(
     (clientY - state.horizon) / (state.h - state.horizon),
@@ -843,6 +924,9 @@ function plantAt(clientX, clientY) {
     1
   );
   const z = clamp(0.1 + groundFrac, 0.1, 1);
+  // convert the tapped screen point into this tree's world position
+  const tp = treeParallax(z);
+  const x = clamp((clientX + state.camera.x * tp) / coverW(tp), 0, 1);
   const tree = makeTree(rng, x, z);
   tree.grow = 0;
   state.trees.push(tree);
@@ -850,14 +934,65 @@ function plantAt(clientX, clientY) {
   updateTreeCount();
 }
 
+// Drag to pan the world; a tap (no real drag) plants a tree.
+let dragging = false;
+let pointerDown = false;
+let prevX = 0;
+let downX = 0;
+let downY = 0;
+let dragDist = 0;
+
 canvas.addEventListener("pointerdown", (e) => {
   if (e.target !== canvas) return;
-  plantAt(e.clientX, e.clientY);
+  pointerDown = true;
+  dragging = false;
+  prevX = downX = e.clientX;
+  downY = e.clientY;
+  dragDist = 0;
+  state.camera.vx = 0;
+  try {
+    canvas.setPointerCapture(e.pointerId);
+  } catch {}
 });
 
 canvas.addEventListener("pointermove", (e) => {
-  state.pointer.x = e.clientX / state.w;
-  state.pointer.y = e.clientY / state.h;
+  if (!pointerDown) return;
+  const dx = e.clientX - prevX;
+  prevX = e.clientX;
+  dragDist += Math.abs(dx);
+  if (dragDist > 5) dragging = true;
+  state.camera.x = clampCam(state.camera.x - dx);
+  state.camera.vx = state.camera.vx * 0.4 + -dx * 0.6;
+});
+
+function endPointer(e) {
+  if (!pointerDown) return;
+  pointerDown = false;
+  try {
+    canvas.releasePointerCapture(e.pointerId);
+  } catch {}
+  if (!dragging) {
+    plantAt(downX, downY); // it was a tap, not a pan
+    state.camera.vx = 0;
+  }
+}
+canvas.addEventListener("pointerup", endPointer);
+canvas.addEventListener("pointercancel", endPointer);
+
+canvas.addEventListener(
+  "wheel",
+  (e) => {
+    e.preventDefault();
+    const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+    state.camera.x = clampCam(state.camera.x + d);
+    state.camera.vx = 0;
+  },
+  { passive: false }
+);
+
+window.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowLeft") state.camera.x = clampCam(state.camera.x - 70);
+  else if (e.key === "ArrowRight") state.camera.x = clampCam(state.camera.x + 70);
 });
 
 const $ = (id) => document.getElementById(id);
@@ -1000,6 +1135,13 @@ if (params.has("t")) {
   }
 }
 
+// optional deep-link: ?cam=0..1 sets the starting scroll position in the world
+let initialCamFrac = NaN;
+if (params.has("cam")) initialCamFrac = clamp(parseFloat(params.get("cam")), 0, 1);
+
 resize();
+if (!Number.isNaN(initialCamFrac)) {
+  state.camera.x = clampCam(initialCamFrac * state.camMax);
+}
 syncTimeUI();
 rafId = requestAnimationFrame(frame);
