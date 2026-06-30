@@ -4,6 +4,10 @@
 const TAU = Math.PI * 2;
 const HALF_PI = Math.PI / 2;
 
+// Set in resize(): true on touch / small-screen devices. Drives a lighter
+// rendering profile so the scene stays smooth on mobile GPUs.
+let MOBILE = false;
+
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const lerp = (a, b, t) => a + (b - a) * t;
 const smoothstep = (t) => t * t * (3 - 2 * t);
@@ -112,7 +116,8 @@ function buildBranch(rng, depth, maxDepth, length, width, angle) {
 
 function makeTree(rng, x, z) {
   // z: 0 = far (small, hazy), 1 = near (large, crisp)
-  const maxDepth = Math.round(rand(rng, 6, 9));
+  let maxDepth = Math.round(rand(rng, 6, 9));
+  if (MOBILE) maxDepth = Math.min(maxDepth, 7); // fewer branch segments
   const trunkLen = rand(rng, 56, 92);
   const trunkWidth = rand(rng, 7, 13);
   const root = buildBranch(rng, 0, maxDepth, trunkLen, trunkWidth, 0);
@@ -196,9 +201,13 @@ const state = {
 let rng = makeRng(state.seed);
 
 function resize() {
-  state.dpr = Math.min(window.devicePixelRatio || 1, 2);
   state.w = window.innerWidth;
   state.h = window.innerHeight;
+  // Size-based so behaviour is deterministic (pointer media queries are
+  // unreliable in some browsers/headless). Touch-target sizing lives in CSS.
+  MOBILE = Math.min(state.w, state.h) < 680;
+  // cap pixel ratio harder on mobile to keep the fill-rate manageable
+  state.dpr = Math.min(window.devicePixelRatio || 1, MOBILE ? 1.5 : 2);
   state.horizon = state.h * 0.66;
   canvas.width = Math.floor(state.w * state.dpr);
   canvas.height = Math.floor(state.h * state.dpr);
@@ -211,7 +220,7 @@ function resize() {
 function buildStars() {
   const r = makeRng(state.seed ^ 0x9e3779b9);
   state.stars = [];
-  const n = Math.floor((state.w * state.h) / 6000);
+  const n = Math.floor((state.w * state.h) / (MOBILE ? 9000 : 6000));
   for (let i = 0; i < n; i++) {
     state.stars.push({
       x: r() * state.w,
@@ -269,14 +278,14 @@ function makeCloud(r, scatter) {
 function buildClouds() {
   const r = makeRng(state.seed ^ 0xc10d);
   state.clouds = [];
-  const n = Math.max(4, Math.floor(state.w / 280));
+  const n = Math.max(3, Math.floor(state.w / (MOBILE ? 340 : 280)));
   for (let i = 0; i < n; i++) state.clouds.push(makeCloud(r, true));
 }
 
 function buildGrass() {
   const r = makeRng(state.seed ^ 0x6213a);
   state.grass = [];
-  const n = Math.floor(state.w / 6);
+  const n = Math.floor(state.w / (MOBILE ? 9 : 6));
   for (let i = 0; i < n; i++) {
     const depth = r();
     state.grass.push({
@@ -297,7 +306,7 @@ function buildGrass() {
 function buildKodama() {
   const r = makeRng(state.seed ^ 0x0d0a);
   state.kodama = [];
-  const n = Math.max(3, Math.floor(state.w / 340));
+  const n = Math.max(2, Math.floor(state.w / (MOBILE ? 420 : 340)));
   for (let i = 0; i < n; i++) {
     state.kodama.push({
       x: r() * state.w,
@@ -333,11 +342,11 @@ function buildTrees(keep) {
 
 function buildWeather() {
   state.leaves = [];
-  const ln = Math.floor(state.w / 26);
+  const ln = Math.floor(state.w / (MOBILE ? 40 : 26));
   for (let i = 0; i < ln; i++) state.leaves.push(spawnLeaf(rng, state.w, state.h));
 
   state.fireflies = [];
-  const fn = Math.floor(state.w / 26);
+  const fn = Math.floor(state.w / (MOBILE ? 40 : 26));
   for (let i = 0; i < fn; i++)
     state.fireflies.push(spawnFirefly(rng, state.w, state.h, state.horizon));
 }
@@ -785,6 +794,7 @@ function drawVignette(cel) {
 /* Loop.                                                                   */
 /* ----------------------------------------------------------------------- */
 let last = performance.now();
+let rafId = 0;
 state.time = 0;
 
 function frame(now) {
@@ -818,7 +828,7 @@ function frame(now) {
   drawBloom(cel);
   drawVignette(cel);
 
-  requestAnimationFrame(frame);
+  rafId = requestAnimationFrame(frame);
 }
 
 /* ----------------------------------------------------------------------- */
@@ -940,9 +950,38 @@ $("panelToggle").addEventListener("click", () => {
   $("panelToggle").setAttribute("aria-expanded", String(!collapsed));
 });
 
-window.addEventListener("resize", resize);
+// Debounced resize so frequent mobile viewport changes (URL bar show/hide,
+// pinch) don't thrash the world rebuild.
+let resizeTimer = 0;
+function onResize() {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(resize, 150);
+}
+window.addEventListener("resize", onResize);
+window.addEventListener("orientationchange", () => setTimeout(resize, 250));
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", onResize);
+}
+
+// Pause rendering while the tab/app is backgrounded to save battery.
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    cancelAnimationFrame(rafId);
+    rafId = 0;
+  } else if (!rafId) {
+    last = performance.now();
+    rafId = requestAnimationFrame(frame);
+  }
+});
 
 // init
+const smallView = Math.min(window.innerWidth, window.innerHeight) < 680;
+if (smallView) densityRange.value = "9"; // lighter default scene on phones
+if (window.innerWidth < 560) {
+  panel.classList.add("is-collapsed"); // start tidy; tap "controls" to open
+  $("panelToggle").setAttribute("aria-expanded", "false");
+}
+
 state.wind = Number(windRange.value) / 100;
 state.density = Number(densityRange.value);
 state.leavesOn = leavesToggle.checked;
@@ -963,4 +1002,4 @@ if (params.has("t")) {
 
 resize();
 syncTimeUI();
-requestAnimationFrame(frame);
+rafId = requestAnimationFrame(frame);

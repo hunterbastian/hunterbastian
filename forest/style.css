@@ -16,6 +16,7 @@ html, body {
   margin: 0;
   height: 100%;
   overflow: hidden;
+  overscroll-behavior: none;
   background: #0b1220;
   color: var(--ink);
   font-family: var(--font);
@@ -29,7 +30,7 @@ html, body {
   height: 100%;
   display: block;
   cursor: crosshair;
-  touch-action: manipulation;
+  touch-action: none;
 }
 
 /* Overlays ---------------------------------------------------------------- */
@@ -83,41 +84,47 @@ html, body {
   overflow: hidden;
 }
 
-.panel__toggle {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  width: 28px;
-  height: 28px;
-  display: grid;
-  place-items: center;
+.panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 13px 16px;
   border: none;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.08);
+  background: transparent;
   color: var(--ink);
   cursor: pointer;
-  transition: background 0.2s ease;
+  font: inherit;
+  -webkit-tap-highlight-color: transparent;
 }
-.panel__toggle:hover { background: rgba(255, 255, 255, 0.16); }
+.panel__header:hover { background: rgba(255, 255, 255, 0.06); }
+
+.panel__title {
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
 
 .panel__chevron {
   width: 9px;
   height: 9px;
   border-right: 2px solid currentColor;
   border-bottom: 2px solid currentColor;
-  transform: rotate(-135deg);
+  transform: rotate(45deg);
   transition: transform 0.25s ease;
-  margin-top: 3px;
+  margin-bottom: 3px;
 }
-.panel.is-collapsed .panel__chevron { transform: rotate(45deg); margin-top: -3px; }
+.panel.is-collapsed .panel__chevron { transform: rotate(-135deg); margin-bottom: -3px; }
 
 .panel__body {
-  padding: 20px 18px 18px;
+  padding: 4px 18px 18px;
   display: flex;
   flex-direction: column;
   gap: 16px;
   max-height: 70vh;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   transition: max-height 0.3s ease, opacity 0.25s ease, padding 0.3s ease;
 }
 .panel.is-collapsed .panel__body {
@@ -239,9 +246,41 @@ input[type="checkbox"]:checked::after { transform: translateX(16px); }
   text-align: center;
 }
 
-@media (max-width: 540px) {
-  .panel { top: auto; bottom: clamp(16px, 4vw, 28px); }
+/* Touch devices: bigger, easier-to-hit controls */
+@media (pointer: coarse) {
+  input[type="range"] { height: 6px; }
+  input[type="range"]::-webkit-slider-thumb { width: 24px; height: 24px; }
+  input[type="range"]::-moz-range-thumb { width: 24px; height: 24px; }
+  input[type="checkbox"] { width: 46px; height: 28px; }
+  input[type="checkbox"]::after { width: 24px; height: 24px; }
+  input[type="checkbox"]:checked::after { transform: translateX(18px); }
+  .btn { padding: 13px 12px; font-size: 0.85rem; }
+  .panel__header { padding: 15px 16px; }
+}
+
+/* Phones: dock the panel as a bottom sheet spanning the width */
+@media (max-width: 560px) {
+  .panel {
+    top: auto;
+    left: 10px;
+    right: 10px;
+    bottom: max(10px, env(safe-area-inset-bottom));
+    width: auto;
+    border-radius: 18px;
+  }
+  .panel__body {
+    max-height: 52vh;
+    gap: 18px;
+  }
   .overlay--bottom { display: none; }
+  .overlay--top { padding-bottom: 0; }
+  .title { font-size: clamp(1.7rem, 9vw, 2.6rem); }
+}
+
+/* Short landscape phones: keep the sheet compact */
+@media (max-height: 460px) and (orientation: landscape) {
+  .panel { width: min(300px, 60vw); left: auto; }
+  .panel__body { max-height: 70vh; }
 }
 
 @media (prefers-reduced-motion: reduce) {

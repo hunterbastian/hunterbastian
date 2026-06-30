@@ -47,6 +47,21 @@ python3 -m http.server 8000
 
 Respects `prefers-reduced-motion`: animation calms down for those who ask for it.
 
+## Mobile
+
+The forest is built to feel native on phones, not just shrunk down:
+
+- **Touch-first** — tap to grow trees; bigger, easier-to-hit sliders and toggles
+  on touch devices.
+- **Bottom-sheet controls** — on phones the panel docks to the bottom and starts
+  collapsed (tap *controls* to open), respecting the safe-area inset.
+- **Lighter render profile** — on small screens it caps the pixel ratio, thins out
+  grass, clouds, leaves, fireflies, and spirits, and trims tree branch depth so
+  the scene stays smooth on mobile GPUs.
+- **Viewport-aware** — handles orientation changes, the iOS/Android URL-bar resize
+  (via `visualViewport`), and pauses rendering when the tab is backgrounded to
+  save battery.
+
 ### Deep links
 
 Share a specific moment by appending `?t=` (a value from `0` to `1`) to the URL,
