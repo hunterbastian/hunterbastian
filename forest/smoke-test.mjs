@@ -1,0 +1,54 @@
+// Headless smoke test: load the forest, run a few frames, capture a screenshot,
+// and fail on any console error or page exception.
+import { spawn } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const url = "http://localhost:8123/index.html?t=0.5";
+
+const server = spawn("python3", ["-m", "http.server", "8123"], {
+  cwd: new URL(".", import.meta.url).pathname,
+  stdio: "ignore",
+});
+
+await new Promise((r) => setTimeout(r, 800));
+
+const userDir = mkdtempSync(join(tmpdir(), "chrome-"));
+const out = join(process.cwd(), "smoke-shot.png");
+
+// Use Chrome's headless screenshot + a virtual-time budget to let frames run.
+const args = [
+  "--headless=new",
+  "--no-sandbox",
+  "--disable-gpu",
+  "--hide-scrollbars",
+  `--user-data-dir=${userDir}`,
+  "--window-size=1280,720",
+  "--virtual-time-budget=4000",
+  "--run-all-compositor-stages-before-draw",
+  "--enable-logging=stderr",
+  "--v=0",
+  `--screenshot=${out}`,
+  url,
+];
+
+const chrome = spawn("google-chrome", args);
+let stderr = "";
+chrome.stderr.on("data", (d) => (stderr += d.toString()));
+
+const code = await new Promise((res) => chrome.on("exit", res));
+server.kill();
+
+const errors = stderr
+  .split("\n")
+  .filter((l) => /ERROR|Uncaught|Unhandled|SEVERE/i.test(l))
+  // ignore benign GPU/font/dbus noise common in headless containers
+  .filter((l) => !/GPU|gpu|font|dbus|GL |egl|Vulkan|sandbox|DevTools/i.test(l));
+
+console.log("chrome exit:", code);
+if (errors.length) {
+  console.log("CONSOLE ERRORS:\n" + errors.join("\n"));
+  process.exit(1);
+}
+console.log("No page errors detected. Screenshot at", out);
