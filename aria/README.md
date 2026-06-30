@@ -7,9 +7,13 @@ diorama that's wider than your screen, with depth parallax across every layer.
 Every tree is grown from a recursive branching algorithm, big fluffy clouds drift
 over lush rolling hills, the sky moves through a full day/night cycle, and the
 world breathes with wind, swaying grass, drifting leaves, fireflies, and little
-kodama spirits.
+kodama spirits. The interface leans warm and editorial — a Bodoni wordmark,
+cream "paper" controls, and terracotta/olive accents (a Mediterranean palette to
+match the name).
 
-No build step, no dependencies — just open it.
+No build step and no JavaScript dependencies — just open it. It does pull two web
+fonts (Bodoni Moda + Inter) from Google Fonts for the lettering, and falls back to
+system serif/sans gracefully when offline.
 
 ## Run it
 
