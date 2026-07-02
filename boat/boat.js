@@ -1,6 +1,7 @@
-// High Seas — a little endless sailing game.
+// High Seas — a little retro-fantasy sailing game.
 // Single canvas, no build step, no images: everything is drawn with paths and
-// gradients so it stays crisp at any size (including a Retina iPhone screen).
+// gradients, then rendered through a pixelation pipeline (see PIXEL_SCALE
+// below) for a chunky, 16-bit-console look on any screen, Retina included.
 
 /* Seeded RNG ------------------------------------------------------------- */
 // mulberry32: tiny, fast, good enough for game feel. Lets ?seed= reproduce a
@@ -29,8 +30,15 @@ const choose = (arr) => arr[Math.floor(rng() * arr.length)];
 const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
 /* Canvas & DOM ------------------------------------------------------------ */
+// The game is drawn to a small offscreen buffer (`ctx`), then that buffer is
+// blown back up onto the real, visible canvas (`screenCtx`) with smoothing
+// disabled. That's the whole trick behind the chunky retro-pixel look — the
+// rest of the game just draws normally, in regular CSS-pixel coordinates.
 const canvas = document.getElementById("sea");
-const ctx = canvas.getContext("2d");
+const screenCtx = canvas.getContext("2d");
+const pixelCanvas = document.createElement("canvas");
+const ctx = pixelCanvas.getContext("2d");
+const PIXEL_SCALE = 3; // CSS px per virtual pixel — higher = chunkier pixels
 const distanceValue = document.getElementById("distanceValue");
 const coinsValue = document.getElementById("coinsValue");
 const bestValue = document.getElementById("bestValue");
@@ -58,10 +66,21 @@ function resize() {
   canvas.height = Math.round(H * DPR);
   canvas.style.width = `${W}px`;
   canvas.style.height = `${H}px`;
-  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  screenCtx.imageSmoothingEnabled = false;
+
+  pixelCanvas.width = Math.max(1, Math.round(W / PIXEL_SCALE));
+  pixelCanvas.height = Math.max(1, Math.round(H / PIXEL_SCALE));
+  // Scale so drawing at ordinary CSS-pixel coordinates (0..W, 0..H) lands
+  // exactly on the small backing buffer — every other line of game code can
+  // stay blissfully unaware that it's rendering at a fraction of the size.
+  ctx.setTransform(pixelCanvas.width / W, 0, 0, pixelCanvas.height / H, 0, 0);
 }
 window.addEventListener("resize", resize);
 resize();
+
+// Nudge the pixel font to load early so in-game score popups (drawn on the
+// canvas, not the DOM) don't miss it and silently fall back.
+document.fonts?.load('10px "Press Start 2P"').catch(() => {});
 
 /* Persistence -------------------------------------------------------------- */
 const STORAGE_BEST = "highSeas.bestDistance";
@@ -122,7 +141,7 @@ function noiseBurst({ duration = 0.35, cutoff = 900, gain = 0.35 }) {
 
 const sfx = {
   coin: () => tone({ freq: 880, duration: 0.1, type: "triangle", gain: 0.16, sweep: 260 }),
-  bottle: () => {
+  chest: () => {
     tone({ freq: 520, duration: 0.16, type: "sine", gain: 0.16, sweep: 180 });
     setTimeout(() => tone({ freq: 780, duration: 0.14, type: "sine", gain: 0.12 }), 70);
   },
@@ -180,7 +199,7 @@ let stormTarget = 0;
 let nextStormAt = rand(26, 38); // seconds of calm sailing before the first storm
 let stormTimer = 0;
 
-let entities = []; // rocks, mines, coins, bottles, fish currently on screen
+let entities = []; // rocks, serpents, coins, chests, fish currently on screen
 let particles = [];
 let popups = []; // floating "+10" style score text
 let spawnTimer = 0;
@@ -250,8 +269,8 @@ document.addEventListener("visibilitychange", () => {
  * Obstacles and pickups spawn just above the top edge and drift down with the
  * world. A spawn always leaves a guaranteed gap somewhere across the width so
  * the lane is never fully blocked. */
-const OBSTACLE_KINDS = ["rock", "mine"];
-const PICKUP_KINDS = ["coin", "coin", "coin", "fish", "bottle"];
+const OBSTACLE_KINDS = ["rock", "serpent"];
+const PICKUP_KINDS = ["coin", "coin", "coin", "fish", "chest"];
 
 function spawnWave() {
   const laneWidth = W - LANE_MARGIN * 2;
@@ -321,7 +340,7 @@ function updateBoat(dt) {
       // nearest upcoming obstacle, otherwise drift back toward the center.
       let danger = null;
       for (const e of entities) {
-        if (e.kind !== "rock" && e.kind !== "mine") continue;
+        if (e.kind !== "rock" && e.kind !== "serpent") continue;
         if (e.y < -40 || e.y > H * 0.75) continue;
         if (!danger || e.y > danger.y) danger = e;
       }
@@ -392,7 +411,7 @@ function circleHit(ax, ay, ar, bx, by, br) {
 
 function collectPickup(e) {
   e.collected = true;
-  const burstColor = e.kind === "coin" ? "255,210,122" : e.kind === "bottle" ? "111,227,208" : "220,235,245";
+  const burstColor = e.kind === "coin" ? "255,210,122" : e.kind === "chest" ? "111,227,208" : "220,235,245";
   for (let i = 0; i < 10; i++) {
     const a = rand(0, Math.PI * 2);
     particles.push({
@@ -412,10 +431,10 @@ function collectPickup(e) {
     bonusScore += 10;
     sfx.coin();
     popups.push({ x: e.x, y: e.y, text: "+10", life: 0.8, maxLife: 0.8, color: "#ffd27a" });
-  } else if (e.kind === "bottle") {
+  } else if (e.kind === "chest") {
     coinsCollected += 1;
     bonusScore += 40;
-    sfx.bottle();
+    sfx.chest();
     popups.push({ x: e.x, y: e.y, text: "+40", life: 0.9, maxLife: 0.9, color: "#6fe3d0" });
   } else if (e.kind === "fish") {
     coinsCollected += 1;
@@ -462,10 +481,10 @@ function crash(reasonText) {
 function updateEntities() {
   const by = boatY();
   for (const e of entities) {
-    if (e.kind === "rock" || e.kind === "mine") {
-      const hitR = e.kind === "mine" ? e.r * 0.75 : e.r * 0.9;
+    if (e.kind === "rock" || e.kind === "serpent") {
+      const hitR = e.kind === "serpent" ? e.r * 0.75 : e.r * 0.9;
       if (circleHit(boat.x, by, BOAT_RADIUS * 0.75, e.x, e.y, hitR)) {
-        crash(e.kind === "mine" ? "You struck a mine!" : "You hit a rock!");
+        crash(e.kind === "serpent" ? "A sea serpent got you!" : "You struck a reef!");
         return;
       }
       if (!e.passed && e.y > by - BOAT_RADIUS && e.y < by + BOAT_RADIUS) {
@@ -514,13 +533,13 @@ function update(dt) {
 /* Rendering ------------------------------------------------------------------ */
 function skyColors() {
   const day = {
-    top: [151, 209, 244],
-    bottom: [214, 238, 250],
-    sun: "rgba(255, 244, 214, 0.9)",
+    top: [72, 148, 212],
+    bottom: [198, 228, 206],
+    sun: "rgba(255, 232, 158, 0.95)",
   };
   const stormy = {
-    top: [58, 74, 92],
-    bottom: [110, 130, 145],
+    top: [46, 54, 70],
+    bottom: [92, 100, 112],
     sun: "rgba(180, 190, 200, 0.5)",
   };
   const mix = (a, b, t) => a.map((v, i) => Math.round(lerp(v, b[i], t)));
@@ -558,8 +577,8 @@ function drawSky() {
 
 function drawOcean(horizon, t) {
   const g = ctx.createLinearGradient(0, horizon, 0, H);
-  const shallow = storm > 0.3 ? [46, 74, 92] : [58, 150, 176];
-  const deep = storm > 0.3 ? [16, 30, 44] : [9, 60, 92];
+  const shallow = storm > 0.3 ? [38, 62, 74] : [42, 158, 138];
+  const deep = storm > 0.3 ? [12, 24, 36] : [12, 44, 84];
   const mix = (a, b, f) => `rgb(${a.map((v, i) => Math.round(lerp(v, b[i], f))).join(",")})`;
   g.addColorStop(0, mix(shallow, shallow, 0));
   g.addColorStop(1, mix(deep, deep, 0));
@@ -705,31 +724,60 @@ function drawRock(e) {
   ctx.restore();
 }
 
-function drawMine(e) {
+function drawSerpent(e, t) {
+  const undulate = Math.sin(t * 3 + e.seed) * 6;
   ctx.save();
   ctx.translate(e.x, e.y);
+
+  // A trailing, wavy neck breaking the surface behind the head.
+  ctx.strokeStyle = "#2f6b4f";
+  ctx.lineWidth = e.r * 0.42;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(-undulate * 0.4, e.r * 0.3);
+  ctx.quadraticCurveTo(-undulate, e.r * 0.9, -undulate * 1.6, e.r * 1.5);
+  ctx.stroke();
+
   ctx.fillStyle = "rgba(255,255,255,0.3)";
   ctx.beginPath();
-  ctx.ellipse(0, e.r * 0.5, e.r * 1.3, e.r * 0.45, 0, 0, Math.PI * 2);
+  ctx.ellipse(0, e.r * 0.55, e.r * 1.2, e.r * 0.4, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  const spikes = 8;
-  ctx.strokeStyle = "#2b2f36";
-  ctx.lineWidth = 2.4;
-  for (let i = 0; i < spikes; i++) {
-    const a = (i / spikes) * Math.PI * 2 + e.seed * 0.3;
-    ctx.beginPath();
-    ctx.moveTo(Math.cos(a) * e.r * 0.55, Math.sin(a) * e.r * 0.55);
-    ctx.lineTo(Math.cos(a) * e.r * 0.95, Math.sin(a) * e.r * 0.95);
-    ctx.stroke();
-  }
-  ctx.fillStyle = "#3a3f47";
+  // Wedge-shaped scaly head.
+  ctx.fillStyle = "#3a8460";
   ctx.beginPath();
-  ctx.arc(0, 0, e.r * 0.55, 0, Math.PI * 2);
+  ctx.moveTo(0, -e.r * 0.95);
+  ctx.lineTo(e.r * 0.62, e.r * 0.05);
+  ctx.quadraticCurveTo(e.r * 0.5, e.r * 0.55, 0, e.r * 0.6);
+  ctx.quadraticCurveTo(-e.r * 0.5, e.r * 0.55, -e.r * 0.62, e.r * 0.05);
+  ctx.closePath();
   ctx.fill();
-  ctx.fillStyle = "rgba(255,255,255,0.15)";
+  ctx.fillStyle = "rgba(255,255,255,0.18)";
   ctx.beginPath();
-  ctx.arc(-e.r * 0.15, -e.r * 0.15, e.r * 0.18, 0, Math.PI * 2);
+  ctx.ellipse(-e.r * 0.16, -e.r * 0.25, e.r * 0.22, e.r * 0.4, -0.3, 0, Math.PI * 2);
+  ctx.fill();
+
+  // A couple of small horns.
+  ctx.fillStyle = "#245038";
+  ctx.beginPath();
+  ctx.moveTo(-e.r * 0.3, -e.r * 0.75);
+  ctx.lineTo(-e.r * 0.42, -e.r * 1.15);
+  ctx.lineTo(-e.r * 0.14, -e.r * 0.8);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(e.r * 0.3, -e.r * 0.75);
+  ctx.lineTo(e.r * 0.42, -e.r * 1.15);
+  ctx.lineTo(e.r * 0.14, -e.r * 0.8);
+  ctx.closePath();
+  ctx.fill();
+
+  // Glowing eyes.
+  const glow = 0.6 + 0.4 * Math.sin(t * 6 + e.seed);
+  ctx.fillStyle = `rgba(255, 226, 110, ${glow})`;
+  ctx.beginPath();
+  ctx.ellipse(-e.r * 0.24, -e.r * 0.32, e.r * 0.12, e.r * 0.08, 0, 0, Math.PI * 2);
+  ctx.ellipse(e.r * 0.24, -e.r * 0.32, e.r * 0.12, e.r * 0.08, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 }
@@ -750,26 +798,39 @@ function drawCoin(e, t) {
   ctx.restore();
 }
 
-function drawBottle(e, t) {
+function drawChest(e, t) {
   const bob = Math.sin(t * 2 + e.seed) * 3;
   ctx.save();
   ctx.translate(e.x, e.y + bob);
-  ctx.rotate(Math.sin(t + e.seed) * 0.15);
-  ctx.fillStyle = "#6fe3d0";
+  ctx.rotate(Math.sin(t + e.seed) * 0.1);
+
+  // Little wooden treasure chest, bobbing on the swell.
+  ctx.fillStyle = "#5a3a22";
+  ctx.fillRect(-11, -4, 22, 13);
+  ctx.fillStyle = "#3f2716";
   ctx.beginPath();
-  ctx.moveTo(-3, -14);
-  ctx.lineTo(3, -14);
-  ctx.lineTo(3, -8);
-  ctx.quadraticCurveTo(9, -4, 9, 6);
-  ctx.quadraticCurveTo(9, 12, 0, 12);
-  ctx.quadraticCurveTo(-9, 12, -9, 6);
-  ctx.quadraticCurveTo(-9, -4, -3, -8);
+  ctx.moveTo(-11, -4);
+  ctx.quadraticCurveTo(0, -14, 11, -4);
   ctx.closePath();
   ctx.fill();
-  ctx.fillStyle = "rgba(255,255,255,0.5)";
-  ctx.fillRect(-1, -6, 2, 12);
-  ctx.fillStyle = "#c9a876";
-  ctx.fillRect(-3, -17, 6, 4);
+  ctx.strokeStyle = "#c9a04e";
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  ctx.moveTo(-11, -4);
+  ctx.lineTo(11, -4);
+  ctx.stroke();
+  ctx.fillStyle = "#e8c165";
+  ctx.fillRect(-2.5, -6, 5, 8);
+  ctx.fillStyle = "#7a5230";
+  ctx.fillRect(-11, -4, 22, 2);
+  ctx.fillRect(-11, 7, 22, 2);
+
+  // A little sparkle to say "treasure".
+  const twinkle = 0.5 + 0.5 * Math.sin(t * 5 + e.seed);
+  ctx.fillStyle = `rgba(255, 240, 190, ${twinkle})`;
+  ctx.beginPath();
+  ctx.arc(8, -12, 1.6, 0, Math.PI * 2);
+  ctx.fill();
   ctx.restore();
 }
 
@@ -799,9 +860,9 @@ function drawFish(e, t) {
 function drawEntities(t) {
   for (const e of entities) {
     if (e.kind === "rock") drawRock(e);
-    else if (e.kind === "mine") drawMine(e);
+    else if (e.kind === "serpent") drawSerpent(e, t);
     else if (e.kind === "coin") drawCoin(e, t);
-    else if (e.kind === "bottle") drawBottle(e, t);
+    else if (e.kind === "chest") drawChest(e, t);
     else if (e.kind === "fish") drawFish(e, t);
   }
 }
@@ -819,7 +880,7 @@ function drawParticles() {
 
 function drawPopups() {
   ctx.textAlign = "center";
-  ctx.font = "700 14px ui-sans-serif, system-ui, sans-serif";
+  ctx.font = '10px "Press Start 2P", ui-monospace, monospace';
   for (const t of popups) {
     ctx.globalAlpha = Math.max(0, t.life / t.maxLife);
     ctx.fillStyle = t.color;
@@ -850,6 +911,13 @@ function render() {
     ctx.fillRect(0, 0, W, H);
   }
   ctx.restore();
+
+  // Blit the low-res buffer up to full size with no smoothing — this is
+  // the moment everything snaps into big, chunky, retro pixels.
+  screenCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  screenCtx.clearRect(0, 0, W, H);
+  screenCtx.imageSmoothingEnabled = false;
+  screenCtx.drawImage(pixelCanvas, 0, 0, pixelCanvas.width, pixelCanvas.height, 0, 0, W, H);
 }
 
 /* Main loop -------------------------------------------------------------- */
