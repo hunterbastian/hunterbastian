@@ -1,0 +1,41 @@
+name: Deploy Aria to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+      # TODO: remove this branch once PR #2 is merged into main —
+      # kept here temporarily so Aria can be previewed via Pages before merge.
+      - cursor/digital-forest-2b00
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Aria as the Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: aria
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
