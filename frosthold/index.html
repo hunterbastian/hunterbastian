@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b1220" />
+  <title>Frosthold</title>
+  <meta name="description" content="Frosthold — a little open-world RPG for your phone. Wander a tiny province, fight wolves and draugr, level up, and shout like a dragonborn." />
+  <link rel="icon" href="../assets/sky-farm-icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Frosthold" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <canvas id="scene" aria-label="Frosthold, a tiny open-world RPG"></canvas>
+
+  <!-- Boot / loading screen -->
+  <div id="boot" class="boot">
+    <div class="boot__crest" aria-hidden="true">⚔</div>
+    <h1 class="boot__title">FROSTHOLD</h1>
+    <p class="boot__sub">a little open world</p>
+    <div class="boot__bar"><div class="boot__bar-fill" id="bootFill"></div></div>
+    <p class="boot__hint" id="bootHint">stoking the hearth&hellip;</p>
+  </div>
+
+  <!-- Start / title menu -->
+  <div id="title" class="title-screen" hidden>
+    <div class="title-screen__inner">
+      <div class="boot__crest" aria-hidden="true">⚔</div>
+      <h1 class="boot__title">FROSTHOLD</h1>
+      <p class="boot__sub">a tiny open-world RPG for your phone</p>
+      <button class="btn btn--big" id="btnPlay">Begin Journey</button>
+      <p class="title-screen__hint">Rotate your phone sideways for the best view · add to home screen for full immersion</p>
+    </div>
+  </div>
+
+  <!-- In-game HUD -->
+  <div id="hud" class="hud" hidden>
+    <!-- top compass -->
+    <div class="compass" id="compass">
+      <div class="compass__tape" id="compassTape"></div>
+      <div class="compass__marker">▼</div>
+    </div>
+
+    <!-- quest banner (top) -->
+    <div class="quest" id="quest">
+      <span class="quest__label">Quest</span>
+      <span class="quest__text" id="questText">Explore the vale</span>
+    </div>
+
+    <!-- vitals: health / stamina / magicka -->
+    <div class="vitals">
+      <div class="vital vital--health"><div class="vital__fill" id="healthFill"></div></div>
+      <div class="vital vital--stamina"><div class="vital__fill" id="staminaFill"></div></div>
+      <div class="vital vital--magicka"><div class="vital__fill" id="magickaFill"></div></div>
+    </div>
+
+    <!-- level / xp -->
+    <div class="level" id="levelBadge">
+      <span id="levelNum">1</span>
+      <div class="level__xp"><div class="level__xp-fill" id="xpFill"></div></div>
+    </div>
+
+    <!-- toast messages (level up, quest complete, loot) -->
+    <div class="toasts" id="toasts"></div>
+
+    <!-- minimap -->
+    <canvas id="minimap" class="minimap" width="140" height="140"></canvas>
+
+    <!-- interact prompt -->
+    <button class="interact" id="interact" hidden>Interact</button>
+
+    <!-- left virtual joystick (move) -->
+    <div class="stick" id="stickMove">
+      <div class="stick__base"></div>
+      <div class="stick__nub" id="stickMoveNub"></div>
+    </div>
+
+    <!-- right action buttons -->
+    <div class="actions">
+      <button class="action action--shout" id="btnShout" title="Shout">
+        <span class="action__icon">FUS</span>
+      </button>
+      <button class="action action--jump" id="btnJump" title="Jump">
+        <span class="action__icon">⤒</span>
+      </button>
+      <button class="action action--attack" id="btnAttack" title="Attack">
+        <span class="action__icon">⚔</span>
+      </button>
+    </div>
+
+    <!-- pause -->
+    <button class="pause" id="btnPause" title="Pause">II</button>
+  </div>
+
+  <!-- pause menu -->
+  <div id="pauseMenu" class="overlay-menu" hidden>
+    <div class="overlay-menu__card">
+      <h2>Paused</h2>
+      <ul class="stat-list" id="statList"></ul>
+      <button class="btn" id="btnResume">Resume</button>
+      <button class="btn btn--ghost" id="btnRestart">Restart Journey</button>
+    </div>
+  </div>
+
+  <!-- death / victory overlay -->
+  <div id="endMenu" class="overlay-menu" hidden>
+    <div class="overlay-menu__card">
+      <h2 id="endTitle">You Have Fallen</h2>
+      <p id="endText">The cold claims another wanderer.</p>
+      <button class="btn" id="btnAgain">Try Again</button>
+    </div>
+  </div>
+
+  <script type="module" src="game.js"></script>
+</body>
+</html>

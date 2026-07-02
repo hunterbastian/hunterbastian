@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1b2947"/>
+      <stop offset="100%" stop-color="#0a0f1c"/>
+    </linearGradient>
+    <linearGradient id="peak" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#eaf4ff"/>
+      <stop offset="100%" stop-color="#9fc3e8"/>
+    </linearGradient>
+    <linearGradient id="blade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f3f6fb"/>
+      <stop offset="100%" stop-color="#b9c6d9"/>
+    </linearGradient>
+  </defs>
+  <rect width="192" height="192" rx="38" fill="url(#bg)"/>
+  <circle cx="96" cy="70" r="30" fill="#ffd27a" opacity="0.9"/>
+  <path d="M20 148 L64 78 L92 118 L112 86 L172 148 Z" fill="url(#peak)"/>
+  <path d="M64 78 L78 100 L92 118" fill="none" stroke="#5f7ea3" stroke-width="4" stroke-linejoin="round" opacity="0.6"/>
+  <path d="M112 86 L128 112 L172 148" fill="none" stroke="#5f7ea3" stroke-width="4" stroke-linejoin="round" opacity="0.5"/>
+  <rect x="20" y="148" width="152" height="18" fill="#111a2e"/>
+  <g transform="translate(96,150) rotate(-45)">
+    <rect x="-6" y="-58" width="12" height="72" rx="3" fill="url(#blade)"/>
+    <rect x="-18" y="10" width="36" height="10" rx="3" fill="#8fe3b0"/>
+    <rect x="-5" y="18" width="10" height="26" rx="3" fill="#6b4a2b"/>
+  </g>
+</svg>
