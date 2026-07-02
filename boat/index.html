@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#083258" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="High Seas" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <title>High Seas</title>
+  <meta name="description" content="A little boat game for your iPhone — steer a sailboat across an endless, stormy sea, dodge the rocks, and grab the coins." />
+  <link rel="icon" href="../assets/boat-icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="../assets/boat-icon.svg" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <canvas id="sea" aria-label="A little sailboat crossing an endless sea"></canvas>
+
+  <div class="hud" id="hud" aria-hidden="true">
+    <div class="hud__stat">
+      <span class="hud__label">distance</span>
+      <span class="hud__value" id="distanceValue">0m</span>
+    </div>
+    <div class="hud__stat hud__stat--coins">
+      <span class="hud__label">coins</span>
+      <span class="hud__value" id="coinsValue">0</span>
+    </div>
+    <div class="hud__stat hud__stat--best">
+      <span class="hud__label">best</span>
+      <span class="hud__value" id="bestValue">0m</span>
+    </div>
+  </div>
+
+  <button class="mute" id="muteBtn" title="Mute / unmute" aria-label="Mute or unmute sound">🔊</button>
+
+  <main class="overlay" id="menuOverlay">
+    <div class="card">
+      <p class="kicker">a little iPhone game</p>
+      <h1 class="title">High&nbsp;Seas</h1>
+      <p class="subtitle">
+        Drag to steer your sailboat across an endless, living sea.
+        Dodge the rocks and mines, scoop up coins and bottles, and
+        outrun the storm for as long as you can.
+      </p>
+      <button class="btn btn--primary" id="startBtn">Set Sail</button>
+      <p class="hint">drag anywhere &middot; or use the arrow keys</p>
+    </div>
+  </main>
+
+  <section class="overlay overlay--hidden" id="gameOverOverlay">
+    <div class="card">
+      <p class="kicker" id="gameOverReason">You hit a rock!</p>
+      <h1 class="title title--small">Sunk!</h1>
+      <div class="stats">
+        <div class="stats__row">
+          <span>distance</span>
+          <strong id="finalDistance">0m</strong>
+        </div>
+        <div class="stats__row">
+          <span>coins</span>
+          <strong id="finalCoins">0</strong>
+        </div>
+        <div class="stats__row">
+          <span>close calls</span>
+          <strong id="finalNearMisses">0</strong>
+        </div>
+        <div class="stats__row">
+          <span>score</span>
+          <strong id="finalScore">0</strong>
+        </div>
+        <div class="stats__row stats__row--best">
+          <span>best distance</span>
+          <strong id="finalBest">0m</strong>
+        </div>
+      </div>
+      <button class="btn btn--primary" id="retryBtn">Sail Again</button>
+    </div>
+  </section>
+
+  <script src="boat.js" type="module"></script>
+</body>
+</html>
