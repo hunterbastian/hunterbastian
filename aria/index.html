@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#f7f2e9" />
+  <title>Aria</title>
+  <meta name="description" content="Aria — an interactive, procedurally generated little world you can wander through, with a living day/night cycle." />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..600;1,6..96,400..500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <canvas id="aria" aria-label="Aria, a procedurally generated little world"></canvas>
+
+  <header class="overlay overlay--top">
+    <h1 class="title">Aria</h1>
+    <p class="subtitle">drag to explore &middot; tap to grow a tree &middot; a little living world</p>
+  </header>
+
+  <aside class="panel" id="panel" aria-label="Aria controls">
+    <button class="panel__header" id="panelToggle" aria-expanded="true" aria-controls="panelBody" title="Hide / show controls">
+      <span class="panel__title">controls</span>
+      <span class="panel__chevron"></span>
+    </button>
+    <div class="panel__body" id="panelBody">
+      <div class="control">
+        <label for="timeRange">time of day</label>
+        <input type="range" id="timeRange" min="0" max="1000" value="180" />
+        <span class="control__value" id="timeValue">dawn</span>
+      </div>
+
+      <div class="control control--switch">
+        <label for="autoTime">auto day / night</label>
+        <input type="checkbox" id="autoTime" checked />
+      </div>
+
+      <div class="control">
+        <label for="windRange">wind</label>
+        <input type="range" id="windRange" min="0" max="100" value="35" />
+      </div>
+
+      <div class="control">
+        <label for="densityRange">density</label>
+        <input type="range" id="densityRange" min="3" max="40" value="16" />
+      </div>
+
+      <div class="control control--switch">
+        <label for="leaves">falling leaves</label>
+        <input type="checkbox" id="leaves" checked />
+      </div>
+
+      <div class="control control--switch">
+        <label for="spirits">forest spirits</label>
+        <input type="checkbox" id="spirits" checked />
+      </div>
+
+      <div class="panel__actions">
+        <button class="btn" id="plant">plant a grove</button>
+        <button class="btn btn--ghost" id="reset">reset</button>
+      </div>
+
+      <p class="panel__hint" id="treeCount">0 trees</p>
+    </div>
+  </aside>
+
+  <footer class="overlay overlay--bottom">
+    <span>drag, scroll, or use &larr; &rarr; to wander &middot; made with canvas &amp; a little wind</span>
+  </footer>
+
+  <script src="aria.js" type="module"></script>
+</body>
+</html>
