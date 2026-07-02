@@ -25,9 +25,12 @@ for a fullscreen, app-like experience (no address bar, custom icon).
 ## What's inside
 
 - **A tiny open world** — rolling procedurally-generated hills, a snowy
-  mountain ring around the edge of the map, a lake, a forest, scattered
-  rocks, a village with a well and a few huts, and a ruined keep guarded by
-  a draugr.
+  mountain ring around the edge of the map, a forest, scattered rocks, a
+  village with a well and a few huts, and a ruined keep guarded by a draugr.
+- **Four lakes and two waterfalls** — hand-placed lakes with real carved
+  basins and gently rippling shader-animated water, plus waterfalls that
+  drop off carved cliff faces into the lakes below with a scrolling
+  flow shader and drifting mist at the base.
 - **Day/night cycle** — a moving sun and moon, drifting stars, and a sky
   that shifts from dawn to noon to dusk to night, all lighting the world in
   real time.
@@ -54,9 +57,11 @@ for a fullscreen, app-like experience (no address bar, custom icon).
 
 Everything renders with WebGL via three.js:
 
-- `game.js` — world generation (a hand-rolled value-noise heightmap),
-  the day/night sky shader, low-poly characters and enemy AI, the
-  third-person camera and touch input, combat, quests, and the render loop.
+- `game.js` — world generation (a hand-rolled value-noise heightmap composed
+  with carved lake basins and cliff steps for the waterfalls, plus custom
+  GLSL water/waterfall shaders), the day/night sky shader, low-poly
+  characters and enemy AI, the third-person camera and touch input, combat,
+  quests, and the render loop.
 - `style.css` — the mobile HUD, joystick, action buttons, and menus.
 - `index.html` — markup, boot/title screens, and the manifest for
   "Add to Home Screen".

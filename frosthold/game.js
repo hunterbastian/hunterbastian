@@ -52,19 +52,86 @@ const WOLF_DEN_POS = new THREE.Vector3(-58, 0, -52);
 const KEEP_POS = new THREE.Vector3(72, 0, 66);
 const ELDER_POS = new THREE.Vector3(6, 0, -6);
 
-function terrainHeight(x, z) {
+// Hand-placed lakes: each carves a real basin into the terrain (rather than
+// floating a flat disc over whatever height happens to be there) so shorelines
+// sit naturally and waterfalls have somewhere believable to land.
+const LAKES = [
+  { name: 'Mirrormere', x: -34, z: 42, radius: 24, waterY: -6.5, depth: 5 },
+  { name: 'Ravenpool', x: -70, z: -28, radius: 14, waterY: -3, depth: 4 },
+  { name: 'Stillwater Tarn', x: 34, z: -72, radius: 9, waterY: 2, depth: 3 },
+  { name: 'Sunken Tarn', x: 96, z: 8, radius: 16, waterY: 3, depth: 4.5 },
+];
+
+// Hand-authored cliff faces: a sharp, deterministic step in the terrain
+// (independent of the noise field) so a waterfall mesh always has a clean
+// rock face to fall down, landing in the paired lake below.
+const WATERFALLS = [
+  {
+    lake: LAKES[0], x: -34, z: 68, dir: [0, -1], halfWidth: 4.5,
+    topY: 17, bottomY: LAKES[0].waterY - 1, stepHalf: 3,
+  },
+  {
+    lake: LAKES[3], x: 96, z: 38, dir: [0, -1], halfWidth: 3.5,
+    topY: 20, bottomY: LAKES[3].waterY - 1, stepHalf: 2.5,
+  },
+];
+
+function baseHeight(x, z) {
   const n1 = fbm(x * 0.012, z * 0.012, 5);
   const n2 = fbm(x * 0.05 + 100, z * 0.05 + 100, 3);
-  let h = n1 * 13 + n2 * 2.4;
+  return n1 * 13 + n2 * 2.4;
+}
 
+function villageFlatten(x, z, h) {
   const distVillage = Math.hypot(x - VILLAGE_POS.x, z - VILLAGE_POS.z);
   const flatten = smoothstep(46, 6, distVillage);
-  h = lerp(h, h * 0.12, flatten);
+  return lerp(h, h * 0.12, flatten);
+}
 
+function edgeMountains(x, z, h) {
   const dist = Math.hypot(x, z);
   const edgeRise = smoothstep(88, WORLD_RADIUS + 6, dist);
-  h += edgeRise * 46;
+  return h + edgeRise * 46;
+}
 
+function lakeBasins(x, z, h) {
+  for (const lake of LAKES) {
+    const dist = Math.hypot(x - lake.x, z - lake.z);
+    const outer = lake.radius * 1.35;
+    if (dist > outer) continue;
+    const basinFloor = lake.waterY - lake.depth;
+    const carved = lerp(basinFloor, lake.waterY + 0.6, smoothstep(0, lake.radius, dist));
+    const blend = smoothstep(outer, lake.radius, dist);
+    h = lerp(h, carved, blend);
+  }
+  return h;
+}
+
+function cliffSteps(x, z, h) {
+  for (const fall of WATERFALLS) {
+    const dx = x - fall.x, dz = z - fall.z;
+    const forward = dx * fall.dir[0] + dz * fall.dir[1];
+    const lateral = dx * -fall.dir[1] + dz * fall.dir[0];
+    const lateralFalloff = smoothstep(fall.halfWidth * 1.7, fall.halfWidth * 0.9, Math.abs(lateral));
+    if (lateralFalloff <= 0) continue;
+    // Bound the feature to a small footprint around the site so the flat
+    // plateau/pool plains don't bleed into an infinite strip across the map.
+    const range = fall.stepHalf * 8;
+    const forwardFalloff = smoothstep(range, range * 0.55, Math.abs(forward));
+    const blend = lateralFalloff * forwardFalloff;
+    if (blend <= 0) continue;
+    const cliffHeight = lerp(fall.topY, fall.bottomY, smoothstep(-fall.stepHalf, fall.stepHalf, forward));
+    h = lerp(h, cliffHeight, blend);
+  }
+  return h;
+}
+
+function terrainHeight(x, z) {
+  let h = baseHeight(x, z);
+  h = villageFlatten(x, z, h);
+  h = lakeBasins(x, z, h);
+  h = cliffSteps(x, z, h);
+  h = edgeMountains(x, z, h);
   return h;
 }
 
@@ -260,16 +327,139 @@ function buildTerrain() {
   mesh.receiveShadow = false;
   scene.add(mesh);
 
-  // still water in low basins
-  const waterGeo = new THREE.CircleGeometry(20, 32);
-  waterGeo.rotateX(-Math.PI / 2);
-  const water = new THREE.Mesh(waterGeo, new THREE.MeshPhongMaterial({
-    color: 0x2f6f8f, transparent: true, opacity: 0.75, shininess: 90,
-  }));
-  water.position.set(-30, -6.6, 40);
-  scene.add(water);
-
   return mesh;
+}
+
+/* --------------------------------------------------------------- water fx */
+
+const waterMaterials = [];
+const waterfallMaterials = [];
+
+function makeLakeMaterial(deepColor, shallowColor) {
+  const mat = new THREE.ShaderMaterial({
+    uniforms: {
+      time: { value: 0 },
+      deepColor: { value: new THREE.Color(deepColor) },
+      shallowColor: { value: new THREE.Color(shallowColor) },
+      opacity: { value: 0.82 },
+    },
+    transparent: true,
+    vertexShader: `
+      uniform float time;
+      varying vec2 vUv;
+      varying float vRipple;
+      void main() {
+        vUv = uv;
+        vec3 pos = position;
+        float ripple = sin(pos.x * 0.5 + time * 1.3) * cos(pos.y * 0.45 + time * 1.1) * 0.09;
+        pos.z += ripple;
+        vRipple = ripple;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+      }`,
+    fragmentShader: `
+      uniform vec3 deepColor;
+      uniform vec3 shallowColor;
+      uniform float opacity;
+      varying vec2 vUv;
+      varying float vRipple;
+      void main() {
+        float d = length(vUv - 0.5) * 2.0;
+        vec3 color = mix(deepColor, shallowColor, smoothstep(0.55, 1.0, d));
+        color += vRipple * 1.4;
+        gl_FragColor = vec4(color, opacity);
+      }`,
+  });
+  waterMaterials.push(mat);
+  return mat;
+}
+
+function buildLakes() {
+  for (const lake of LAKES) {
+    const segments = 40;
+    const geo = new THREE.CircleGeometry(lake.radius, segments, 0, Math.PI * 2);
+    // perturb the rim for a natural, non-perfectly-circular shoreline
+    const pos = geo.attributes.position;
+    for (let i = 1; i < pos.count; i++) {
+      const vx = pos.getX(i), vy = pos.getY(i);
+      const r = Math.hypot(vx, vy);
+      if (r < lake.radius * 0.9) continue;
+      const angle = Math.atan2(vy, vx);
+      const n = noise2D(Math.cos(angle) * 3 + lake.x, Math.sin(angle) * 3 + lake.z);
+      const scale = 1 + (n - 0.5) * 0.22;
+      pos.setXY(i, vx * scale, vy * scale);
+    }
+    geo.computeVertexNormals();
+    geo.rotateX(-Math.PI / 2);
+
+    const mat = makeLakeMaterial(0x1c4c66, 0x5fa8c9);
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(lake.x, lake.waterY, lake.z);
+    scene.add(mesh);
+
+    colliders.push({ x: lake.x, z: lake.z, radius: lake.radius * 0.4 });
+  }
+}
+
+function buildWaterfalls() {
+  for (const fall of WATERFALLS) {
+    const height = fall.topY - fall.bottomY;
+    const width = fall.halfWidth * 1.6;
+    const geo = new THREE.PlaneGeometry(width, height, 6, 16);
+
+    const mat = new THREE.ShaderMaterial({
+      uniforms: {
+        time: { value: 0 },
+        waterColor: { value: new THREE.Color(0xbfe4f2) },
+      },
+      transparent: true,
+      side: THREE.DoubleSide,
+      vertexShader: `
+        uniform float time;
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          vec3 pos = position;
+          pos.x += sin(pos.y * 3.0 + time * 2.2) * 0.06;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+        }`,
+      fragmentShader: `
+        uniform float time;
+        uniform vec3 waterColor;
+        varying vec2 vUv;
+        void main() {
+          float flow = fract(vUv.y * 7.0 - time * 2.4);
+          float stripe = smoothstep(0.0, 0.18, flow) * smoothstep(0.55, 0.18, flow);
+          float edgeFoam = 1.0 - smoothstep(0.0, 0.14, vUv.x) * smoothstep(1.0, 0.86, vUv.x);
+          float bottomFoam = smoothstep(0.22, 0.0, vUv.y);
+          float white = clamp(stripe * 0.55 + edgeFoam * 0.5 + bottomFoam * 0.7, 0.0, 1.0);
+          vec3 color = mix(waterColor, vec3(1.0), white);
+          float alpha = 0.88 - edgeFoam * 0.15;
+          gl_FragColor = vec4(color, alpha);
+        }`,
+    });
+    waterfallMaterials.push(mat);
+
+    const mesh = new THREE.Mesh(geo, mat);
+    const midY = (fall.topY + fall.bottomY) / 2;
+    mesh.position.set(fall.x, midY, fall.z);
+    const yaw = Math.atan2(fall.dir[0], fall.dir[1]);
+    mesh.rotation.y = yaw;
+    scene.add(mesh);
+
+    fall.mistPos = new THREE.Vector3(
+      fall.x + fall.dir[0] * (fall.halfWidth * 0.3),
+      fall.bottomY + 0.3,
+      fall.z + fall.dir[1] * (fall.halfWidth * 0.3)
+    );
+    fall.mistTimer = 0;
+
+    colliders.push({ x: fall.x, z: fall.z, radius: fall.halfWidth + 1 });
+  }
+}
+
+function updateWaterFx(elapsed) {
+  for (const m of waterMaterials) m.uniforms.time.value = elapsed;
+  for (const m of waterfallMaterials) m.uniforms.time.value = elapsed;
 }
 
 /* ------------------------------------------------------------------- decor */
@@ -311,7 +501,8 @@ function scatterInstances({ geometries, materials, count, place, colorRange }) {
 const noGoZones = [
   { x: VILLAGE_POS.x, z: VILLAGE_POS.z, r: 22 },
   { x: KEEP_POS.x, z: KEEP_POS.z, r: 26 },
-  { x: -30, z: 40, r: 22 }, // lake
+  ...LAKES.map((l) => ({ x: l.x, z: l.z, r: l.radius * 1.3 })),
+  ...WATERFALLS.map((f) => ({ x: f.x, z: f.z, r: f.halfWidth * 2.2 })),
 ];
 function inNoGoZone(x, z) {
   return noGoZones.some((z2) => Math.hypot(x - z2.x, z - z2.z) < z2.r);
@@ -547,6 +738,24 @@ function spawnRing(pos, color, maxScale = 3, life = 0.4) {
       const p = 1 - t / life;
       mesh.scale.setScalar(lerp(0.4, maxScale, 1 - p));
       mat.opacity = p * 0.9;
+    },
+  });
+}
+function spawnMist(pos) {
+  const mesh = new THREE.Mesh(
+    new THREE.SphereGeometry(randRange(0.3, 0.55), 6, 6),
+    new THREE.MeshBasicMaterial({ color: 0xf3f8ff, transparent: true, opacity: 0.4, depthWrite: false })
+  );
+  mesh.position.copy(pos).add(new THREE.Vector3(randRange(-0.6, 0.6), 0, randRange(-0.6, 0.6)));
+  scene.add(mesh);
+  const vel = new THREE.Vector3(randRange(-0.4, 0.4), randRange(0.8, 1.4), randRange(-0.4, 0.4));
+  const life = randRange(0.9, 1.4);
+  transientFx.push({
+    mesh, life, maxLife: life,
+    update(dt) {
+      mesh.position.addScaledVector(vel, dt);
+      mesh.material.opacity = Math.max(0, 0.4 * (this.life / this.maxLife));
+      mesh.scale.multiplyScalar(1 + dt * 0.4);
     },
   });
 }
@@ -1213,6 +1422,8 @@ class Game {
 
   buildWorld() {
     buildTerrain();
+    buildLakes();
+    buildWaterfalls();
     buildTrees();
     buildRocks();
     buildWell();
@@ -1273,6 +1484,7 @@ class Game {
       { x: WOLF_DEN_POS.x, z: WOLF_DEN_POS.z, color: '#d94b4b' },
       { x: KEEP_POS.x, z: KEEP_POS.z, color: '#8fe3b0' },
       { x: chestPos.x, z: chestPos.z, color: '#d9b34a' },
+      ...LAKES.map((l) => ({ x: l.x, z: l.z, color: '#4b9bd9' })),
     ];
   }
 
@@ -1390,6 +1602,18 @@ class Game {
     camera.lookAt(target);
   }
 
+  updateWaterfallMist(dt) {
+    const p = this.player.group.position;
+    for (const fall of WATERFALLS) {
+      if (p.distanceTo(fall.mistPos) > 55) continue;
+      fall.mistTimer -= dt;
+      if (fall.mistTimer <= 0) {
+        fall.mistTimer = 0.12;
+        spawnMist(fall.mistPos);
+      }
+    }
+  }
+
   updateInteractables() {
     const p = this.player.group.position;
     let nearest = null, nearestDist = Infinity;
@@ -1424,6 +1648,8 @@ class Game {
 
     this.updateCamera(dt);
     updateSky(this.elapsed, this.player.group.position);
+    updateWaterFx(this.elapsed);
+    this.updateWaterfallMist(dt);
     updateFx(dt);
     this.updateInteractables();
 
@@ -1448,3 +1674,4 @@ class Game {
 }
 
 window.__game = new Game();
+window.__three = { camera, scene, renderer, input };
