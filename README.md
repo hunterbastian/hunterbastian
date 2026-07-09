@@ -11,4 +11,4 @@ Portfolio : **[hunterbastian.com](https://hunterbastian.com)**
 
 - [`aria/`](aria/) — scrollable procedural little world
 - [`forest/`](forest/) — interactive digital forest
-- [`starship/`](starship/) — controllable deep-space flight sim 
+- [`starship/`](starship/) — Star Trek–inspired bridge sim (pick your ship) 

@@ -3,25 +3,26 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
-  <meta name="theme-color" content="#05070d" />
-  <title>Starship</title>
-  <meta name="description" content="A small controllable starship simulation — fly through deep space with inertia, thrusters, and a living starfield." />
+  <meta name="theme-color" content="#02040a" />
+  <title>Starship — Bridge Simulation</title>
+  <meta name="description" content="A Star Trek–inspired starship bridge simulation — choose your vessel and fly through deep space." />
   <link rel="icon" href="../assets/sky-farm-icon.svg" type="image/svg+xml" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Antonio:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <canvas id="space" aria-label="Starship flight simulation"></canvas>
+  <canvas id="space" aria-label="Starship bridge flight simulation"></canvas>
 
   <header class="brand" aria-hidden="true">
     <p class="brand__mark">STARSHIP</p>
+    <p class="brand__sub" id="brandSub">bridge · online</p>
   </header>
 
   <div class="hud" id="hud" aria-live="polite">
     <div class="hud__block">
-      <span class="hud__label">SPD</span>
+      <span class="hud__label">IMP</span>
       <span class="hud__value" id="hudSpeed">0</span>
     </div>
     <div class="hud__block">
@@ -33,25 +34,26 @@
       <span class="hud__value" id="hudShield">100</span>
     </div>
     <div class="hud__block">
-      <span class="hud__label">FUEL</span>
+      <span class="hud__label">PWR</span>
       <span class="hud__value" id="hudFuel">100</span>
     </div>
   </div>
 
-  <aside class="panel" id="panel" aria-label="Flight controls">
+  <aside class="panel" id="panel" aria-label="Bridge controls">
     <button class="panel__toggle" id="panelToggle" aria-expanded="true" aria-controls="panelBody" title="Hide / show controls">
       <span class="panel__chevron"></span>
     </button>
     <div class="panel__body" id="panelBody">
-      <p class="panel__title">flight deck</p>
+      <p class="panel__title">ops console</p>
+      <p class="panel__ship" id="panelShip">Constitution · NCC-1701</p>
 
       <div class="control">
-        <label for="thrustRange">thrust</label>
+        <label for="thrustRange">impulse</label>
         <input type="range" id="thrustRange" min="20" max="100" value="55" />
       </div>
 
       <div class="control">
-        <label for="dragRange">drag</label>
+        <label for="dragRange">inertial dampers</label>
         <input type="range" id="dragRange" min="0" max="40" value="8" />
       </div>
 
@@ -61,16 +63,19 @@
       </div>
 
       <div class="control control--switch">
-        <label for="trails">engine trails</label>
+        <label for="trails">warp trail</label>
         <input type="checkbox" id="trails" checked />
       </div>
 
       <div class="panel__actions">
-        <button class="btn" id="refuel">refuel &amp; repair</button>
-        <button class="btn btn--ghost" id="reset">reset</button>
+        <button class="btn" id="refuel">recharge</button>
+        <button class="btn btn--ghost" id="changeShip">change ship</button>
+      </div>
+      <div class="panel__actions">
+        <button class="btn btn--ghost" id="reset">reset sector</button>
       </div>
 
-      <p class="panel__hint" id="hint">WASD / arrows · space fire · shift boost</p>
+      <p class="panel__hint" id="hint">WASD / arrows · space phasers · shift boost</p>
     </div>
   </aside>
 
@@ -79,18 +84,53 @@
       <div class="touch__knob" id="knob"></div>
     </div>
     <div class="touch__buttons">
-      <button class="touch__btn" id="fireBtn" type="button">FIRE</button>
+      <button class="touch__btn" id="fireBtn" type="button">PHASER</button>
       <button class="touch__btn touch__btn--boost" id="boostBtn" type="button">BOOST</button>
     </div>
   </div>
 
   <footer class="footer">
-    <span>inertia flight · deep space</span>
+    <span>starfleet bridge simulation</span>
   </footer>
 
-  <div class="splash" id="splash">
+  <div class="splash" id="splash" role="dialog" aria-label="Select your starship">
+    <div class="splash__lcars" aria-hidden="true">
+      <span class="splash__bar splash__bar--top"></span>
+      <span class="splash__bar splash__bar--side"></span>
+    </div>
+    <p class="splash__eyebrow">United Federation of Planets</p>
     <p class="splash__brand">STARSHIP</p>
-    <p class="splash__line">tap or press any key to launch</p>
+    <p class="splash__line">Select vessel · engage when ready</p>
+
+    <div class="fleet" id="fleet" role="listbox" aria-label="Available starships">
+      <button class="ship-card is-selected" type="button" role="option" aria-selected="true" data-ship="constitution">
+        <canvas class="ship-card__preview" width="160" height="90" data-preview="constitution"></canvas>
+        <span class="ship-card__class">Heavy Cruiser</span>
+        <span class="ship-card__name">Constitution</span>
+        <span class="ship-card__reg">NCC-1701</span>
+        <span class="ship-card__blurb">Balanced explorer. Strong shields, steady impulse.</span>
+        <span class="ship-card__stats">SHLD ●●●● · SPD ●●● · WPN ●●●</span>
+      </button>
+      <button class="ship-card" type="button" role="option" aria-selected="false" data-ship="defiant">
+        <canvas class="ship-card__preview" width="160" height="90" data-preview="defiant"></canvas>
+        <span class="ship-card__class">Escort</span>
+        <span class="ship-card__name">Defiant</span>
+        <span class="ship-card__reg">NX-74205</span>
+        <span class="ship-card__blurb">Compact warship. Twin pulse phasers, high agility.</span>
+        <span class="ship-card__stats">SHLD ●● · SPD ●●●●● · WPN ●●●●</span>
+      </button>
+      <button class="ship-card" type="button" role="option" aria-selected="false" data-ship="raptor">
+        <canvas class="ship-card__preview" width="160" height="90" data-preview="raptor"></canvas>
+        <span class="ship-card__class">Bird of Prey</span>
+        <span class="ship-card__name">Raptor</span>
+        <span class="ship-card__reg">IKS-447</span>
+        <span class="ship-card__blurb">Predatory raider. Heavy disruptors, thick armor.</span>
+        <span class="ship-card__stats">SHLD ●●●●● · SPD ●● · WPN ●●●●●</span>
+      </button>
+    </div>
+
+    <button class="splash__engage" id="engage" type="button">Engage</button>
+    <p class="splash__keys">← → to choose · Enter to engage</p>
   </div>
 
   <script src="starship.js" type="module"></script>
