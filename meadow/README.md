@@ -30,10 +30,15 @@ URL to force the grass quality.
 
 ```bash
 npm install
-npm run dev       # http://localhost:5173
+npm run dev       # http://localhost:5173 (also on your network, for phones)
 npm run build     # type-check + production build into dist/
-npm run preview   # serve the build
+npm test          # unit tests (Vitest)
+npm run test:ui   # build + headless UI checks, screenshots in /tmp/meadow-ui
+npm run check     # all of the above
 ```
+
+Project notes for Claude and humans: `CLAUDE.md` (how it works), `ROADMAP.md` (where it's going),
+`HANDOFF.md` (current state), `CHANGELOG.md` (what changed).
 
 ## How it works
 
@@ -59,5 +64,5 @@ npm run preview   # serve the build
 
 ## Deploy
 
-It's a static Vite app. On Vercel, set the project's root directory to `meadow`. The
-framework preset (Vite) is detected automatically and the output goes to `dist/`.
+Vercel, auto-deploying from `main` (`vercel.json`: Vite, `npm run build`, `dist/`). Vercel Web
+Analytics is injected only on `*.vercel.app`.

@@ -19,7 +19,9 @@ export const BRUSH = {
   erase: 1.4,
 } as const;
 
-const params = new URLSearchParams(location.search);
-const coarse = matchMedia('(pointer: coarse)').matches;
+// Guarded so pure modules (walls, noise) can be imported by Vitest in Node.
+const inBrowser = typeof window !== 'undefined';
+const params = new URLSearchParams(inBrowser ? location.search : '');
+const coarse = inBrowser && matchMedia('(pointer: coarse)').matches;
 /** `?q=low` or touch devices get a lighter grass field. */
 export const LOW_QUALITY = params.get('q') === 'low' || (coarse && params.get('q') !== 'high');

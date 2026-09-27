@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { inject as injectAnalytics } from '@vercel/analytics';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import './style.css';
 import { BRUSH, BUILD_RADIUS, LOW_QUALITY, WALL_COURSES, WORLD_SIZE } from './config';
@@ -576,9 +577,16 @@ function updateFps(dt: number): void {
   fpsAccum = 0;
 }
 
-addEventListener('resize', () => {
+/** Portrait phones get a wider lens so the scene isn't cropped to a sliver. */
+function fitCamera(): void {
   camera.aspect = innerWidth / innerHeight;
+  camera.fov = camera.aspect < 1 ? THREE.MathUtils.lerp(64, 42, camera.aspect) : 42;
   camera.updateProjectionMatrix();
+}
+fitCamera();
+
+addEventListener('resize', () => {
+  fitCamera();
   renderer.setSize(innerWidth, innerHeight);
   pixelator.resize();
 });
@@ -642,5 +650,25 @@ requestAnimationFrame(() => {
   if (!seen && !navigator.webdriver) setTimeout(openHelp, 500);
 });
 
-// Handy for poking at things from the console.
-Object.assign(window, { meadow: { scene, camera, controls, world: () => world } });
+// Vercel Web Analytics, only on the live site so local and headless runs aren't counted.
+if (location.hostname.endsWith('.vercel.app')) injectAnalytics();
+
+// Handy for poking at things from the console (and tests/ui.mjs).
+Object.assign(window, {
+  __meadow: {
+    scene,
+    camera,
+    controls,
+    world: () => world,
+    ui: () => ({
+      tool,
+      courses: wallCourses,
+      canUndo: history.canUndo,
+      canRedo: history.canRedo,
+      pixel: { ...pixelator.settings },
+    }),
+    setTool,
+    undo,
+    redo,
+  },
+});
