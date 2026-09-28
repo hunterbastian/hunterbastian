@@ -28,6 +28,19 @@ build runs from any folder or static host.
 | `[` `]`          | pixel size down / up                           |
 | `H`              | hide the controls card                         |
 
+**On iPhone / iPad / touch screens:**
+
+| Touch              | Action                                          |
+| ------------------ | ----------------------------------------------- |
+| left thumb         | floating joystick: wander, push to the edge to trot |
+| right thumb drag   | look around                                     |
+| pinch              | zoom                                            |
+| ◐ / ?              | cycle dither · show or hide help                |
+
+Page zoom, bounce-scrolling and long-press menus are turned off, and the UI
+respects the notch and home-indicator safe areas. Portrait gets a wider field
+of view. Use Safari → Share → *Add to Home Screen* to play full-screen.
+
 Stand still for a few seconds and the mossling looks around, sniffs the
 ground and eventually sits down.
 
@@ -97,6 +110,7 @@ Terrain height comes from the same triangles that are drawn
 npm run build && npm run smoke
 ```
 
-This serves the build in headless Chromium, walks and trots the creature around,
-writes `smoke-*.png` screenshots, and fails on any page error. It uses a
+This serves the build in headless Chromium, walks and trots the creature around
+on a desktop viewport, then does the same on an emulated iPhone using the touch
+joystick. It writes `smoke-*.png` screenshots and fails on any page error. It uses a
 Playwright install from the project or the global one.

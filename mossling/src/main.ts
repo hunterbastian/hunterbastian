@@ -11,7 +11,9 @@ import { createWorld, SPAWN } from "./world/world";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#game")!;
 const hud = document.querySelector<HTMLElement>("#hud")!;
-const modeLabel = document.querySelector<HTMLElement>("#mode")!;
+const modeLabels = document.querySelectorAll<HTMLElement>(".mode");
+// Phones/tablets start in touch mode; anything else switches on first touch.
+document.body.classList.toggle("touch", matchMedia("(pointer: coarse)").matches);
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: "high-performance" });
 renderer.setPixelRatio(1);
@@ -32,45 +34,70 @@ scene.add(fill);
 
 const world = createWorld(scene);
 const creature = new Creature(scene, SPAWN.x, SPAWN.z, world.blobTex);
-const input = new Input(canvas);
+const input = new Input(canvas, document.querySelector<HTMLElement>("#stick")!, document.querySelector<HTMLElement>("#knob")!);
 const follow = new FollowCamera(innerWidth / innerHeight, creature);
-const dither = new DitherPass();
+const dither = new DitherPass(renderer);
 
 // ---- resolution: the canvas *is* the low-res frame ---------------------
 const params = new URLSearchParams(location.search);
 let pixelScale = Number(params.get("px")) || 0;
+let pixelScaleNow = 3;
 let modeIndex = Math.max(0, DITHER_MODES.indexOf((params.get("dither") ?? "palette") as DitherMode));
 
+// Aim for ~440 pixels along the long edge, so a phone in portrait gets the
+// same chunky pixels as a laptop.
+const autoScale = () => Math.max(2, Math.round(Math.max(innerWidth, innerHeight) / 440));
+
 function resize() {
-  const scale = pixelScale || Math.max(2, Math.round(innerHeight / 250));
-  const w = Math.max(160, Math.ceil(innerWidth / scale));
+  const scale = pixelScale || autoScale();
+  pixelScaleNow = scale;
+  const w = Math.max(90, Math.ceil(innerWidth / scale));
   const h = Math.max(90, Math.ceil(innerHeight / scale));
   renderer.setSize(w, h, false);
   dither.setSize(w, h);
   globalUniforms.uSnapRes.value.set(w, h);
   follow.camera.aspect = w / h;
+  // Portrait phones: widen the view so the glen doesn't feel like a keyhole.
+  const aspect = w / h;
+  follow.camera.fov = aspect < 1 ? Math.min(78, (2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(27.5)) / Math.sqrt(aspect)) * 180) / Math.PI) : 55;
   follow.camera.updateProjectionMatrix();
 }
 addEventListener("resize", resize);
+// iOS reports the new size a beat after rotating.
+addEventListener("orientationchange", () => setTimeout(resize, 250));
 resize();
 
 function setMode(i: number) {
   modeIndex = (i + DITHER_MODES.length) % DITHER_MODES.length;
   dither.setMode(DITHER_MODES[modeIndex]);
-  modeLabel.textContent = DITHER_MODES[modeIndex];
+  modeLabels.forEach((el) => (el.textContent = DITHER_MODES[modeIndex]));
 }
 setMode(modeIndex);
 
 input.on("KeyT", () => setMode(modeIndex + 1));
 input.on("BracketLeft", () => {
-  pixelScale = Math.max(1, (pixelScale || Math.round(innerHeight / 250)) - 1);
+  pixelScale = Math.max(1, pixelScaleNow - 1);
   resize();
 });
 input.on("BracketRight", () => {
-  pixelScale = Math.min(8, (pixelScale || Math.round(innerHeight / 250)) + 1);
+  pixelScale = Math.min(8, pixelScaleNow + 1);
   resize();
 });
-input.on("KeyH", () => hud.classList.toggle("hidden"));
+const toggleHud = () => {
+  if (hud.classList.contains("hidden") || hud.classList.contains("faded")) hud.classList.remove("hidden", "faded");
+  else hud.classList.add("hidden");
+};
+input.on("KeyH", toggleHud);
+
+// Touch buttons mirror the keyboard shortcuts.
+const tap = (sel: string, fn: () => void) =>
+  document.querySelector(sel)?.addEventListener("pointerup", (e) => {
+    e.preventDefault();
+    fn();
+  });
+tap("#btn-dither", () => setMode(modeIndex + 1));
+tap("#btn-help", toggleHud);
+tap("#hud", toggleHud);
 
 // ---- loop ----------------------------------------------------------------
 const clock = new THREE.Clock();
@@ -82,10 +109,11 @@ function frame() {
   const t = clock.elapsedTime;
   globalUniforms.uTime.value = t;
 
+  if (input.usedTouch) document.body.classList.add("touch");
   const axis = input.axis();
   const { forward, right } = follow.basis();
   move.copy(forward).multiplyScalar(axis.y).addScaledVector(right, axis.x);
-  creature.update(dt, t, { x: move.x, z: move.z, run: input.down("ShiftLeft", "ShiftRight") }, world.colliders);
+  creature.update(dt, t, { x: move.x, z: move.z, run: axis.run }, world.colliders);
 
   // Let the controls card drift away once you're off exploring.
   walked += creature.speed * dt;

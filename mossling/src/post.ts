@@ -15,11 +15,14 @@ export class DitherPass {
   private readonly camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   private readonly material: THREE.ShaderMaterial;
 
-  constructor() {
+  constructor(renderer: THREE.WebGLRenderer) {
+    // Half-float keeps dark gradients smooth before dithering, but not every
+    // mobile GPU can render to it — fall back to 8-bit where it can't.
+    const halfFloat = renderer.extensions.has("EXT_color_buffer_float") || renderer.extensions.has("EXT_color_buffer_half_float");
     this.target = new THREE.WebGLRenderTarget(1, 1, {
       minFilter: THREE.NearestFilter,
       magFilter: THREE.NearestFilter,
-      type: THREE.HalfFloatType,
+      type: halfFloat ? THREE.HalfFloatType : THREE.UnsignedByteType,
       depthBuffer: true,
     });
     const palette = paletteSRGB();
