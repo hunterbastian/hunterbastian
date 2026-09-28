@@ -62,6 +62,7 @@ export function buildGlows(specs: GlowSpec[], fog: THREE.FogExp2) {
         float core = smoothstep(0.22, 0.0, d);
         vec3 col = vColor * (halo * intensity + core * 0.6);
         gl_FragColor = vec4(col * vAlpha, 1.0);
+          #include <colorspace_fragment>
       }
     `,
     transparent: true,

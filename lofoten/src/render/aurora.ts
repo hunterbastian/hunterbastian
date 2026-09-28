@@ -94,6 +94,7 @@ const fragmentShader = /* glsl */ `
     float a = hem * ends * breathe * pulse * (rise * (0.25 + 0.9 * rays) + rim * 0.9);
     a *= 0.7 + vFold * 1.2;
     gl_FragColor = vec4(col * a * strength, 1.0);
+          #include <colorspace_fragment>
   }
 `;
 

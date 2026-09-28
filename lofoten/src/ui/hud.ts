@@ -32,7 +32,11 @@ export class Hud {
 
   setLocked(locked: boolean) {
     this.root.classList.toggle('is-playing', locked);
-    if (locked) this.started = true;
+    if (locked && !this.started) {
+      this.started = true;
+      // Announce where the walk begins once the card is out of the way.
+      if (this.current) this.showToast(ZONES.find((z) => z.id === this.current)!.label);
+    }
     if (!locked && this.started) {
       this.introTitle.textContent = 'Paused';
       this.introAction.textContent = 'Click to continue';
@@ -52,7 +56,7 @@ export class Hud {
       el.classList.toggle('is-current', id === zone);
       el.classList.toggle('is-visited', this.visited.has(id) && id !== zone);
     }
-    if (first) this.showToast(ZONES.find((z) => z.id === zone)!.label);
+    if (first && this.started) this.showToast(ZONES.find((z) => z.id === zone)!.label);
   }
 
   private showToast(text: string) {

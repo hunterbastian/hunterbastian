@@ -79,6 +79,10 @@ const WaterShader = {
 
       vec3 base = mix(waterColor, shallowColor, 0.25 + 0.25 * N.x);
       vec3 col = mix(base, refl * 0.9, clamp(0.5 + fres * 0.6, 0.0, 1.0));
+      // Faint sky sheen on ripple faces tilted toward the viewer keeps the
+      // surface readable even where the reflection is dark.
+      float sheen = clamp(dot(N.xz, normalize(V.xz + 1e-4)) * 6.0, 0.0, 1.0) * calm;
+      col += vec3(0.03, 0.06, 0.1) * sheen;
 
       // Moon glitter.
       vec3 R = reflect(-V, N);

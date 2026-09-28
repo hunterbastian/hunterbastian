@@ -80,6 +80,17 @@ describe('boundaries', () => {
     expect(p.surface).toBe('porch');
   });
 
+  it('stair spurs connect the boardwalk and the village both ways', () => {
+    const p = new Player(world, -91, -21, Math.PI); // on the boardwalk, facing south
+    hold(p, 7, { forward: 1 });
+    expect(p.surface).toBe('terrain');
+    expect(p.z).toBeGreaterThan(-6);
+    p.yaw = 0; // back north, up the spur
+    hold(p, 7, { forward: 1 });
+    expect(p.surface).toBe('waterfront');
+    expect(p.z).toBeLessThan(-19);
+  });
+
   it('the overlook railing stops you at the cliff', () => {
     const p = new Player(world, VIEW_DECK.cx, VIEW_DECK.cz + 1, 0);
     expect(p.surface).toBe('overlook');

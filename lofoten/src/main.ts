@@ -40,6 +40,7 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.toneMapping = THREE.NeutralToneMapping;
 renderer.toneMappingExposure = 1.0;
 renderer.shadowMap.enabled = STAGE >= 2;
+renderer.info.autoReset = false; // count every pass (reflection + post) per frame
 renderer.shadowMap.type = THREE.PCFShadowMap;
 
 const scene = new THREE.Scene();
@@ -176,8 +177,9 @@ function syncCamera() {
 }
 
 function frame(now: number) {
+  renderer.info.reset();
   timer.update(now);
-  const dt = Math.min(timer.getDelta(), 0.1) * timeScale;
+  const dt = Math.min(Math.max(timer.getDelta(), 0), 0.1) * timeScale;
   elapsed += dt;
 
   if (autopilot && !autopilot.done) {
@@ -209,6 +211,7 @@ function frame(now: number) {
 
 syncCamera();
 hud.ready();
+if (AUTOWALK) hud.setLocked(true); // demo mode: hide the card and let the autopilot walk
 requestAnimationFrame(frame);
 
 /* Debug / test hooks. */

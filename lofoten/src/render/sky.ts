@@ -49,6 +49,7 @@ export function buildSky() {
           col += vec3(0.55, 0.65, 0.85) * (pow(m, 12.0) * 0.06 + pow(m, 90.0) * 0.12);
           if (h < 0.0) col = mix(col, horizon * 0.6, smoothstep(0.0, -0.1, h));
           gl_FragColor = vec4(col, 1.0);
+          #include <colorspace_fragment>
         }
       `,
     }),
@@ -105,6 +106,7 @@ export function buildSky() {
           float d = length(gl_PointCoord - 0.5) * 2.0;
           if (d > 1.0) discard;
           gl_FragColor = vec4(vCol * smoothstep(1.0, 0.2, d), 1.0);
+          #include <colorspace_fragment>
         }
       `,
       transparent: true,
@@ -141,6 +143,7 @@ export function buildSky() {
           vec3 col = vec3(1.0, 1.0, 1.05) * (0.3 + 0.9 * phase);
           float glow = smoothstep(2.0, 0.9, d) * 0.12;
           gl_FragColor = vec4(col * disc + vec3(0.6, 0.7, 0.9) * glow, disc + glow);
+          #include <colorspace_fragment>
         }
       `,
     }),
