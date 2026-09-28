@@ -1,0 +1,27 @@
+{
+  "name": "lofoten-night",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "walk": "node scripts/walk-route.mjs",
+    "check:controls": "node scripts/controls-check.mjs",
+    "shots": "node scripts/shoot.mjs",
+    "check:touch": "node scripts/touch-check.mjs"
+  },
+  "dependencies": {
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@types/three": "^0.186.0",
+    "playwright-core": "^1.56.1",
+    "typescript": "~5.9.3",
+    "vite": "^8.3.1",
+    "vitest": "^5.0.2"
+  }
+}

@@ -1,0 +1,399 @@
+:root {
+  --ink: #050b18;
+  --panel: rgba(6, 13, 28, 0.72);
+  --line: rgba(190, 210, 240, 0.16);
+  --text: #dfe7f3;
+  --muted: #8e9bb3;
+  --amber: #ffb259;
+  --aurora: #43ff9c;
+  --font: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+  --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  background: var(--ink);
+  color: var(--text);
+  font-family: var(--font);
+}
+
+#scene {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+
+#hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Entry card ------------------------------------------------------------ */
+
+#intro {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(460px, calc(100vw - 32px));
+  padding: 28px 30px 24px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  backdrop-filter: blur(6px);
+  pointer-events: auto;
+  cursor: pointer;
+  text-align: left;
+  transition: opacity 0.35s ease, transform 0.35s ease;
+  outline: none;
+}
+
+#intro:focus-visible {
+  border-color: rgba(67, 255, 156, 0.6);
+}
+
+.eyebrow {
+  margin: 0 0 6px;
+  font: 11px/1.4 var(--mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+#intro h1 {
+  margin: 0;
+  font-weight: 400;
+  font-size: 44px;
+  letter-spacing: 0.01em;
+  line-height: 1.05;
+  background: linear-gradient(95deg, #e6eef9 20%, #9dffd0 60%, #43ff9c);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.lede {
+  margin: 10px 0 16px;
+  font-size: 16px;
+  line-height: 1.45;
+  color: #c3cde0;
+}
+
+.route-line {
+  margin: 0 0 18px;
+  font: 12px/1.6 var(--mono);
+  color: var(--text);
+}
+
+.route-line span {
+  color: var(--amber);
+}
+
+.route-line b {
+  font-weight: inherit;
+  white-space: nowrap;
+}
+
+.keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 0 0 20px;
+  font: 12px/1.3 var(--mono);
+}
+
+.keys div {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.keys dt {
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
+.keys dd {
+  margin: 0;
+  color: var(--muted);
+}
+
+.action {
+  margin: 0;
+  font: 13px/1.4 var(--mono);
+  letter-spacing: 0.06em;
+  color: var(--amber);
+}
+
+.loading {
+  display: none;
+  margin: 0;
+  font: 13px/1.4 var(--mono);
+  color: var(--muted);
+}
+
+#hud.is-loading .action {
+  display: none;
+}
+
+#hud.is-loading .loading {
+  display: block;
+}
+
+#hud.is-loading #intro {
+  cursor: progress;
+}
+
+#hud.is-playing #intro {
+  opacity: 0;
+  transform: translate(-50%, -46%);
+  pointer-events: none;
+}
+
+/* Route indicator ------------------------------------------------------- */
+
+#route {
+  position: absolute;
+  left: calc(20px + env(safe-area-inset-left));
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  gap: 14px;
+  font: 11px/1 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(142, 155, 179, 0.7);
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+
+#hud.is-playing #route {
+  opacity: 1;
+}
+
+#route li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: color 0.4s ease;
+}
+
+#route li::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+}
+
+#route li.is-visited {
+  color: rgba(223, 231, 243, 0.75);
+}
+
+#route li.is-visited::before {
+  background: currentColor;
+}
+
+#route li.is-current {
+  color: var(--amber);
+}
+
+#route li.is-current::before {
+  background: var(--amber);
+  box-shadow: 0 0 8px var(--amber);
+}
+
+/* Place-name toast ------------------------------------------------------ */
+
+#toast {
+  position: absolute;
+  left: 50%;
+  top: calc(12vh + env(safe-area-inset-top));
+  transform: translateX(-50%);
+  font-size: 22px;
+  letter-spacing: 0.08em;
+  color: var(--text);
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  transition: opacity 1.2s ease;
+  white-space: nowrap;
+}
+
+#toast.is-visible {
+  opacity: 0.9;
+}
+
+#reticle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  margin: -1.5px 0 0 -1.5px;
+  border-radius: 50%;
+  background: rgba(223, 231, 243, 0.55);
+  opacity: 0;
+}
+
+#hud.is-playing #reticle {
+  opacity: 1;
+}
+
+/* Touch -------------------------------------------------------------- */
+
+.keys--touch,
+#hud[data-input='touch'] .keys--mouse {
+  display: none;
+}
+
+#hud[data-input='touch'] .keys--touch {
+  display: flex;
+}
+
+/* The route moves to the top so thumbs don't cover it. */
+#hud[data-input='touch'] #route {
+  top: calc(14px + env(safe-area-inset-top));
+  bottom: auto;
+  left: calc(16px + env(safe-area-inset-left));
+  flex-wrap: wrap;
+  row-gap: 8px;
+  max-width: calc(100vw - 96px - env(safe-area-inset-left) - env(safe-area-inset-right));
+}
+
+#hud[data-input='touch'] #reticle {
+  display: none;
+}
+
+#stick {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 112px;
+  height: 112px;
+  margin: -56px 0 0 -56px;
+  border-radius: 50%;
+  border: 1px solid rgba(223, 231, 243, 0.28);
+  background: rgba(6, 13, 28, 0.25);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  will-change: transform;
+}
+
+#stick.is-visible {
+  opacity: 1;
+}
+
+#stick .knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 44px;
+  height: 44px;
+  margin: -22px 0 0 -22px;
+  border-radius: 50%;
+  background: rgba(255, 178, 89, 0.55);
+  box-shadow: 0 0 14px rgba(255, 178, 89, 0.45);
+}
+
+#pause {
+  position: absolute;
+  top: calc(10px + env(safe-area-inset-top));
+  right: calc(12px + env(safe-area-inset-right));
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  font: 13px/1 var(--mono);
+  letter-spacing: 0.08em;
+  pointer-events: auto;
+  display: none;
+  cursor: pointer;
+}
+
+#hud.is-playing[data-input='touch'] #pause {
+  display: block;
+}
+
+#notice {
+  position: absolute;
+  left: 50%;
+  bottom: calc(24px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  width: min(360px, calc(100vw - 32px));
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font: 13px/1.4 var(--mono);
+  color: var(--text);
+  display: none;
+}
+
+#notice.is-visible {
+  display: block;
+}
+
+@media (max-width: 520px) {
+  #route {
+    gap: 8px;
+    font-size: 9px;
+  }
+  #intro {
+    padding: 22px 20px 20px;
+  }
+  #intro h1 {
+    font-size: 36px;
+  }
+}
+
+/* Phones in landscape: keep the card inside the short viewport. */
+@media (max-height: 480px) {
+  #intro {
+    padding: 16px 20px 14px;
+  }
+  #intro h1 {
+    font-size: 30px;
+  }
+  .lede {
+    display: none;
+  }
+  .route-line {
+    margin: 8px 0 10px;
+  }
+  .keys {
+    margin-bottom: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #intro,
+  #toast,
+  #route {
+    transition: none;
+  }
+}
