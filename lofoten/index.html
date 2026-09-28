@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#050b18" />
+    <title>Nordlys — a night walk</title>
+    <meta name="description" content="A small walkable Lofoten fishing village at night: red cabins on stilts, a lit bridge, jagged peaks and a flowing aurora." />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23050b18'/%3E%3Cpath d='M3 24 11 10l4 7 3-4 11 11z' fill='%23d9e3f0'/%3E%3Cpath d='M4 8c6-4 17-4 24 1' stroke='%2343ff9c' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E" />
+  </head>
+  <body>
+    <canvas id="scene" aria-label="Walkable 3D scene of a Lofoten fishing village at night"></canvas>
+
+    <div id="hud" class="is-loading">
+      <section id="intro" role="button" tabindex="0" aria-label="Enter the scene">
+        <p class="eyebrow">Lofoten · 68°N · midnight</p>
+        <h1 data-title>Nordlys</h1>
+        <p class="lede">A short night walk through a fishing village under the northern lights.</p>
+        <p class="route-line">Cabin porch <span>→</span> Waterfront <span>→</span> Bridge <span>→</span> Rocky overlook</p>
+        <dl class="keys">
+          <div><dt>WASD</dt><dd>walk</dd></div>
+          <div><dt>Mouse</dt><dd>look</dd></div>
+          <div><dt>Shift</dt><dd>stride</dd></div>
+          <div><dt>Esc</dt><dd>release</dd></div>
+        </dl>
+        <p class="action" data-action>Click to enter</p>
+        <p class="loading">Building the village…</p>
+      </section>
+
+      <ol id="route" aria-label="Route progress"></ol>
+      <div id="toast" aria-live="polite"></div>
+      <div id="reticle" aria-hidden="true"></div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
