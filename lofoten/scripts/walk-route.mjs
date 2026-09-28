@@ -21,7 +21,9 @@ const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
 
-await page.goto(`${url}?autowalk`);
+const target = new URL(url);
+target.searchParams.set('autowalk', '');
+await page.goto(target.href);
 await page.waitForFunction(() => window.__nordlys);
 await page.evaluate((s) => {
   document.getElementById('hud').classList.add('is-playing');

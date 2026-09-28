@@ -17,7 +17,20 @@ npm install
 npm run dev        # http://localhost:5173
 ```
 
-Click to enter · **WASD** walk · **Mouse** look · **Shift** longer stride · **Esc** release.
+**Desktop:** click to enter · **WASD** walk · **Mouse** look · **Shift** longer stride · **Esc** release.
+
+**iPhone / iPad (and other touch devices):** tap to enter · **left thumb**
+drags a floating joystick to walk (push it to the rim for a longer stride) ·
+**right thumb** drags to look · **II** button pauses. An iPad with a keyboard
+can also walk with WASD. Add it to the Home Screen from Safari's share menu
+to run it full screen.
+
+Touch devices automatically get a lighter rendering profile (lower pixel ratio,
+smaller shadow map and reflection buffer, 2× MSAA); add `?mobile` on desktop to
+preview it.
+
+To try it on a phone during development, run `npm run dev` and open the
+**Network** URL Vite prints (same Wi-Fi), or deploy `dist/` anywhere static.
 
 The route is one continuous stroll of roughly two minutes:
 
@@ -33,6 +46,7 @@ The four steps along the bottom-left light up as you reach them.
 | `?stage=2` | Adds cabins, bridge details, mountains, lights and shadows |
 | _(none)_ | Stage 3, the full scene: reflective water, aurora and the dither pass |
 | `?autowalk` | The autopilot walks the full route (handy for demos) |
+| `?mobile` | Use the touch-device rendering profile on desktop |
 
 ## How it's put together
 
@@ -49,6 +63,7 @@ src/
   player/walkworld.ts   ground queries, shoreline boundary, collider push-out
   player/player.ts      grounded first-person movement (gravity, steps, slopes)
   player/input.ts       pointer lock, keyboard, mouse look
+  player/touch.ts       floating joystick + drag-to-look for touch screens
   player/autopilot.ts   drives the player along the route (tests + ?autowalk)
   render/water.ts       Reflector-based water with animated ripple normals
   render/aurora.ts      folded, ray-streaked aurora curtain shader
@@ -80,8 +95,10 @@ npm test              # node: autopilot walks the whole route; boundary checks
 npm run dev           # then, in another terminal:
 npm run walk          # real browser: ?autowalk run, asserts zone order, saves screenshots
 npm run check:controls  # real browser: click-to-lock, W walks, mouse looks, release pauses
+npm run check:touch   # emulated iPhone: tap to enter, joystick walks, drag looks, pause, landscape
 npm run shots         # screenshots of eight viewpoints along the route
 ```
 
 The browser scripts use `playwright-core` with a local Chromium
-(`CHROME_PATH` overrides the path).
+(`CHROME_PATH` overrides the path). The touch check emulates an iPhone in
+Chromium; it is not a substitute for a pass on real iOS Safari.

@@ -19,6 +19,13 @@ body {
   margin: 0;
   height: 100%;
   overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
   background: var(--ink);
   color: var(--text);
   font-family: var(--font);
@@ -30,6 +37,7 @@ body {
   width: 100%;
   height: 100%;
   display: block;
+  touch-action: none;
 }
 
 #hud {
@@ -166,8 +174,8 @@ body {
 
 #route {
   position: absolute;
-  left: 20px;
-  bottom: 18px;
+  left: calc(20px + env(safe-area-inset-left));
+  bottom: calc(18px + env(safe-area-inset-bottom));
   margin: 0;
   padding: 0;
   list-style: none;
@@ -222,7 +230,7 @@ body {
 #toast {
   position: absolute;
   left: 50%;
-  top: 12vh;
+  top: calc(12vh + env(safe-area-inset-top));
   transform: translateX(-50%);
   font-size: 22px;
   letter-spacing: 0.08em;
@@ -253,11 +261,132 @@ body {
   opacity: 1;
 }
 
+/* Touch -------------------------------------------------------------- */
+
+.keys--touch,
+#hud[data-input='touch'] .keys--mouse {
+  display: none;
+}
+
+#hud[data-input='touch'] .keys--touch {
+  display: flex;
+}
+
+/* The route moves to the top so thumbs don't cover it. */
+#hud[data-input='touch'] #route {
+  top: calc(14px + env(safe-area-inset-top));
+  bottom: auto;
+  left: calc(16px + env(safe-area-inset-left));
+  flex-wrap: wrap;
+  row-gap: 8px;
+  max-width: calc(100vw - 96px - env(safe-area-inset-left) - env(safe-area-inset-right));
+}
+
+#hud[data-input='touch'] #reticle {
+  display: none;
+}
+
+#stick {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 112px;
+  height: 112px;
+  margin: -56px 0 0 -56px;
+  border-radius: 50%;
+  border: 1px solid rgba(223, 231, 243, 0.28);
+  background: rgba(6, 13, 28, 0.25);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  will-change: transform;
+}
+
+#stick.is-visible {
+  opacity: 1;
+}
+
+#stick .knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 44px;
+  height: 44px;
+  margin: -22px 0 0 -22px;
+  border-radius: 50%;
+  background: rgba(255, 178, 89, 0.55);
+  box-shadow: 0 0 14px rgba(255, 178, 89, 0.45);
+}
+
+#pause {
+  position: absolute;
+  top: calc(10px + env(safe-area-inset-top));
+  right: calc(12px + env(safe-area-inset-right));
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  font: 13px/1 var(--mono);
+  letter-spacing: 0.08em;
+  pointer-events: auto;
+  display: none;
+  cursor: pointer;
+}
+
+#hud.is-playing[data-input='touch'] #pause {
+  display: block;
+}
+
+#notice {
+  position: absolute;
+  left: 50%;
+  bottom: calc(24px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  width: min(360px, calc(100vw - 32px));
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font: 13px/1.4 var(--mono);
+  color: var(--text);
+  display: none;
+}
+
+#notice.is-visible {
+  display: block;
+}
+
 @media (max-width: 520px) {
   #route {
     gap: 8px;
     font-size: 9px;
-    left: 12px;
+  }
+  #intro {
+    padding: 22px 20px 20px;
+  }
+  #intro h1 {
+    font-size: 36px;
+  }
+}
+
+/* Phones in landscape: keep the card inside the short viewport. */
+@media (max-height: 480px) {
+  #intro {
+    padding: 16px 20px 14px;
+  }
+  #intro h1 {
+    font-size: 30px;
+  }
+  .lede {
+    display: none;
+  }
+  .route-line {
+    margin: 8px 0 10px;
+  }
+  .keys {
+    margin-bottom: 12px;
   }
 }
 

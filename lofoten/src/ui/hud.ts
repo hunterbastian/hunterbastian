@@ -14,6 +14,7 @@ export class Hud {
   private current: ZoneId | null = null;
   private toastTimer = 0;
   private started = false;
+  private touch = false;
 
   constructor() {
     const route = document.getElementById('route')!;
@@ -30,7 +31,16 @@ export class Hud {
     this.root.classList.remove('is-loading');
   }
 
-  setLocked(locked: boolean) {
+  /** Switch hints and wording between mouse/keyboard and touch. */
+  setInputMode(mode: 'touch' | 'mouse') {
+    this.touch = mode === 'touch';
+    this.root.dataset.input = mode;
+    this.introAction.textContent = this.started
+      ? `${this.touch ? 'Tap' : 'Click'} to continue`
+      : `${this.touch ? 'Tap' : 'Click'} to enter`;
+  }
+
+  setPlaying(locked: boolean) {
     this.root.classList.toggle('is-playing', locked);
     if (locked && !this.started) {
       this.started = true;
@@ -39,12 +49,12 @@ export class Hud {
     }
     if (!locked && this.started) {
       this.introTitle.textContent = 'Paused';
-      this.introAction.textContent = 'Click to continue';
+      this.introAction.textContent = `${this.touch ? 'Tap' : 'Click'} to continue`;
     }
   }
 
   lockBlocked() {
-    this.introAction.textContent = 'Click again to continue';
+    this.introAction.textContent = `${this.touch ? 'Tap' : 'Click'} again to continue`;
   }
 
   setZone(zone: ZoneId | null) {

@@ -2,7 +2,12 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Nordlys" />
+    <meta name="format-detection" content="telephone=no" />
     <meta name="theme-color" content="#050b18" />
     <title>Nordlys — a night walk</title>
     <meta name="description" content="A small walkable Lofoten fishing village at night: red cabins on stilts, a lit bridge, jagged peaks and a flowing aurora." />
@@ -17,11 +22,17 @@
         <h1 data-title>Nordlys</h1>
         <p class="lede">A short night walk through a fishing village under the northern lights.</p>
         <p class="route-line"><b>Cabin porch</b> <span>→</span> <b>Waterfront</b> <span>→</span> <b>Bridge</b> <span>→</span> <b>Rocky overlook</b></p>
-        <dl class="keys">
+        <dl class="keys keys--mouse">
           <div><dt>WASD</dt><dd>walk</dd></div>
           <div><dt>Mouse</dt><dd>look</dd></div>
           <div><dt>Shift</dt><dd>stride</dd></div>
           <div><dt>Esc</dt><dd>release</dd></div>
+        </dl>
+        <dl class="keys keys--touch">
+          <div><dt>Left thumb</dt><dd>walk</dd></div>
+          <div><dt>Right thumb</dt><dd>look</dd></div>
+          <div><dt>Push to rim</dt><dd>stride</dd></div>
+          <div><dt>II</dt><dd>pause</dd></div>
         </dl>
         <p class="action" data-action>Click to enter</p>
         <p class="loading">Building the village…</p>
@@ -30,6 +41,9 @@
       <ol id="route" aria-label="Route progress"></ol>
       <div id="toast" aria-live="polite"></div>
       <div id="reticle" aria-hidden="true"></div>
+      <div id="stick" aria-hidden="true"><div class="knob"></div></div>
+      <button id="pause" type="button" aria-label="Pause">II</button>
+      <p id="notice" role="alert"></p>
     </div>
 
     <script type="module" src="/src/main.ts"></script>

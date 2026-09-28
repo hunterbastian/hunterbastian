@@ -8,6 +8,8 @@ const PITCH_LIMIT = 1.45;
 export class InputController {
   private keys = new Set<string>();
   locked = false;
+  /** Keyboard walking without pointer lock (touch mode, e.g. iPad + keyboard). */
+  keysEnabled = false;
   onLockChange: (locked: boolean) => void = () => {};
   onLockError: () => void = () => {};
 
@@ -24,7 +26,13 @@ export class InputController {
   }
 
   requestLock() {
-    const req = this.target.requestPointerLock() as unknown as Promise<void> | undefined;
+    if (!this.canLock) return this.onLockError();
+    let req: Promise<void> | undefined;
+    try {
+      req = this.target.requestPointerLock() as unknown as Promise<void> | undefined;
+    } catch {
+      return this.onLockError();
+    }
     // Newer browsers return a promise that rejects if re-locked too quickly after Esc.
     if (req && typeof req.catch === 'function') req.catch(() => this.onLockError());
   }
@@ -35,8 +43,16 @@ export class InputController {
     this.onLockChange(this.locked);
   };
 
+  get canLock() {
+    return typeof this.target.requestPointerLock === 'function';
+  }
+
+  clearKeys() {
+    this.keys.clear();
+  }
+
   private onKeyDown = (e: KeyboardEvent) => {
-    if (!this.locked) return;
+    if (!this.locked && !this.keysEnabled) return;
     this.keys.add(e.code);
     if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
   };

@@ -11,7 +11,8 @@
     "test": "vitest run",
     "walk": "node scripts/walk-route.mjs",
     "check:controls": "node scripts/controls-check.mjs",
-    "shots": "node scripts/shoot.mjs"
+    "shots": "node scripts/shoot.mjs",
+    "check:touch": "node scripts/touch-check.mjs"
   },
   "dependencies": {
     "three": "^0.186.1"

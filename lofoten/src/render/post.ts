@@ -54,9 +54,9 @@ export const DitherShader = {
   `,
 };
 
-export function buildPost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera) {
+export function buildPost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, samples = 4) {
   const size = renderer.getDrawingBufferSize(new THREE.Vector2());
-  const target = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: 4 });
+  const target = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples });
   const composer = new EffectComposer(renderer, target);
   composer.addPass(new RenderPass(scene, camera));
   composer.addPass(new OutputPass());
