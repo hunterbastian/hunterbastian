@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="A cozy little dithered 3D forest you wander as a mossy four-legged creature." />
+    <title>Mossling</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E%3Crect x='3' y='6' width='10' height='6' fill='%23e2c79a'/%3E%3Crect x='4' y='5' width='7' height='2' fill='%2362743a'/%3E%3Crect x='11' y='4' width='4' height='4' fill='%23e2c79a'/%3E%3Crect x='13' y='5' width='1' height='1' fill='%231c1a20'/%3E%3Crect x='4' y='12' width='2' height='2' fill='%235a4031'/%3E%3Crect x='10' y='12' width='2' height='2' fill='%235a4031'/%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;700&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <canvas id="game" aria-label="A small dithered forest glen with a mossy creature"></canvas>
+
+    <aside id="hud">
+      <h1>mossling</h1>
+      <p>a small glen. no hurry.</p>
+      <dl>
+        <dt><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></dt>
+        <dd>wander</dd>
+        <dt><kbd>Shift</kbd></dt>
+        <dd>trot</dd>
+        <dt>drag · scroll</dt>
+        <dd>look around · zoom</dd>
+        <dt><kbd>T</kbd></dt>
+        <dd>dither: <span id="mode">palette</span></dd>
+        <dt><kbd>[</kbd> <kbd>]</kbd></dt>
+        <dd>pixel size</dd>
+        <dt><kbd>H</kbd></dt>
+        <dd>hide this card</dd>
+      </dl>
+    </aside>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
