@@ -55,29 +55,44 @@ try {
   await page.waitForTimeout(7500);
   await page.screenshot({ path: "smoke-sit.png" });
 
-  // Phone pass: emulate an iPhone and drive the touch joystick + look drag.
-  const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
-  const mobile = await phone.newPage();
-  mobile.on("console", (m) => m.type() === "error" && !m.text().startsWith("Failed to load resource") && errors.push(m.text()));
-  mobile.on("pageerror", (e) => errors.push(String(e)));
-  await mobile.goto(`http://localhost:${port}/`);
-  await mobile.waitForTimeout(2500);
-  await mobile.screenshot({ path: "smoke-phone-start.png" });
-  const cdp = await phone.newCDPSession(mobile);
-  const touch = (type, points) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: points });
-  // Left thumb pushes the stick up-right (trot); right thumb swings the camera.
-  await touch("touchStart", [{ x: 90, y: 740, id: 1 }]);
-  for (let i = 1; i <= 8; i++) await touch("touchMove", [{ x: 90 + i * 4, y: 740 - i * 9, id: 1 }]);
-  await mobile.waitForTimeout(1500);
-  await touch("touchStart", [{ x: 90 + 32, y: 740 - 72, id: 1 }, { x: 300, y: 400, id: 2 }]);
-  for (let i = 1; i <= 6; i++) await touch("touchMove", [{ x: 90 + 32, y: 740 - 72, id: 1 }, { x: 300 - i * 12, y: 400, id: 2 }]);
-  await touch("touchEnd", [{ x: 90 + 32, y: 740 - 72, id: 1 }]);
-  await mobile.waitForTimeout(1200);
-  await mobile.screenshot({ path: "smoke-phone-walk.png" });
-  await touch("touchEnd", []);
-  await mobile.waitForTimeout(300);
-  const moved = await mobile.evaluate(() => document.querySelector("#stick")?.classList.contains("active"));
-  if (moved) errors.push("joystick stayed active after release");
+  // Phone passes. Upright, the stage is rotated 90° so the game plays in
+  // landscape; a stage point (sx, sy) sits at viewport (390 - sy, sx).
+  const phonePass = async (name, viewport, toScreen) => {
+    const phone = await browser.newContext({ viewport, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
+    const mobile = await phone.newPage();
+    mobile.on("console", (m) => m.type() === "error" && !m.text().startsWith("Failed to load resource") && errors.push(m.text()));
+    mobile.on("pageerror", (e) => errors.push(String(e)));
+    await mobile.goto(`http://localhost:${port}/`);
+    await mobile.waitForTimeout(2500);
+    await mobile.screenshot({ path: `smoke-${name}-start.png` });
+    const cdp = await phone.newCDPSession(mobile);
+    const touch = (type, points) =>
+      cdp.send("Input.dispatchTouchEvent", { type, touchPoints: points.map(([x, y, id]) => ({ ...toScreen(x, y), id })) });
+    // Left thumb pushes the stick forward-right (trot); right thumb swings the camera.
+    await touch("touchStart", [[90, 300, 1]]);
+    for (let i = 1; i <= 8; i++) await touch("touchMove", [[90 + i * 4, 300 - i * 9, 1]]);
+    await mobile.waitForTimeout(1500);
+    const stick = [122, 228, 1];
+    await touch("touchStart", [stick, [600, 200, 2]]);
+    for (let i = 1; i <= 6; i++) await touch("touchMove", [stick, [600 - i * 12, 200, 2]]);
+    await mobile.waitForTimeout(1200);
+    const state = await mobile.evaluate(() => ({
+      rotated: document.querySelector("#stage")?.classList.contains("rotated"),
+      stickActive: document.querySelector("#stick")?.classList.contains("active"),
+    }));
+    await mobile.screenshot({ path: `smoke-${name}-walk.png` });
+    await touch("touchEnd", []);
+    await mobile.waitForTimeout(300);
+    if (!(await mobile.evaluate(() => document.querySelector("#stick")?.classList.contains("active")) === false))
+      errors.push(`${name}: joystick stayed active after release`);
+    if (!state.stickActive) errors.push(`${name}: joystick never activated`);
+    await phone.close();
+    return state;
+  };
+  const upright = await phonePass("phone-upright", { width: 390, height: 844 }, (x, y) => ({ x: 390 - y, y: x }));
+  if (!upright.rotated) errors.push("upright phone: stage was not rotated to landscape");
+  const sideways = await phonePass("phone-landscape", { width: 844, height: 390 }, (x, y) => ({ x, y }));
+  if (sideways.rotated) errors.push("landscape phone: stage should not be rotated");
 } finally {
   await browser.close();
   server.kill();

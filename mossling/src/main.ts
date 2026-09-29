@@ -10,6 +10,8 @@ import { SUN_DIR } from "./world/sky";
 import { createWorld, SPAWN } from "./world/world";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#game")!;
+const stage = document.querySelector<HTMLElement>("#stage")!;
+const turnHint = document.querySelector<HTMLElement>("#turn-hint")!;
 const hud = document.querySelector<HTMLElement>("#hud")!;
 const modeLabels = document.querySelectorAll<HTMLElement>(".mode");
 // Phones/tablets start in touch mode; anything else switches on first touch.
@@ -34,12 +36,41 @@ scene.add(fill);
 
 const world = createWorld(scene);
 const creature = new Creature(scene, SPAWN.x, SPAWN.z, world.blobTex);
-const input = new Input(canvas, document.querySelector<HTMLElement>("#stick")!, document.querySelector<HTMLElement>("#knob")!);
+// ---- landscape stage --------------------------------------------------
+// Web pages can't lock orientation on iOS, so on a phone held upright we turn
+// the whole stage 90° clockwise: tip the phone onto its left side and the
+// glen fills the screen. If the phone's own rotation is unlocked, the browser
+// goes landscape by itself and the stage stays put.
+const params = new URLSearchParams(location.search);
+let rotated = false;
+
+function layoutStage() {
+  const touch = document.body.classList.contains("touch");
+  rotated = touch && innerHeight > innerWidth && params.get("rotate") !== "0";
+  const w = rotated ? innerHeight : innerWidth;
+  const h = rotated ? innerWidth : innerHeight;
+  stage.style.width = `${w}px`;
+  stage.style.height = `${h}px`;
+  stage.style.transform = rotated ? `translateX(${innerWidth}px) rotate(90deg)` : "";
+  stage.classList.toggle("rotated", rotated);
+  document.body.classList.toggle("rotated", rotated);
+  return { w, h };
+}
+
+// Viewport point → stage point (inverse of the rotation above).
+const toStage = (x: number, y: number) => (rotated ? { x: y, y: innerWidth - x } : { x, y });
+
+const input = new Input(
+  canvas,
+  document.querySelector<HTMLElement>("#stick")!,
+  document.querySelector<HTMLElement>("#knob")!,
+  toStage,
+  () => stage.clientWidth,
+);
 const follow = new FollowCamera(innerWidth / innerHeight, creature);
 const dither = new DitherPass(renderer);
 
 // ---- resolution: the canvas *is* the low-res frame ---------------------
-const params = new URLSearchParams(location.search);
 let pixelScale = Number(params.get("px")) || 0;
 let pixelScaleNow = 3;
 let modeIndex = Math.max(0, DITHER_MODES.indexOf((params.get("dither") ?? "palette") as DitherMode));
@@ -49,10 +80,11 @@ let modeIndex = Math.max(0, DITHER_MODES.indexOf((params.get("dither") ?? "palet
 const autoScale = () => Math.max(2, Math.round(Math.max(innerWidth, innerHeight) / 440));
 
 function resize() {
+  const view = layoutStage();
   const scale = pixelScale || autoScale();
   pixelScaleNow = scale;
-  const w = Math.max(90, Math.ceil(innerWidth / scale));
-  const h = Math.max(90, Math.ceil(innerHeight / scale));
+  const w = Math.max(90, Math.ceil(view.w / scale));
+  const h = Math.max(90, Math.ceil(view.h / scale));
   renderer.setSize(w, h, false);
   dither.setSize(w, h);
   globalUniforms.uSnapRes.value.set(w, h);
@@ -99,6 +131,11 @@ tap("#btn-dither", () => setMode(modeIndex + 1));
 tap("#btn-help", toggleHud);
 tap("#hud", toggleHud);
 
+// The turn hint fades after a few seconds or once you start playing.
+const dismissHint = () => turnHint.classList.add("gone");
+setTimeout(dismissHint, 4000);
+addEventListener("pointerdown", dismissHint, { once: true });
+
 // ---- loop ----------------------------------------------------------------
 const clock = new THREE.Clock();
 const move = new THREE.Vector3();
@@ -109,7 +146,10 @@ function frame() {
   const t = clock.elapsedTime;
   globalUniforms.uTime.value = t;
 
-  if (input.usedTouch) document.body.classList.add("touch");
+  if (input.usedTouch && !document.body.classList.contains("touch")) {
+    document.body.classList.add("touch");
+    resize();
+  }
   const axis = input.axis();
   const { forward, right } = follow.basis();
   move.copy(forward).multiplyScalar(axis.y).addScaledVector(right, axis.x);

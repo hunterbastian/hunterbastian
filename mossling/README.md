@@ -37,9 +37,15 @@ build runs from any folder or static host.
 | pinch              | zoom                                            |
 | ◐ / ?              | cycle dither · show or hide help                |
 
+**Mossling always plays in landscape.** Web pages can't lock orientation on iOS,
+so when a phone is held upright the whole game turns 90° and a hint asks you to
+tip the phone onto its left side. Touch input is remapped to match. If your
+phone's rotation lock is off, the browser goes landscape on its own and nothing
+extra is rotated. Add `?rotate=0` to the URL to turn this off.
+
 Page zoom, bounce-scrolling and long-press menus are turned off, and the UI
-respects the notch and home-indicator safe areas. Portrait gets a wider field
-of view. Use Safari → Share → *Add to Home Screen* to play full-screen.
+respects the notch and home-indicator safe areas, including when rotated. Use
+Safari → Share → *Add to Home Screen* to play full-screen.
 
 Stand still for a few seconds and the mossling looks around, sniffs the
 ground and eventually sits down.
@@ -111,6 +117,6 @@ npm run build && npm run smoke
 ```
 
 This serves the build in headless Chromium, walks and trots the creature around
-on a desktop viewport, then does the same on an emulated iPhone using the touch
-joystick. It writes `smoke-*.png` screenshots and fails on any page error. It uses a
+on a desktop viewport, then on an emulated iPhone held upright (checking the
+stage is rotated to landscape) and held sideways, using the touch joystick. It writes `smoke-*.png` screenshots and fails on any page error. It uses a
 Playwright install from the project or the global one.

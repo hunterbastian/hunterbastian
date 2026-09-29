@@ -22,10 +22,16 @@ export class Input {
   /** True once any touch has happened — used to swap the HUD over. */
   usedTouch = false;
 
+  /**
+   * @param toStage maps viewport coordinates into the game stage's own
+   *   coordinates (the stage may be rotated 90° to force landscape).
+   */
   constructor(
     target: HTMLElement,
     private stickEl?: HTMLElement,
     private knobEl?: HTMLElement,
+    private toStage: (x: number, y: number) => { x: number; y: number } = (x, y) => ({ x, y }),
+    private stageWidth: () => number = () => innerWidth,
   ) {
     addEventListener("keydown", (e) => {
       if (e.repeat) return;
@@ -44,11 +50,12 @@ export class Input {
       e.preventDefault();
       const touch = e.pointerType !== "mouse";
       if (touch) this.usedTouch = true;
-      const role: Role = touch && this.stick.id < 0 && e.clientX < innerWidth * 0.45 ? "stick" : "look";
-      this.pointers.set(e.pointerId, { role, x: e.clientX, y: e.clientY });
+      const at = this.toStage(e.clientX, e.clientY);
+      const role: Role = touch && this.stick.id < 0 && at.x < this.stageWidth() * 0.45 ? "stick" : "look";
+      this.pointers.set(e.pointerId, { role, x: at.x, y: at.y });
       target.setPointerCapture(e.pointerId);
       if (role === "stick") {
-        this.stick = { id: e.pointerId, ox: e.clientX, oy: e.clientY, dx: 0, dy: 0 };
+        this.stick = { id: e.pointerId, ox: at.x, oy: at.y, dx: 0, dy: 0 };
         this.drawStick(true);
       }
       this.pinchDist = this.lookPinchDistance();
@@ -58,13 +65,14 @@ export class Input {
       const p = this.pointers.get(e.pointerId);
       if (!p) return;
       // Deltas from clientX/Y: iOS Safari doesn't give reliable movementX on touch.
-      const mx = e.clientX - p.x;
-      const my = e.clientY - p.y;
-      p.x = e.clientX;
-      p.y = e.clientY;
+      const at = this.toStage(e.clientX, e.clientY);
+      const mx = at.x - p.x;
+      const my = at.y - p.y;
+      p.x = at.x;
+      p.y = at.y;
       if (p.role === "stick") {
-        let dx = e.clientX - this.stick.ox;
-        let dy = e.clientY - this.stick.oy;
+        let dx = at.x - this.stick.ox;
+        let dy = at.y - this.stick.oy;
         const len = Math.hypot(dx, dy);
         if (len > STICK_RADIUS) {
           // Let the stick trail the thumb so it never feels stuck at the edge.
