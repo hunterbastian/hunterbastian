@@ -288,14 +288,14 @@ export class Creature {
     if (inputLen > 0.05) {
       const desired = Math.atan2(input.x, input.z);
       const diff = wrapAngle(desired - this.heading);
-      turnTarget = THREE.MathUtils.clamp(diff * 6, -5, 5);
+      turnTarget = THREE.MathUtils.clamp(diff * 8, -7, 7);
       targetSpeed = (input.run ? RUN_SPEED : WALK_SPEED) * inputLen;
       // Big turn? Slow down and swing around in a little arc.
-      targetSpeed *= THREE.MathUtils.lerp(1, 0.3, Math.min(1, Math.abs(diff) / 2));
+      targetSpeed *= THREE.MathUtils.lerp(1, 0.4, Math.min(1, Math.abs(diff) / 2));
     }
-    this.turnRate = damp(this.turnRate, turnTarget, 12, dt);
+    this.turnRate = damp(this.turnRate, turnTarget, 16, dt);
     this.heading = wrapAngle(this.heading + this.turnRate * dt);
-    this.speed = damp(this.speed, targetSpeed, targetSpeed > this.speed ? 4 : 6, dt);
+    this.speed = damp(this.speed, targetSpeed, targetSpeed > this.speed ? 6 : 8, dt);
     this.accel = damp(this.accel, (this.speed - this.lastSpeed) / Math.max(dt, 1e-4), 6, dt);
     this.lastSpeed = this.speed;
     this.gait = damp(this.gait, Math.min(1, this.speed / RUN_SPEED), 5, dt);

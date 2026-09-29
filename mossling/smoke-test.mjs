@@ -23,7 +23,7 @@ try {
   // External font loads may fail offline/in CI; only care about our own code.
   page.on("console", (m) => m.type() === "error" && !m.text().startsWith("Failed to load resource") && errors.push(m.text()));
   page.on("pageerror", (e) => errors.push(String(e)));
-  await page.goto(`http://localhost:${port}/${process.argv[2] ?? ""}`);
+  await page.goto(`http://localhost:${port}/${process.argv[2] ?? "?debug"}`);
   await page.waitForTimeout(2500);
   await page.screenshot({ path: "smoke-start.png" });
 
@@ -55,6 +55,40 @@ try {
   await page.waitForTimeout(7500);
   await page.screenshot({ path: "smoke-sit.png" });
 
+  // Control feel: holding a sideways key should walk a straight line (the
+  // camera drifting behind must not bend the path into a spiral), and walking
+  // toward the camera must not spin it around.
+  const probe = () => page.evaluate(() => {
+    const m = window.__mossling;
+    if (!m) return null;
+    const cam = m.follow.camera.position;
+    return { x: m.creature.position.x, z: m.creature.position.z, yaw: m.follow.yaw, camX: cam.x, camY: cam.y, camZ: cam.z };
+  });
+  if (await probe()) {
+    await page.keyboard.down("KeyD");
+    await page.waitForTimeout(700);
+    const a = await probe();
+    await page.waitForTimeout(1200);
+    const b = await probe();
+    await page.waitForTimeout(1200);
+    const c = await probe();
+    await page.keyboard.up("KeyD");
+    for (const p of [a, b, c]) if (!Number.isFinite(p.camX + p.camY + p.camZ)) errors.push("camera position is not finite");
+    const bend = Math.abs(Math.atan2(Math.sin(Math.atan2(c.x - b.x, c.z - b.z) - Math.atan2(b.x - a.x, b.z - a.z)), Math.cos(Math.atan2(c.x - b.x, c.z - b.z) - Math.atan2(b.x - a.x, b.z - a.z))));
+    const travelled = Math.hypot(c.x - a.x, c.z - a.z);
+    if (travelled < 2) errors.push(`holding D only moved the creature ${travelled.toFixed(2)} units`);
+    if (bend > 0.35) errors.push(`holding D curved the path by ${bend.toFixed(2)} rad`);
+    await page.waitForTimeout(800);
+    const s0 = await probe();
+    await page.keyboard.down("KeyS");
+    await page.waitForTimeout(2500);
+    const s1 = await probe();
+    await page.keyboard.up("KeyS");
+    const spin = Math.abs(Math.atan2(Math.sin(s1.yaw - s0.yaw), Math.cos(s1.yaw - s0.yaw)));
+    if (spin > 0.4) errors.push(`walking toward the camera spun it by ${spin.toFixed(2)} rad`);
+    console.log(`control checks: moved ${travelled.toFixed(1)}u, path bend ${bend.toFixed(3)} rad, camera spin ${spin.toFixed(3)} rad`);
+  }
+
   // Phone passes. Upright, the stage is rotated 90° so the game plays in
   // landscape; a stage point (sx, sy) sits at viewport (390 - sy, sx).
   const phonePass = async (name, viewport, toScreen) => {
@@ -79,6 +113,7 @@ try {
     const state = await mobile.evaluate(() => ({
       rotated: document.querySelector("#stage")?.classList.contains("rotated"),
       stickActive: document.querySelector("#stick")?.classList.contains("active"),
+      trot: document.querySelector("#stick")?.classList.contains("trot"),
     }));
     await mobile.screenshot({ path: `smoke-${name}-walk.png` });
     await touch("touchEnd", []);
@@ -86,6 +121,7 @@ try {
     if (!(await mobile.evaluate(() => document.querySelector("#stick")?.classList.contains("active")) === false))
       errors.push(`${name}: joystick stayed active after release`);
     if (!state.stickActive) errors.push(`${name}: joystick never activated`);
+    if (!state.trot) errors.push(`${name}: full push did not show trot on the stick`);
     await phone.close();
     return state;
   };

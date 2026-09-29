@@ -120,6 +120,8 @@ const toggleHud = () => {
   else hud.classList.add("hidden");
 };
 input.on("KeyH", toggleHud);
+input.on("KeyC", () => follow.recenter());
+input.on("DoubleTap", () => follow.recenter());
 
 // Touch buttons mirror the keyboard shortcuts.
 const tap = (sel: string, fn: () => void) =>
@@ -129,17 +131,27 @@ const tap = (sel: string, fn: () => void) =>
   });
 tap("#btn-dither", () => setMode(modeIndex + 1));
 tap("#btn-help", toggleHud);
-tap("#hud", toggleHud);
 
 // The turn hint fades after a few seconds or once you start playing.
 const dismissHint = () => turnHint.classList.add("gone");
 setTimeout(dismissHint, 4000);
 addEventListener("pointerdown", dismissHint, { once: true });
 
+// Test hook: ?debug exposes live state to the smoke test.
+if (params.has("debug")) Object.assign(window, { __mossling: { creature, follow } });
+
 // ---- loop ----------------------------------------------------------------
 const clock = new THREE.Clock();
 const move = new THREE.Vector3();
 let walked = 0;
+
+// Movement is camera-relative, but the camera also drifts behind the creature.
+// Reading input against the live camera makes "hold right" spiral forever, so
+// while a direction is held we latch the camera yaw it started from. Your own
+// camera moves still count, and a clearly new direction re-latches.
+let inputYaw = follow.yaw;
+let latchAngle: number | null = null;
+const RELATCH = 0.75; // radians (~43°)
 
 function frame() {
   const dt = Math.min(clock.getDelta(), 1 / 20);
@@ -151,19 +163,34 @@ function frame() {
     resize();
   }
   const axis = input.axis();
-  const { forward, right } = follow.basis();
+  if (axis.x === 0 && axis.y === 0) {
+    latchAngle = null;
+    inputYaw = follow.yaw;
+  } else {
+    const angle = Math.atan2(axis.x, axis.y);
+    const turned = latchAngle === null ? Infinity : Math.abs(Math.atan2(Math.sin(angle - latchAngle), Math.cos(angle - latchAngle)));
+    if (turned > RELATCH) {
+      inputYaw = follow.yaw;
+      latchAngle = angle;
+    } else {
+      inputYaw += follow.manualYawDelta;
+    }
+  }
+  const { forward, right } = FollowCamera.basis(inputYaw);
   move.copy(forward).multiplyScalar(axis.y).addScaledVector(right, axis.x);
   creature.update(dt, t, { x: move.x, z: move.z, run: axis.run }, world.colliders);
 
-  // Let the controls card drift away once you're off exploring.
+  // Let the controls card drift away once you're off exploring (on a phone,
+  // as soon as you start moving, so it's never under your thumbs).
   walked += creature.speed * dt;
-  if (walked > 12 && !hud.dataset.faded) {
+  const touchMoving = document.body.classList.contains("touch") && (axis.x !== 0 || axis.y !== 0);
+  if ((walked > 12 || touchMoving) && !hud.dataset.faded) {
     hud.dataset.faded = "1";
     hud.classList.add("faded");
   }
 
   world.update(t, dt);
-  follow.update(dt, creature, input.consumeDrag(), performance.now() - input.lastDragTime);
+  follow.update(dt, creature, { ...input.consumeDrag(), turn: input.lookTurn() }, performance.now() - input.lastDragTime, world.colliders);
   dither.render(renderer, scene, follow.camera);
   requestAnimationFrame(frame);
 }

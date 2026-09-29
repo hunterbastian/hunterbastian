@@ -24,6 +24,7 @@ build runs from any folder or static host.
 | `W A S D` / arrows | wander (camera-relative)                     |
 | `Shift`          | trot                                           |
 | drag · scroll    | orbit the camera · zoom                        |
+| `Q` `E` · `C`    | turn the camera · swing it back behind you     |
 | `T`              | cycle dither: `palette` → `posterize` → `off`  |
 | `[` `]`          | pixel size down / up                           |
 | `H`              | hide the controls card                         |
@@ -32,8 +33,9 @@ build runs from any folder or static host.
 
 | Touch              | Action                                          |
 | ------------------ | ----------------------------------------------- |
-| left thumb         | floating joystick: wander, push to the edge to trot |
+| left thumb         | floating joystick: walk, push to the edge to trot (the knob turns orange) |
 | right thumb drag   | look around                                     |
+| double-tap right side | swing the camera back behind you             |
 | pinch              | zoom                                            |
 | ◐ / ?              | cycle dither · show or hide help                |
 
@@ -46,6 +48,14 @@ extra is rotated. Add `?rotate=0` to the URL to turn this off.
 Page zoom, bounce-scrolling and long-press menus are turned off, and the UI
 respects the notch and home-indicator safe areas, including when rotated. Use
 Safari → Share → *Add to Home Screen* to play full-screen.
+
+**How the controls feel.** Movement is relative to the camera. While you hold
+a direction, the direction is locked to where the camera was when you started,
+so holding "right" walks a straight line instead of spiralling as the camera
+drifts in behind you. Pick a clearly new direction and it re-locks. The camera
+only drifts behind the creature while it's walking away from you, so walking
+toward the camera never spins the view. It also pulls in rather than hiding
+behind a tree trunk.
 
 Stand still for a few seconds and the mossling looks around, sniffs the
 ground and eventually sits down.
@@ -118,5 +128,6 @@ npm run build && npm run smoke
 
 This serves the build in headless Chromium, walks and trots the creature around
 on a desktop viewport, then on an emulated iPhone held upright (checking the
-stage is rotated to landscape) and held sideways, using the touch joystick. It writes `smoke-*.png` screenshots and fails on any page error. It uses a
+stage is rotated to landscape) and held sideways, using the touch joystick. On desktop it also checks the control feel: holding a sideways key
+must walk a straight line, and walking toward the camera must not spin it. It writes `smoke-*.png` screenshots and fails on any page error. It uses a
 Playwright install from the project or the global one.
