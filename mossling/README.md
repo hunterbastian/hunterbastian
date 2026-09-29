@@ -1,0 +1,142 @@
+# Mossling
+
+A tiny, cozy 3D walking game set long, long ago. You're a mossling, a round
+little baby dinosaur with a mossy saddle, leafy back plates, a frill and a
+sprout on its head. You potter around a quiet prehistoric valley at golden
+hour. Nothing to fight and nothing to collect. You just walk around.
+
+The valley has tree ferns, cycads, tall monkey-puzzle conifers and a golden
+ginkgo. There's a pond ringed with horsetails and a nest of speckled eggs (one
+of them wobbles). A giant skeleton lies half-sunk in the moss, and its ribs are
+tall enough to walk under. Amber stones glow along the trails, and a volcano
+smokes on the horizon. Long-necked sauropods graze along the rim, pterosaurs
+glide overhead, and giant dragonflies buzz over the water.
+
+Built with **Three.js + TypeScript + Vite**.
+
+## Run it
+
+```bash
+cd mossling
+npm install
+npm run dev        # http://localhost:5173
+```
+
+`npm run build` writes a static site to `dist/`. It uses relative paths, so the
+build runs from any folder or static host.
+
+## Controls
+
+| Input            | Action                                         |
+| ---------------- | ---------------------------------------------- |
+| `W A S D` / arrows | wander (camera-relative)                     |
+| `Shift`          | trot                                           |
+| drag · scroll    | orbit the camera · zoom                        |
+| `Q` `E` · `C`    | turn the camera · swing it back behind you     |
+| `T`              | cycle dither: `palette` → `posterize` → `off`  |
+| `[` `]`          | pixel size down / up                           |
+| `H`              | hide the controls card                         |
+
+**On iPhone / iPad / touch screens:**
+
+| Touch              | Action                                          |
+| ------------------ | ----------------------------------------------- |
+| left thumb         | floating joystick: walk, push to the edge to trot (the knob turns orange) |
+| right thumb drag   | look around                                     |
+| double-tap right side | swing the camera back behind you             |
+| pinch              | zoom                                            |
+| ◐ / ?              | cycle dither · show or hide help                |
+
+**Mossling always plays in landscape.** Web pages can't lock orientation on iOS,
+so when a phone is held upright the whole game turns 90° and a hint asks you to
+tip the phone onto its left side. Touch input is remapped to match. If your
+phone's rotation lock is off, the browser goes landscape on its own and nothing
+extra is rotated. Add `?rotate=0` to the URL to turn this off.
+
+Page zoom, bounce-scrolling and long-press menus are turned off, and the UI
+respects the notch and home-indicator safe areas, including when rotated. Use
+Safari → Share → *Add to Home Screen* to play full-screen.
+
+**How the controls feel.** Movement is relative to the camera. While you hold
+a direction, the direction is locked to where the camera was when you started,
+so holding "right" walks a straight line instead of spiralling as the camera
+drifts in behind you. Pick a clearly new direction and it re-locks. The camera
+only drifts behind the creature while it's walking away from you, so walking
+toward the camera never spins the view. It also pulls in rather than hiding
+behind a tree trunk.
+
+Stand still for a few seconds and the mossling looks around, sniffs the
+ground and eventually sits down.
+
+URL options: `?dither=posterize` and `?px=3` (a fixed pixel size).
+
+## The look
+
+- **Real low resolution.** The canvas is rendered at about 250px tall and scaled
+  up with `image-rendering: pixelated`, so every pixel is a crisp square.
+- **Dithering is part of the art.** A post pass (`src/post.ts`) adds a 4×4
+  Bayer threshold to each pixel and snaps it to a hand-picked 32-colour palette
+  of warm, mossy colours (`src/palette.ts`). Fog, sky gradients, lantern glows,
+  path edges and shading all turn into visible stipple.
+- **PS1 touches.** Vertices snap to the low-res grid (a subtle wobble), shading
+  is flat, textures are tiny nearest-filtered canvases, shadows are blobs, and
+  the fog is thick and warm.
+
+## How it works
+
+```
+src/
+  main.ts              renderer, lights, fog, loop, resolution
+  post.ts              Bayer + palette dither pass
+  palette.ts           the 32-colour palette + named scene colours
+  ps1.ts               material patch: vertex snapping + wind sway
+  camera.ts            floaty third-person follow/orbit camera
+  input.ts             keyboard + drag + wheel
+  creature/
+    creature.ts        body build, locomotion, gait, idle life
+    ik.ts              two-bone IK + stable segment orientation
+  world/
+    terrain.ts         analytic heightfield, paths, pond, vertex colours
+    world.ts           ferns, cycads, conifers, ginkgo, nest, skeleton,
+                       amber stones, volcano, grass/flowers/horsetails, motes
+    fauna.ts           sauropod herd, pterosaurs, dragonflies
+    sky.ts             gradient dome, sun, drifting low-poly clouds
+    batch.ts           merges props into a few meshes with baked face colours
+    textures.ts        procedural pixel textures
+    noise.ts           seeded RNG + value noise
+```
+
+### Procedural walking
+
+The creature has no animation clips. Each frame:
+
+1. **Body.** WASD sets a target direction relative to the camera. The creature
+   turns toward it at a limited rate, eases its speed up and down, and slows
+   into an arc on sharp turns.
+2. **Feet.** Each paw has a rest spot under its hip, pushed forward by the
+   current velocity. When a planted paw drifts too far from that spot, it steps
+   there along an eased arc.
+3. **Gait.** Diagonal pairs (front-left with back-right) step together. A pair
+   can only lift while the other pair is planted, which gives a natural trot.
+   Step length, duration and height scale with speed.
+4. **IK.** Hip-to-paw legs are solved with analytic two-bone IK. Front wrists
+   bend forward and hind hocks bend back.
+5. **Secondary motion.** Body height, pitch and roll follow the planted feet, so
+   it tilts on slopes. It leans into turns and accelerations. The head, ears,
+   sprout and tail react to speed and turning, and it blinks, breathes, and
+   flicks its ears.
+
+Terrain height comes from the same triangles that are drawn
+(`groundAt()`), so paws land exactly on the ground.
+
+## Smoke test
+
+```bash
+npm run build && npm run smoke
+```
+
+This serves the build in headless Chromium, walks and trots the creature around
+on a desktop viewport, then on an emulated iPhone held upright (checking the
+stage is rotated to landscape) and held sideways, using the touch joystick. On desktop it also checks the control feel: holding a sideways key
+must walk a straight line, and walking toward the camera must not spin it. It writes `smoke-*.png` screenshots and fails on any page error. It uses a
+Playwright install from the project or the global one.
