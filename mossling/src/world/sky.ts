@@ -61,7 +61,8 @@ export function createSky() {
   const cloudGeo = new THREE.IcosahedronGeometry(1, 0);
   const cloudMat = new THREE.MeshLambertMaterial({
     color: 0xf6ecd2,
-    emissive: 0x6e6450,
+    // Strong self-light so undersides stay soft cream instead of rock-brown.
+    emissive: 0xb3a88a,
     flatShading: true,
     fog: false,
   });

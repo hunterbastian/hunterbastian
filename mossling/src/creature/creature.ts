@@ -7,8 +7,8 @@ import { groundAt, groundNormal, PLAY_RADIUS, WATER_LEVEL } from "../world/terra
 import type { Collider } from "../world/world";
 import { placeSegment, solveTwoBone } from "./ik";
 
-// The mossling: a round little four-legged forest creature with a mossy
-// saddle and a sprout on its head. Nothing here is keyframed — the body is
+// The mossling: a round little baby dinosaur with a mossy saddle, a row of
+// leafy back plates, a frill, and a sprout on its head. Nothing here is keyframed — the body is
 // pushed around by input and the legs figure out where to step on their own.
 
 export type MoveInput = {
@@ -124,8 +124,10 @@ export class Creature {
     const furMat = lambert({ vertexColors: true });
     const fur = new THREE.Color(COLORS.creatureFur);
     const belly = new THREE.Color(COLORS.creatureBelly);
+    const dorsal = new THREE.Color(0xc49e6c);
     const bellyTint = (n: THREE.Vector3, _c: THREE.Vector3, _b: THREE.Color, out: THREE.Color) => {
       if (n.y < -0.35) out.copy(belly);
+      else if (n.y > 0.6) out.lerp(dorsal, 0.6);
       else out.multiplyScalar(0.9 + n.y * 0.15);
     };
 
@@ -147,6 +149,17 @@ export class Creature {
     moss.add(stem, xf(-0.08, 0.3, -0.12, 0.1, 0, 0.2, 0.05, 0.14, 0.05), { color: 0xf2e6c4 });
     moss.add(new THREE.SphereGeometry(1, 7, 3, 0, Math.PI * 2, 0, Math.PI / 2), xf(-0.11, 0.43, -0.11, 0.1, 0, 0.25, 0.11, 0.08, 0.11), { color: 0xb95c3c });
     moss.add(new THREE.IcosahedronGeometry(1, 0), xf(-0.1, 0.515, -0.11, 0, 0, 0, 0.025, 0.02, 0.025), { color: 0xfff8e2, vary: 0 });
+    // Leafy back plates poking up through the moss, stegosaur style.
+    const plateGeo = new THREE.ConeGeometry(1, 1, 4, 1);
+    plateGeo.translate(0, 0.5, 0);
+    const plates = 7;
+    for (let i = 0; i < plates; i++) {
+      const k = i / (plates - 1);
+      const pz = 0.34 - k * 0.8;
+      const h = 0.1 + Math.sin(k * Math.PI) * 0.12;
+      const py = 0.3 + Math.sin(k * Math.PI) * 0.06 - (k > 0.8 ? (k - 0.8) * 0.5 : 0);
+      moss.add(plateGeo, xf((i % 2 ? 1 : -1) * 0.03, py, pz, 0, 0, (i % 2 ? 1 : -1) * 0.12, 0.018, h, 0.09), { color: i % 2 ? 0xa3a852 : 0xc4c173, vary: 0.1 });
+    }
     this.body.add(moss.build(lambert({ vertexColors: true })));
 
     // Head.
@@ -155,7 +168,11 @@ export class Creature {
     const head = new Batch();
     head.add(new THREE.IcosahedronGeometry(1, 1), xf(0, 0.06, 0.02, 0, 0, 0, 0.29, 0.26, 0.27), { color: fur, tint: bellyTint, lumpy: 0.04 });
     head.add(new THREE.IcosahedronGeometry(1, 1), xf(0, -0.04, 0.24, 0, 0, 0, 0.15, 0.12, 0.14), { color: belly });
-    head.add(new THREE.IcosahedronGeometry(1, 0), xf(0, 0.0, 0.37, 0, 0, 0, 0.055, 0.04, 0.035), { color: 0x3a3438, vary: 0 });
+    // A little beak, a nose horn and two brow nubs: a baby ceratopsian.
+    const cone = new THREE.ConeGeometry(1, 1, 5, 1);
+    head.add(cone, xf(0, -0.06, 0.39, Math.PI / 2 + 0.25, 0, 0, 0.07, 0.09, 0.05), { color: 0x5a4031, vary: 0 });
+    head.add(cone, xf(0, 0.08, 0.32, -0.35, 0, 0, 0.035, 0.1, 0.035), { color: 0xf2e6c4, vary: 0 });
+    for (const s of [-1, 1]) head.add(cone, xf(s * 0.1, 0.24, 0.1, -0.5, 0, -s * 0.3, 0.025, 0.07, 0.025), { color: 0xf2e6c4, vary: 0 });
     for (const s of [-1, 1]) head.add(new THREE.IcosahedronGeometry(1, 0), xf(s * 0.18, -0.04, 0.17, 0, 0, 0, 0.06, 0.04, 0.03), { color: 0xe6a9a0, vary: 0 });
     this.head.add(head.build(lambert({ vertexColors: true })));
 
@@ -175,12 +192,18 @@ export class Creature {
       this.eyes.push(eye);
     }
 
-    // Ears: soft cones with pink insides, on pivots so they can flick.
+    // Frill: a warm fan behind the head, with two lobes on pivots that flick
+    // like ears.
+    const frill = new Batch();
+    frill.add(new THREE.CircleGeometry(1, 7, 0, Math.PI), xf(0, 0.12, -0.1, -0.35, 0, 0, 0.26, 0.24, 1), { color: 0xdf8f55, vary: 0.12 });
+    frill.add(new THREE.CircleGeometry(1, 7, 0, Math.PI), xf(0, 0.13, -0.095, -0.35, 0, 0, 0.17, 0.15, 1), { color: 0xf2e6c4, vary: 0.05 });
+    const frillMesh = frill.build(lambert({ vertexColors: true, side: THREE.DoubleSide }));
+    this.head.add(frillMesh);
     const earBatch = new Batch();
     const earGeo = new THREE.ConeGeometry(1, 1, 5, 1);
     earGeo.translate(0, 0.5, 0);
-    earBatch.add(earGeo, xf(0, 0, 0, 0, 0, 0, 0.1, 0.26, 0.06), { color: fur });
-    earBatch.add(earGeo, xf(0, 0.02, 0.025, 0, 0, 0, 0.065, 0.19, 0.03), { color: 0xe6a9a0, vary: 0 });
+    earBatch.add(earGeo, xf(0, 0, 0, 0, 0, 0, 0.1, 0.24, 0.04), { color: 0xdf8f55 });
+    earBatch.add(earGeo, xf(0, 0.02, 0.02, 0, 0, 0, 0.06, 0.17, 0.02), { color: 0xf2e6c4, vary: 0 });
     const earMesh = earBatch.build(lambert({ vertexColors: true }));
     for (const s of [-1, 1]) {
       const pivot = new THREE.Group();
@@ -201,18 +224,27 @@ export class Creature {
     this.sprout.add(sproutBatch.build(lambert({ vertexColors: true })));
     this.head.add(this.sprout);
 
-    // Tail: a chain of shrinking puffs ending in a mossy tuft.
+    // Tail: a long taper that ends in a tiny spiky club.
     let parent: THREE.Object3D = this.body;
     const tailGeo = new THREE.IcosahedronGeometry(1, 0);
     const tailMat = lambert({ color: COLORS.creatureFur });
-    const tuftMat = lambert({ color: COLORS.creatureMoss });
-    for (let i = 0; i < 5; i++) {
+    const spikeMat = lambert({ color: 0xf2e6c4 });
+    const spikeGeo = new THREE.ConeGeometry(0.03, 0.14, 4, 1);
+    spikeGeo.translate(0, 0.07, 0);
+    for (let i = 0; i < 7; i++) {
       const seg = new THREE.Group();
-      seg.position.set(0, i === 0 ? 0.12 : 0, i === 0 ? -0.55 : -0.11);
-      const r = 0.1 - i * 0.008 + (i === 4 ? 0.05 : 0);
-      const puff = new THREE.Mesh(tailGeo, i === 4 ? tuftMat : tailMat);
-      puff.scale.set(r, r, r * 1.3);
+      seg.position.set(0, i === 0 ? 0.08 : 0, i === 0 ? -0.55 : -0.11);
+      const r = 0.11 - i * 0.012;
+      const puff = new THREE.Mesh(tailGeo, tailMat);
+      puff.scale.set(r, r * 0.9, r * 1.5);
       puff.position.z = -0.05;
+      if (i === 6)
+        for (const [sx, sz] of [[1, 0], [-1, 0], [1, -0.08], [-1, -0.08]] as const) {
+          const spike = new THREE.Mesh(spikeGeo, spikeMat);
+          spike.position.set(sx * 0.03, 0.02, sz - 0.04);
+          spike.rotation.set(-0.9, 0, -sx * 1.0);
+          seg.add(spike);
+        }
       seg.add(puff);
       parent.add(seg);
       this.tail.push(seg);
@@ -449,7 +481,7 @@ export class Creature {
     this.tail.forEach((seg, i) => {
       const k = i / this.tail.length;
       // Positive X lifts the tail: a perky upward curl that relaxes when running or sitting.
-      const curl = i === 0 ? 0.7 - this.gait * 0.5 - this.sit * 1.1 : 0.3 - this.gait * 0.22 - this.sit * 0.1;
+      const curl = i === 0 ? 0.22 - this.gait * 0.2 - this.sit * 0.55 : 0.03 - this.gait * 0.04 - this.sit * 0.04;
       seg.rotation.set(curl, Math.sin(t * wagSpeed - i * 0.7) * wag * (0.4 + k) - this.turnRate * 0.08, 0);
     });
 

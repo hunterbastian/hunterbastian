@@ -1,8 +1,16 @@
 # Mossling
 
-A tiny, cozy 3D walking game. You're a small four-legged forest creature with a
-mossy saddle and a sprout on its head, pottering around a quiet glen at golden
+A tiny, cozy 3D walking game set long, long ago. You're a mossling, a round
+little baby dinosaur with a mossy saddle, leafy back plates, a frill and a
+sprout on its head. You potter around a quiet prehistoric valley at golden
 hour. Nothing to fight and nothing to collect. You just walk around.
+
+The valley has tree ferns, cycads, tall monkey-puzzle conifers and a golden
+ginkgo. There's a pond ringed with horsetails and a nest of speckled eggs (one
+of them wobbles). A giant skeleton lies half-sunk in the moss, and its ribs are
+tall enough to walk under. Amber stones glow along the trails, and a volcano
+smokes on the horizon. Long-necked sauropods graze along the rim, pterosaurs
+glide overhead, and giant dragonflies buzz over the water.
 
 Built with **Three.js + TypeScript + Vite**.
 
@@ -89,8 +97,9 @@ src/
     ik.ts              two-bone IK + stable segment orientation
   world/
     terrain.ts         analytic heightfield, paths, pond, vertex colours
-    world.ts           trees, bushes, cottage, standing stones, lanterns,
-                       grass/flowers/reeds, motes, butterflies
+    world.ts           ferns, cycads, conifers, ginkgo, nest, skeleton,
+                       amber stones, volcano, grass/flowers/horsetails, motes
+    fauna.ts           sauropod herd, pterosaurs, dragonflies
     sky.ts             gradient dome, sun, drifting low-poly clouds
     batch.ts           merges props into a few meshes with baked face colours
     textures.ts        procedural pixel textures

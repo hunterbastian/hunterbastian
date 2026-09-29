@@ -5,7 +5,8 @@ import { Batch, xf, type FaceTint } from "./batch";
 import { mulberry32, valueNoise } from "./noise";
 import { createSky } from "./sky";
 import { createTerrain, groundAt, pathDistance, PLAY_RADIUS, POND, pondMask, WATER_LEVEL } from "./terrain";
-import { barkTexture, blobTexture, leafTexture, plankTexture, stoneTexture } from "./textures";
+import { createFauna, HERD_RADIUS } from "./fauna";
+import { barkTexture, blobTexture, leafTexture, stoneTexture } from "./textures";
 
 export type Collider = { x: number; z: number; r: number };
 
@@ -16,21 +17,35 @@ export type World = {
 };
 
 export const SPAWN = { x: 0, z: 13 };
-const COTTAGE = { x: -17, z: -13 };
-const STONES = { x: 1, z: -28 };
-const OLD_TREE = { x: -20, z: 14 };
+const NEST = { x: -17, z: -13 };
+const FOSSIL = { x: 1, z: -29 };
+const GINKGO = { x: -20, z: 14 };
 
 // Keep props out of the landmarks' personal space.
 const CLEARINGS = [
   { ...SPAWN, r: 4 },
-  { ...COTTAGE, r: 7 },
-  { ...STONES, r: 7.5 },
-  { ...OLD_TREE, r: 4.5 },
+  { ...NEST, r: 5 },
+  { ...FOSSIL, r: 8.5 },
+  { ...GINKGO, r: 4.5 },
 ];
 
 const mossTop: FaceTint = (n, _c, _b, out) => {
   if (n.y > 0.55) out.lerp(new THREE.Color(COLORS.creatureMoss), 0.75);
 };
+
+const sunlit: FaceTint = (n, _c, _b, out) => {
+  out.multiplyScalar(0.78 + Math.max(0, n.y) * 0.4);
+};
+
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
+
+/** Matrix for a +Y unit segment stretched from a to b with radius r. */
+function span(a: THREE.Vector3, b: THREE.Vector3, r: number): THREE.Matrix4 {
+  const d = new THREE.Vector3().subVectors(b, a);
+  const len = d.length();
+  const q = new THREE.Quaternion().setFromUnitVectors(Y_AXIS, d.divideScalar(len || 1));
+  return new THREE.Matrix4().compose(a, q, new THREE.Vector3(r, len, r));
+}
 
 export function createWorld(scene: THREE.Scene): World {
   const rand = mulberry32(7);
@@ -41,18 +56,18 @@ export function createWorld(scene: THREE.Scene): World {
   const sky = createSky();
   scene.add(sky.group);
   animated.push(sky.update);
+  animated.push(createFauna(scene));
 
   // ---- materials ---------------------------------------------------------
   const barkMat = lambert({ vertexColors: true, map: barkTexture() });
-  const leafMat = lambert({ vertexColors: true, map: leafTexture() });
+  // A little self-light so frond undersides read as deep green, not black.
+  const leafMat = lambert({ vertexColors: true, map: leafTexture(), emissive: 0x1e2812 });
   const stoneMat = lambert({ vertexColors: true, map: stoneTexture() });
-  const plankMat = lambert({ vertexColors: true, map: plankTexture() });
   const plainMat = lambert({ vertexColors: true });
 
   const bark = new Batch();
   const leaves = new Batch();
   const stones = new Batch();
-  const planks = new Batch();
   const plain = new Batch();
 
   const free = (x: number, z: number, r: number, allowRim = false) => {
@@ -64,138 +79,173 @@ export function createWorld(scene: THREE.Scene): World {
     return true;
   };
 
-  // ---- trees -------------------------------------------------------------
+  // ---- shared shapes -----------------------------------------------------
   const trunkGeo = new THREE.CylinderGeometry(0.7, 1, 1, 6, 1);
   trunkGeo.translate(0, 0.5, 0);
   const blobGeo = new THREE.IcosahedronGeometry(1, 0);
   const blobGeo1 = new THREE.IcosahedronGeometry(1, 1);
-  const coneGeo = new THREE.ConeGeometry(1, 1, 7, 1);
-  coneGeo.translate(0, 0.5, 0);
+  const rockGeo = new THREE.DodecahedronGeometry(1, 0);
+  const boneGeo = new THREE.CylinderGeometry(1, 1, 1, 5, 1);
+  boneGeo.translate(0, 0.5, 0);
+  // A frond is two blades: a stalk that widens as it rises, then a tip that droops.
+  const frondBase = new THREE.CylinderGeometry(1, 0.35, 1, 4, 1);
+  frondBase.translate(0, 0.5, 0);
+  const frondTip = new THREE.ConeGeometry(1, 1, 4, 1);
+  frondTip.translate(0, 0.5, 0);
 
-  const leafTints = [COLORS.leaf, COLORS.leafLight, 0x6b8a36, 0x4c6a2e];
-  const autumnTints = [0xf0b870, 0xdf8f55, 0xc4c173];
+  const m4 = () => new THREE.Matrix4();
+  function frond(batch: Batch, x: number, y: number, z: number, yaw: number, tilt: number, droop: number, len: number, width: number, color: number) {
+    const rot = m4().makeRotationY(yaw).multiply(m4().makeRotationX(tilt));
+    const l1 = len * 0.55;
+    batch.add(frondBase, m4().makeTranslation(x, y, z).multiply(rot).multiply(m4().makeScale(width, l1, width * 0.16)), { color, vary: 0.18, rand, tint: sunlit });
+    const tip = new THREE.Vector3(0, l1, 0).applyMatrix4(rot).add(new THREE.Vector3(x, y, z));
+    const rot2 = m4().makeRotationY(yaw).multiply(m4().makeRotationX(droop));
+    batch.add(frondTip, m4().makeTranslation(tip.x, tip.y, tip.z).multiply(rot2).multiply(m4().makeScale(width, len * 0.5, width * 0.14)), { color, vary: 0.18, rand, tint: sunlit });
+  }
 
-  function roundTree(x: number, z: number, scale: number) {
+  const ferns = [0x62743a, 0x4a6a2e, 0x80903f, 0x55742f];
+  const pick = <T,>(arr: readonly T[]) => arr[Math.floor(rand() * arr.length)];
+
+  // ---- flora -------------------------------------------------------------
+
+  /** Tree fern: a slim shaggy trunk under a parasol of arching fronds. */
+  function treeFern(x: number, z: number, scale: number) {
     const y = groundAt(x, z) - 0.2;
-    const h = (2.2 + rand() * 1.2) * scale;
-    const r = (0.28 + rand() * 0.1) * scale;
-    bark.add(trunkGeo, xf(x, y, z, 0, rand() * 6, (rand() - 0.5) * 0.08, r, h, r), { color: COLORS.bark, rand });
-    const autumn = rand() < 0.16;
-    const blobs = 3 + Math.floor(rand() * 3);
-    for (let i = 0; i < blobs; i++) {
-      const a = rand() * Math.PI * 2;
-      const d = i === 0 ? 0 : (0.7 + rand() * 0.5) * scale;
-      const br = (i === 0 ? 1.5 : 0.9 + rand() * 0.5) * scale;
-      const tint = autumn ? autumnTints[Math.floor(rand() * autumnTints.length)] : leafTints[Math.floor(rand() * leafTints.length)];
-      leaves.add(
-        i === 0 ? blobGeo1 : blobGeo,
-        xf(x + Math.cos(a) * d, y + h + (i === 0 ? 0.4 : rand() * 0.9) * scale, z + Math.sin(a) * d, rand(), rand() * 6, rand(), br, br * 0.85, br),
-        { color: tint, lumpy: 0.25, vary: 0.2, rand, tint: (n, _c, _b, out) => out.multiplyScalar(0.8 + Math.max(0, n.y) * 0.35) },
-      );
+    const h = (2.4 + rand() * 1.6) * scale;
+    const r = 0.22 * scale;
+    bark.add(trunkGeo, xf(x, y, z, (rand() - 0.5) * 0.12, rand() * 6, (rand() - 0.5) * 0.12, r, h, r), { color: 0x5a4031, vary: 0.3, rand });
+    const n = 8 + Math.floor(rand() * 3);
+    const color = pick(ferns);
+    for (let i = 0; i < n; i++) {
+      const yaw = (i / n) * Math.PI * 2 + rand() * 0.4;
+      frond(leaves, x, y + h, z, yaw, 0.9 + rand() * 0.35, 2.1 + rand() * 0.3, (1.9 + rand() * 0.6) * scale, 0.32 * scale, color);
     }
+    // A fresh fiddlehead or two uncurling in the middle.
+    leaves.add(blobGeo, xf(x, y + h + 0.1 * scale, z, 0, 0, 0, 0.25 * scale), { color: 0x80903f, rand });
     colliders.push({ x, z, r: r + 0.35 });
   }
 
-  function pineTree(x: number, z: number, scale: number) {
-    const y = groundAt(x, z) - 0.2;
-    const h = (1.2 + rand() * 0.5) * scale;
-    const r = 0.26 * scale;
-    bark.add(trunkGeo, xf(x, y, z, 0, rand() * 6, 0, r, h, r), { color: COLORS.bark, rand });
+  /** Cycad: a stout pineapple trunk with a stiff crown and sometimes a cone. */
+  function cycad(x: number, z: number, scale: number) {
+    const y = groundAt(x, z) - 0.15;
+    const h = (0.8 + rand() * 1.1) * scale;
+    const r = 0.42 * scale;
+    bark.add(trunkGeo, xf(x, y, z, 0, rand() * 6, 0, r, h, r), { color: 0x7b5a3e, vary: 0.4, lumpy: 0.06, rand });
+    const n = 11 + Math.floor(rand() * 4);
+    const color = rand() < 0.5 ? 0x33442a : 0x475a30;
+    for (let i = 0; i < n; i++) {
+      const yaw = (i / n) * Math.PI * 2 + rand() * 0.3;
+      frond(leaves, x, y + h, z, yaw, 0.55 + rand() * 0.4, 1.35 + rand() * 0.3, (1.5 + rand() * 0.5) * scale, 0.26 * scale, color);
+    }
+    if (rand() < 0.4) plain.add(blobGeo1, xf(x, y + h + 0.25 * scale, z, 0, rand(), 0, 0.28 * scale, 0.42 * scale, 0.28 * scale), { color: 0xdf8f55, lumpy: 0.04, rand });
+    colliders.push({ x, z, r: r + 0.3 });
+  }
+
+  /** Monkey-puzzle conifer: tall bare trunk, tiers of flat branch pads on top. */
+  function araucaria(x: number, z: number, scale: number) {
+    const y = groundAt(x, z) - 0.3;
+    const h = (6 + rand() * 3) * scale;
+    const r = 0.3 * scale;
+    bark.add(trunkGeo, xf(x, y, z, 0, rand() * 6, 0, r, h, r), { color: 0x6a4a34, rand });
     const tiers = 3 + Math.floor(rand() * 2);
-    for (let i = 0; i < tiers; i++) {
-      const k = 1 - i / (tiers + 0.5);
-      const w = (1.6 * k + 0.3) * scale;
-      leaves.add(coneGeo, xf(x, y + h + i * 1.05 * scale, z, 0, rand() * 6, 0, w, 1.7 * scale, w), {
-        color: rand() < 0.5 ? COLORS.pine : 0x2f4a2c,
-        vary: 0.18,
-        rand,
-        tint: (n, _c, _b, out) => out.multiplyScalar(0.8 + Math.max(0, n.y) * 0.4),
-      });
+    const color = rand() < 0.5 ? COLORS.pine : 0x243224;
+    for (let k = 0; k < tiers; k++) {
+      const ty = y + h - 1.8 * scale + k * 0.75 * scale;
+      const spread = (1.9 - k * 0.38) * scale;
+      const pads = 5 + (k === 0 ? 1 : 0);
+      for (let i = 0; i < pads; i++) {
+        const a = (i / pads) * Math.PI * 2 + k * 0.6 + rand() * 0.3;
+        const px = x + Math.cos(a) * spread * 0.6;
+        const pz = z + Math.sin(a) * spread * 0.6;
+        leaves.add(blobGeo, xf(px, ty, pz, 0, -a, 0, spread * 0.55, 0.28 * scale, 0.45 * scale), { color, vary: 0.2, lumpy: 0.1, rand, tint: sunlit });
+      }
     }
+    leaves.add(blobGeo, xf(x, y + h + 0.55 * scale, z, 0, rand(), 0, 0.7 * scale, 0.4 * scale, 0.7 * scale), { color, rand, tint: sunlit });
     colliders.push({ x, z, r: r + 0.35 });
   }
 
-  // The old blossom tree on the knoll — a landmark you can see from anywhere.
+  /** A low clump of ground ferns. */
+  function fernClump(x: number, z: number, s: number) {
+    const y = groundAt(x, z) - 0.05;
+    const n = 6 + Math.floor(rand() * 3);
+    const color = pick(ferns);
+    for (let i = 0; i < n; i++) {
+      frond(leaves, x, y, z, (i / n) * Math.PI * 2 + rand() * 0.5, 0.5 + rand() * 0.35, 1.7 + rand() * 0.3, (1.0 + rand() * 0.5) * s, 0.24 * s, color);
+    }
+  }
+
+  // The old ginkgo on the knoll: a golden landmark you can see from anywhere.
   {
-    const { x, z } = OLD_TREE;
+    const { x, z } = GINKGO;
     const y = groundAt(x, z) - 0.3;
     bark.add(trunkGeo, xf(x, y, z, 0, 0.4, 0.05, 0.9, 4.6, 0.9), { color: 0x5a4031, lumpy: 0.08, rand });
     for (const [a, len, tilt] of [[0.3, 3, 0.9], [2.4, 2.6, 0.8], [4.4, 2.8, 1.0]] as const) {
       bark.add(trunkGeo, xf(x + Math.cos(a) * 0.3, y + 3.6, z + Math.sin(a) * 0.3, Math.sin(a) * tilt, 0, -Math.cos(a) * tilt, 0.35, len, 0.35), { color: 0x5a4031, rand });
     }
-    const pinks = [0xe6a9a0, 0xc9747a, 0xf0c4b4, 0xdf9f98];
+    const golds = [0xf0b870, 0xe3cf9c, 0xc4c173, 0xdfae5a];
     for (let i = 0; i < 11; i++) {
       const a = rand() * Math.PI * 2;
       const d = i === 0 ? 0 : 1.5 + rand() * 2.2;
       const br = i === 0 ? 2.6 : 1.3 + rand() * 0.9;
       leaves.add(blobGeo1, xf(x + Math.cos(a) * d, y + 6.2 + rand() * 1.6 - d * 0.25, z + Math.sin(a) * d, rand(), rand() * 6, rand(), br, br * 0.8, br), {
-        color: pinks[i % pinks.length],
+        color: golds[i % golds.length],
         lumpy: 0.3,
         vary: 0.2,
         rand,
-        tint: (n, _c, _b, out) => out.multiplyScalar(0.78 + Math.max(0, n.y) * 0.35),
+        tint: sunlit,
       });
     }
     colliders.push({ x, z, r: 1.3 });
-    // Roots
     for (let i = 0; i < 5; i++) {
       const a = (i / 5) * Math.PI * 2 + 0.3;
       bark.add(trunkGeo, xf(x + Math.cos(a) * 0.8, y + 0.1, z + Math.sin(a) * 0.8, Math.sin(a) * 1.3, 0, -Math.cos(a) * 1.3, 0.25, 1.4, 0.25), { color: 0x5a4031, rand });
     }
+    // Fallen fan leaves around its roots.
+    for (let i = 0; i < 40; i++) {
+      const a = rand() * Math.PI * 2;
+      const d = 1.6 + rand() * 3.2;
+      const lx = x + Math.cos(a) * d;
+      const lz = z + Math.sin(a) * d;
+      plain.add(blobGeo, xf(lx, groundAt(lx, lz) + 0.02, lz, 0, rand() * 6, 0, 0.14, 0.02, 0.1), { color: golds[i % golds.length], vary: 0.2, rand });
+    }
   }
 
-  // Scatter trees: groves inside the glen, a thick wood around the rim.
-  for (let i = 0; i < 1500 && colliders.length < 140; i++) {
+  // Groves inside the valley, a tall conifer wood around the rim.
+  for (let i = 0; i < 1500 && colliders.length < 150; i++) {
     const x = (rand() - 0.5) * PLAY_RADIUS * 2;
     const z = (rand() - 0.5) * PLAY_RADIUS * 2;
-    if (valueNoise(x * 0.07 + 5, z * 0.07 - 2) < 0.48) continue;
+    if (valueNoise(x * 0.07 + 5, z * 0.07 - 2) < 0.46) continue;
     const scale = 0.8 + rand() * 0.6;
     if (!free(x, z, 1.4 * scale)) continue;
-    if (rand() < 0.65) roundTree(x, z, scale);
-    else pineTree(x, z, scale);
+    const roll = rand();
+    if (roll < 0.45) treeFern(x, z, scale);
+    else if (roll < 0.8) cycad(x, z, scale);
+    else araucaria(x, z, scale * 0.9);
   }
   for (let i = 0; i < 1400; i++) {
     const a = rand() * Math.PI * 2;
     const r = PLAY_RADIUS - 4 + rand() * 26;
     const x = Math.cos(a) * r;
     const z = Math.sin(a) * r;
-    const scale = 1 + rand() * 0.9;
+    const scale = 1 + rand() * 0.8;
+    // Leave a grassy lane through the rim wood where the long-necks walk.
+    if (Math.abs(r - HERD_RADIUS) < 6) continue;
     if (!free(x, z, 1.1 * scale, true)) continue;
-    if (rand() < 0.55) pineTree(x, z, scale * 1.15);
-    else roundTree(x, z, scale);
+    if (rand() < 0.7) araucaria(x, z, scale);
+    else treeFern(x, z, scale * 1.2);
   }
 
-  // Bushes: low lumpy clumps that soften the edges of paths and groves.
-  for (let i = 0; i < 400; i++) {
+  // Fern clumps soften the edges of trails and groves.
+  for (let i = 0; i < 500; i++) {
     const x = (rand() - 0.5) * PLAY_RADIUS * 2;
     const z = (rand() - 0.5) * PLAY_RADIUS * 2;
-    const s = 0.5 + rand() * 0.5;
-    if (!free(x, z, s)) continue;
-    if (valueNoise(x * 0.1 - 9, z * 0.1 + 4) < 0.45) continue;
-    const y = groundAt(x, z);
-    const tint = rand() < 0.2 ? 0x80903f : rand() < 0.5 ? COLORS.leaf : 0x4c6a2e;
-    for (let k = 0; k < 3; k++) {
-      const a = rand() * Math.PI * 2;
-      const r = s * (0.7 + rand() * 0.4);
-      leaves.add(blobGeo, xf(x + Math.cos(a) * s * 0.6, y + r * 0.4, z + Math.sin(a) * s * 0.6, rand(), rand() * 6, rand(), r, r * 0.75, r), {
-        color: tint,
-        lumpy: 0.2,
-        vary: 0.2,
-        rand,
-        tint: (n, _c, _b, out) => out.multiplyScalar(0.8 + Math.max(0, n.y) * 0.35),
-      });
-    }
-    // A few bushes carry berries or blossoms.
-    if (rand() < 0.35) {
-      const berry = rand() < 0.5 ? 0xb95c3c : 0xe6a9a0;
-      for (let k = 0; k < 5; k++)
-        plain.add(blobGeo, xf(x + (rand() - 0.5) * s * 1.6, y + s * (0.5 + rand() * 0.5), z + (rand() - 0.5) * s * 1.6, 0, 0, 0, 0.07), { color: berry, vary: 0 });
-    }
-    colliders.push({ x, z, r: s * 0.8 });
+    const s = 0.7 + rand() * 0.6;
+    if (!free(x, z, s * 0.6)) continue;
+    if (valueNoise(x * 0.1 - 9, z * 0.1 + 4) < 0.42) continue;
+    fernClump(x, z, s);
   }
 
-  // ---- rocks, stumps, logs, mushrooms -----------------------------------
-  const rockGeo = new THREE.DodecahedronGeometry(1, 0);
+  // ---- rocks, logs, mushrooms -------------------------------------------
   for (let i = 0; i < 70; i++) {
     const x = (rand() - 0.5) * PLAY_RADIUS * 2.1;
     const z = (rand() - 0.5) * PLAY_RADIUS * 2.1;
@@ -210,8 +260,6 @@ export function createWorld(scene: THREE.Scene): World {
     if (s > 0.6) colliders.push({ x, z, r: s * 0.9 });
   }
 
-  const stumpGeo = new THREE.CylinderGeometry(1, 1.15, 1, 7, 1);
-  stumpGeo.translate(0, 0.5, 0);
   const logGeo = new THREE.CylinderGeometry(1, 1, 1, 7, 1);
   const capGeo = new THREE.SphereGeometry(1, 7, 3, 0, Math.PI * 2, 0, Math.PI / 2);
   const stemGeo = new THREE.CylinderGeometry(0.5, 0.6, 1, 5, 1);
@@ -223,24 +271,18 @@ export function createWorld(scene: THREE.Scene): World {
     plain.add(capGeo, xf(x, y + 0.33 * s, z, (rand() - 0.5) * 0.3, rand() * 6, (rand() - 0.5) * 0.3, 0.3 * s, 0.22 * s, 0.3 * s), { color: cap, rand });
   }
 
-  for (let i = 0; i < 26; i++) {
+  // Fallen giant logs, mossy and sprouting fungi.
+  for (let i = 0; i < 16; i++) {
     const x = (rand() - 0.5) * PLAY_RADIUS * 1.9;
     const z = (rand() - 0.5) * PLAY_RADIUS * 1.9;
-    if (!free(x, z, 0.8)) continue;
+    if (!free(x, z, 1.2)) continue;
     const y = groundAt(x, z) - 0.1;
-    if (rand() < 0.55) {
-      const s = 0.4 + rand() * 0.3;
-      bark.add(stumpGeo, xf(x, y, z, 0, rand() * 6, 0, s, 0.5 + rand() * 0.3, s), { color: COLORS.bark, rand, tint: mossTop });
-      colliders.push({ x, z, r: s + 0.2 });
-      for (let k = 0; k < 3; k++) mushroom(x + (rand() - 0.5) * 1.4, z + (rand() - 0.5) * 1.4, 0.8 + rand() * 0.6, rand() < 0.6 ? 0xb95c3c : 0xdf8f55);
-    } else {
-      const len = 2 + rand() * 1.5;
-      const ry = rand() * Math.PI;
-      bark.add(logGeo, xf(x, y + 0.3, z, Math.PI / 2, 0, ry, 0.32, len, 0.32), { color: 0x7b5a3e, rand, tint: mossTop });
-      colliders.push({ x, z, r: 0.9 });
-    }
+    const len = 2.5 + rand() * 2;
+    const ry = rand() * Math.PI;
+    bark.add(logGeo, xf(x, y + 0.35, z, Math.PI / 2, 0, ry, 0.4, len, 0.4), { color: 0x7b5a3e, rand, tint: mossTop });
+    colliders.push({ x, z, r: 1.1 });
+    for (let k = 0; k < 3; k++) mushroom(x + (rand() - 0.5) * 1.6, z + (rand() - 0.5) * 1.6, 0.8 + rand() * 0.6, rand() < 0.6 ? 0xb95c3c : 0xdf8f55);
   }
-  // Mushroom rings in shady spots.
   for (let i = 0; i < 9; i++) {
     const cx = (rand() - 0.5) * PLAY_RADIUS * 1.7;
     const cz = (rand() - 0.5) * PLAY_RADIUS * 1.7;
@@ -252,142 +294,188 @@ export function createWorld(scene: THREE.Scene): World {
     }
   }
 
-  // ---- cottage -----------------------------------------------------------
-  const box = new THREE.BoxGeometry(1, 1, 1);
-  box.translate(0, 0.5, 0);
-  const prism = new THREE.CylinderGeometry(1, 1, 1, 3, 1);
-  prism.rotateZ(Math.PI / 2);
-  prism.rotateX(Math.PI / 6);
+  // ---- the nest ----------------------------------------------------------
+  // A ring of mud and twigs in the clearing, with a clutch of speckled eggs.
+  // One of them is thinking about hatching.
+  let wobbleEgg: THREE.Mesh | null = null;
   {
-    const { x, z } = COTTAGE;
-    const y = groundAt(x, z) - 0.1;
-    const rot = 0.5;
-    const cottage = new THREE.Group();
-    cottage.position.set(x, y, z);
-    cottage.rotation.y = rot;
-    const local = (m: THREE.Matrix4) => m.premultiply(new THREE.Matrix4().makeRotationY(rot)).premultiply(new THREE.Matrix4().makeTranslation(x, y, z));
-
-    stones.add(box, local(xf(0, -0.2, 0, 0, 0, 0, 5.2, 0.6, 4.2)), { color: 0x9b9785, rand });
-    planks.add(box, local(xf(0, 0.3, 0, 0, 0, 0, 4.6, 2.5, 3.6)), { color: 0xe0c89a, rand });
-    // Timber frame
-    for (const [px, pz] of [[-2.3, -1.8], [2.3, -1.8], [-2.3, 1.8], [2.3, 1.8]] as const)
-      plain.add(box, local(xf(px, 0.2, pz, 0, 0, 0, 0.3, 2.7, 0.3)), { color: 0x5a4031, rand });
-    // Roof: mossy thatch prism
-    plain.add(prism, local(xf(0, 3.35, 0, 0, 0, 0, 5.8, 2.1, 3.3)), {
-      color: 0x7f8c3a,
-      vary: 0.25,
-      rand,
-      tint: (n, _c, _b, out) => (n.y < -0.5 ? out.set(0x3f2d24) : out.multiplyScalar(0.85 + n.y * 0.3)),
+    const { x, z } = NEST;
+    const y = groundAt(x, z);
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      plain.add(blobGeo, xf(x + Math.cos(a) * 1.35, y + 0.15, z + Math.sin(a) * 1.35, rand(), -a, rand(), 0.55, 0.35, 0.4), { color: rand() < 0.5 ? 0x7b5a3e : 0x9e7b52, lumpy: 0.1, rand });
+    }
+    for (let i = 0; i < 14; i++) {
+      const a = rand() * Math.PI * 2;
+      const tw = new THREE.Vector3(x + Math.cos(a) * 1.5, y + 0.4, z + Math.sin(a) * 1.5);
+      const tw2 = tw.clone().add(new THREE.Vector3(Math.cos(a + 1.6) * 0.8, 0.1, Math.sin(a + 1.6) * 0.8));
+      plain.add(boneGeo, span(tw, tw2, 0.03), { color: 0x5a4031, rand });
+    }
+    plain.add(new THREE.CylinderGeometry(1, 1, 0.2, 9, 1), xf(x, y + 0.05, z, 0, 0, 0, 1.15, 1, 1.15), { color: 0xc49e6c, vary: 0.2, rand });
+    const eggGeo = new THREE.IcosahedronGeometry(1, 1);
+    const eggs: [number, number, number][] = [[0.35, 0.1, 0xf2e6c4], [-0.4, 0.25, 0xbcc8b4], [0.05, -0.45, 0xf2e6c4], [-0.1, 0.55, 0xe3cf9c]];
+    eggs.forEach(([ex, ez, color], i) => {
+      const egg = new THREE.Mesh(eggGeo, lambert({ color }));
+      egg.scale.set(0.3, 0.4, 0.3);
+      egg.position.set(x + ex, y + 0.45, z + ez);
+      egg.rotation.set((rand() - 0.5) * 0.4, rand() * 6, (rand() - 0.5) * 0.4);
+      // Speckles.
+      for (let k = 0; k < 6; k++) {
+        const dot = new THREE.Mesh(blobGeo, lambert({ color: 0x7b5a3e }));
+        const d = new THREE.Vector3(rand() - 0.5, rand() - 0.3, rand() - 0.5).normalize();
+        dot.position.copy(d);
+        dot.scale.setScalar(0.12);
+        egg.add(dot);
+      }
+      scene.add(egg);
+      if (i === 0) wobbleEgg = egg;
     });
-    // Chimney
-    stones.add(box, local(xf(1.4, 2.4, -0.7, 0, 0, 0, 0.7, 2.6, 0.7)), { color: 0x8a8a78, rand, tint: mossTop });
-    // Door + step
-    planks.add(box, local(xf(0.4, 0.3, 1.82, 0, 0, 0, 0.95, 1.7, 0.1)), { color: 0x7b5a3e, rand });
-    stones.add(box, local(xf(0.4, 0, 2.3, 0, 0, 0, 1.3, 0.2, 0.6)), { color: 0x9b9785, rand });
-    // Fence
-    for (let i = 0; i < 7; i++) {
-      const fx = -3.2 + i * 0.9;
-      plain.add(box, local(xf(fx, -0.1, 3.6, 0, 0, (rand() - 0.5) * 0.1, 0.16, 1.0, 0.16)), { color: 0x9e7b52, rand });
+    colliders.push({ x, z, r: 1.8 });
+    for (let i = 0; i < 6; i++) {
+      const a = rand() * Math.PI * 2;
+      fernClump(x + Math.cos(a) * 3.2, z + Math.sin(a) * 3.2, 0.8 + rand() * 0.4);
     }
-    plain.add(box, local(xf(-0.5, 0.55, 3.6, 0, 0, 0, 5.6, 0.1, 0.08)), { color: 0x9e7b52, rand });
+  }
+  animated.push((t) => {
+    if (!wobbleEgg) return;
+    // A little wobble every few seconds.
+    const k = (t % 5.5) / 5.5;
+    wobbleEgg.rotation.z = k > 0.85 ? Math.sin(t * 28) * 0.18 * Math.sin(((k - 0.85) / 0.15) * Math.PI) : 0;
+  });
 
-    // Warm windows glow from inside.
-    const windowMat = new THREE.MeshBasicMaterial({ color: 0xffc46b, fog: false });
-    for (const [wx, wz, wr] of [[-1.3, 1.83, 0], [2.33, 0, Math.PI / 2]] as const) {
-      const win = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.7), windowMat);
-      win.position.set(wx, 1.4, wz);
-      win.rotation.y = wr;
-      cottage.add(win);
+  // ---- the old skeleton -------------------------------------------------
+  // A long-necked giant, half sunk into the moss. The ribs arch high enough to
+  // walk through; only their feet are solid.
+  {
+    const { x: fx, z: fz } = FOSSIL;
+    const bone = 0xf2e6c4;
+    const boneOld = 0xe3cf9c;
+    const n = 7;
+    const ribX = (i: number) => fx - 3.6 + i * 1.25;
+    let prevTop: THREE.Vector3 | null = null;
+    for (let i = 0; i < n; i++) {
+      const bx = ribX(i);
+      const R = 1.1 + 1.6 * Math.sin((Math.PI * (i + 0.8)) / (n + 0.6));
+      const lean = (i - n / 2) * 0.04;
+      const base = groundAt(bx, fz) - 0.2;
+      const pts: THREE.Vector3[] = [];
+      for (let k = 0; k <= 6; k++) {
+        const phi = (k / 6) * Math.PI;
+        pts.push(new THREE.Vector3(bx + Math.sin(phi) * lean * R, base + Math.sin(phi) * R * 1.3, fz + Math.cos(phi) * R));
+      }
+      for (let k = 0; k < 6; k++) plain.add(boneGeo, span(pts[k], pts[k + 1], 0.22 - Math.abs(k - 3) * 0.02), { color: bone, vary: 0.12, rand, tint: mossTop });
+      colliders.push({ x: bx, z: fz + R, r: 0.35 }, { x: bx, z: fz - R, r: 0.35 });
+      // Vertebra on top, joined to the one before.
+      const top = pts[3].clone().add(new THREE.Vector3(0, 0.15, 0));
+      plain.add(blobGeo, xf(top.x, top.y, top.z, rand(), 0, rand(), 0.42, 0.34, 0.36), { color: bone, rand, tint: mossTop });
+      if (prevTop) plain.add(boneGeo, span(prevTop, top, 0.2), { color: boneOld, rand, tint: mossTop });
+      prevTop = top;
     }
-    scene.add(cottage);
-    const doorLight = new THREE.PointLight(0xffb35c, 6, 9, 1.6);
-    doorLight.position.set(x + Math.sin(rot) * 3 + 0.4, y + 2, z + Math.cos(rot) * 3);
-    scene.add(doorLight);
-    colliders.push({ x, z, r: 2.4 }, { x: x - 1.6, z: z + 0.9, r: 1.6 }, { x: x + 1.6, z: z - 0.9, r: 1.6 });
+    // Neck bones sweeping down to a skull resting in the moss.
+    const neckPts: THREE.Vector3[] = [];
+    for (let k = 0; k <= 6; k++) {
+      const nx = ribX(0) - 0.9 - k * 1.0;
+      const nz = fz + Math.sin(k * 0.5) * 1.4;
+      neckPts.push(new THREE.Vector3(nx, groundAt(nx, nz) + Math.max(0.2, 2.9 - k * 0.55), nz));
+    }
+    if (prevTop) neckPts.unshift(new THREE.Vector3(ribX(0), groundAt(ribX(0), fz) + 2.9, fz));
+    for (let k = 0; k < neckPts.length - 1; k++) {
+      plain.add(blobGeo, xf(neckPts[k].x, neckPts[k].y, neckPts[k].z, rand(), 0, rand(), 0.34, 0.28, 0.3), { color: bone, rand, tint: mossTop });
+      plain.add(boneGeo, span(neckPts[k], neckPts[k + 1], 0.16), { color: boneOld, rand, tint: mossTop });
+    }
+    const sk = neckPts[neckPts.length - 1];
+    const skullY = groundAt(sk.x - 0.6, sk.z) + 0.35;
+    plain.add(blobGeo1, xf(sk.x - 0.6, skullY + 0.1, sk.z, 0, 0.3, 0.2, 1.1, 0.7, 0.75), { color: bone, lumpy: 0.08, rand, tint: mossTop });
+    plain.add(blobGeo, xf(sk.x - 1.6, skullY - 0.1, sk.z + 0.3, 0, 0.3, 0.1, 0.85, 0.25, 0.5), { color: boneOld, rand, tint: mossTop });
+    plain.add(blobGeo, xf(sk.x - 0.4, skullY + 0.3, sk.z + 0.62, 0, 0, 0, 0.2, 0.17, 0.1), { color: 0x2c2830, vary: 0, rand });
+    colliders.push({ x: sk.x - 0.7, z: sk.z, r: 0.8 });
+    // Tail vertebrae trailing off the other end, disappearing into the ground.
+    let prev = prevTop!;
+    for (let k = 1; k <= 7; k++) {
+      const tx = ribX(n - 1) + k * 0.95;
+      const tz = fz - Math.sin(k * 0.45) * 1.2;
+      const p = new THREE.Vector3(tx, groundAt(tx, tz) + Math.max(0.05, 2.6 - k * 0.42), tz);
+      plain.add(boneGeo, span(prev, p, 0.18 - k * 0.015), { color: boneOld, rand, tint: mossTop });
+      plain.add(blobGeo, xf(p.x, p.y, p.z, rand(), 0, rand(), 0.34 - k * 0.025, 0.28 - k * 0.02, 0.3 - k * 0.025), { color: bone, rand, tint: mossTop });
+      prev = p;
+    }
+  }
 
-    // Chimney smoke: chunky puffs that rise, swell, and fade.
-    const smokeMat = ps1(new THREE.MeshLambertMaterial({ color: 0xe8e0c8, flatShading: true, transparent: true, depthWrite: false }));
-    const chimney = new THREE.Vector3(1.4, 5.2, -0.7).applyAxisAngle(new THREE.Vector3(0, 1, 0), rot).add(new THREE.Vector3(x, y, z));
-    const puffs = Array.from({ length: 7 }, (_, i) => {
-      const m = new THREE.Mesh(blobGeo, smokeMat.clone());
-      m.userData.offset = i / 7;
-      scene.add(m);
-      return m;
+  // ---- amber stones along the trails ------------------------------------
+  // Mossy rocks with a lump of glowing amber on top: the valley's lanterns.
+  const blobTex = blobTexture();
+  const glowMat = new THREE.SpriteMaterial({ map: blobTex, color: 0xffb050, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.45 });
+  const amberSpots: [number, number][] = [[2.2, 9], [-5.8, 1.5], [-13.5, -5], [7.8, 0], [4.2, -12], [3.4, -21.5], [-21.5, 3], [16, -17]];
+  const glows: THREE.Sprite[] = [];
+  const amberMat = new THREE.MeshBasicMaterial({ color: 0xf0b870 });
+  for (const [lx, lz] of amberSpots) {
+    const y = groundAt(lx, lz);
+    const s = 0.5 + rand() * 0.15;
+    stones.add(rockGeo, xf(lx, y + s * 0.3, lz, rand(), rand() * 6, rand(), s * 1.2, s * 0.8, s), { color: 0x8a8a78, lumpy: 0.2, rand, tint: mossTop });
+    const amber = new THREE.Mesh(new THREE.OctahedronGeometry(1, 0), amberMat);
+    amber.scale.set(0.2, 0.32, 0.2);
+    amber.position.set(lx, y + s * 0.9 + 0.2, lz);
+    amber.rotation.set(0.2, rand() * 6, 0.15);
+    scene.add(amber);
+    const sprite = new THREE.Sprite(glowMat.clone());
+    sprite.position.copy(amber.position);
+    sprite.scale.setScalar(1.6);
+    sprite.userData.phase = rand() * 10;
+    scene.add(sprite);
+    glows.push(sprite);
+    colliders.push({ x: lx, z: lz, r: 0.55 });
+  }
+  animated.push((t) => {
+    for (const g of glows) (g.material as THREE.SpriteMaterial).opacity = 0.38 + Math.sin(t * 1.3 + g.userData.phase) * 0.08;
+  });
+
+  // ---- the volcano -------------------------------------------------------
+  // Far off beyond the rim: a hazy cone with a glowing crater and a slow plume.
+  {
+    const vx = 70;
+    const vz = -140;
+    const cone = new THREE.CylinderGeometry(9, 62, 95, 10, 4);
+    cone.translate(0, 47.5 - 10, 0);
+    // Fade from fog at the foot to a dusky violet-grey at the summit.
+    const fog = new THREE.Color(COLORS.fog);
+    const peak = new THREE.Color(0x76637e);
+    const pos = cone.attributes.position as THREE.BufferAttribute;
+    const col = new Float32Array(pos.count * 3);
+    for (let i = 0; i < pos.count; i++) {
+      const k = THREE.MathUtils.clamp((pos.getY(i) + 10) / 95, 0, 1);
+      const c = fog.clone().lerp(peak, Math.pow(k, 0.7) * 0.8);
+      const j = 1 + (Math.sin(i * 12.9898) * 0.5) * 0.06;
+      col.set([c.r * j, c.g * j, c.b * j], i * 3);
+    }
+    cone.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    const volcano = new THREE.Mesh(cone, new THREE.MeshBasicMaterial({ vertexColors: true, fog: false }));
+    volcano.position.set(vx, 0, vz);
+    scene.add(volcano);
+    const crater = new THREE.Mesh(new THREE.CylinderGeometry(8.5, 9, 2, 10), new THREE.MeshBasicMaterial({ color: 0xdf8f55, fog: false }));
+    crater.position.set(vx, 85.5, vz);
+    scene.add(crater);
+    const craterGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: blobTex, color: 0xf0a060, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, opacity: 0.6 }));
+    craterGlow.position.set(vx, 90, vz);
+    craterGlow.scale.setScalar(40);
+    scene.add(craterGlow);
+    const plumeMat = new THREE.MeshBasicMaterial({ color: 0xb9b4a4, transparent: true, depthWrite: false, fog: false });
+    const puffs = Array.from({ length: 10 }, (_, i) => {
+      const p = new THREE.Mesh(blobGeo1, plumeMat.clone());
+      p.userData.offset = i / 10;
+      scene.add(p);
+      return p;
     });
     animated.push((t) => {
+      craterGlow.material.opacity = 0.5 + Math.sin(t * 0.7) * 0.1;
       for (const p of puffs) {
-        const k = (t * 0.12 + p.userData.offset) % 1;
-        p.position.set(chimney.x + Math.sin(t * 0.6 + k * 5) * 0.4 + k * 1.6, chimney.y + k * 5, chimney.z + k * 0.8);
-        p.scale.setScalar(0.25 + k * 0.9);
-        p.rotation.set(k * 3, k * 2, 0);
-        (p.material as THREE.MeshLambertMaterial).opacity = Math.min(1, k * 6) * (1 - k) * 0.85;
+        const k = (t * 0.02 + p.userData.offset) % 1;
+        p.position.set(vx + k * 40 + Math.sin(t * 0.2 + k * 6) * 4, 92 + k * 70, vz + k * 10);
+        p.scale.setScalar(6 + k * 22);
+        p.rotation.set(k * 2, k * 3, 0);
+        (p.material as THREE.MeshBasicMaterial).opacity = Math.min(1, k * 8) * (1 - k) * 0.7;
       }
     });
   }
-
-  // ---- standing stones ---------------------------------------------------
-  {
-    const { x, z } = STONES;
-    const n = 8;
-    for (let i = 0; i < n; i++) {
-      const a = (i / n) * Math.PI * 2;
-      if (i === 2) continue; // a gap where the path comes in
-      const sx = x + Math.cos(a) * 5;
-      const sz = z + Math.sin(a) * 5;
-      const h = 2 + rand() * 1.4;
-      stones.add(box, xf(sx, groundAt(sx, sz) - 0.3, sz, (rand() - 0.5) * 0.15, -a, (rand() - 0.5) * 0.15, 0.9, h, 0.6), {
-        color: 0x8f8d7c,
-        lumpy: 0.1,
-        rand,
-        tint: mossTop,
-      });
-      colliders.push({ x: sx, z: sz, r: 0.7 });
-    }
-    // Central altar with a little glowing crystal.
-    const ay = groundAt(x, z);
-    stones.add(box, xf(x, ay - 0.2, z, 0, 0.3, 0, 1.6, 0.8, 1.1), { color: 0x9b9785, rand, tint: mossTop });
-    colliders.push({ x, z, r: 1.1 });
-    const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.28, 0), new THREE.MeshBasicMaterial({ color: 0xc8f0d8, fog: false }));
-    crystal.position.set(x, ay + 1.05, z);
-    scene.add(crystal);
-    const glow = new THREE.PointLight(0x9fe0c0, 5, 10, 1.5);
-    glow.position.set(x, ay + 1.5, z);
-    scene.add(glow);
-    animated.push((t) => {
-      crystal.rotation.y = t * 0.8;
-      crystal.position.y = ay + 1.05 + Math.sin(t * 1.6) * 0.08;
-      glow.intensity = 4.5 + Math.sin(t * 2.1) * 1;
-    });
-  }
-
-  // ---- lanterns along the paths -----------------------------------------
-  const blobTex = blobTexture();
-  const glowMat = new THREE.SpriteMaterial({ map: blobTex, color: 0xffc46b, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.55 });
-  const lanternSpots: [number, number][] = [[2.2, 9], [-5.8, 1.5], [-13.5, -5], [7.8, 0], [4.2, -12], [3.4, -21.5], [-21.5, 3]];
-  const flames: THREE.Sprite[] = [];
-  for (const [lx, lz] of lanternSpots) {
-    const y = groundAt(lx, lz);
-    plain.add(box, xf(lx, y - 0.2, lz, 0, 0.3, 0, 0.14, 1.55, 0.14), { color: 0x5a4031, rand });
-    plain.add(box, xf(lx, y + 1.35, lz, 0, 0.3, 0, 0.36, 0.08, 0.36), { color: 0x3f2d24, rand });
-    plain.add(box, xf(lx, y + 1.7, lz, 0, 0.3, 0, 0.4, 0.08, 0.4), { color: 0x3f2d24, rand });
-    const core = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.28, 0.24), new THREE.MeshBasicMaterial({ color: 0xffd08a }));
-    core.position.set(lx, y + 1.57, lz);
-    core.rotation.y = 0.3;
-    scene.add(core);
-    const sprite = new THREE.Sprite(glowMat.clone());
-    sprite.position.set(lx, y + 1.57, lz);
-    sprite.scale.setScalar(1.8);
-    sprite.userData.phase = rand() * 10;
-    scene.add(sprite);
-    flames.push(sprite);
-    colliders.push({ x: lx, z: lz, r: 0.3 });
-  }
-  animated.push((t) => {
-    for (const f of flames) {
-      const flick = 0.5 + Math.sin(t * 7 + f.userData.phase) * 0.06 + Math.sin(t * 13 + f.userData.phase) * 0.04;
-      (f.material as THREE.SpriteMaterial).opacity = flick;
-    }
-  });
 
   // ---- pond --------------------------------------------------------------
   {
@@ -424,9 +512,7 @@ export function createWorld(scene: THREE.Scene): World {
   const flowerGeo = flowerGeometry();
   const flowerMat = lambert({ vertexColors: true }, { wind: 0.3 });
   const flowers = new THREE.InstancedMesh(flowerGeo, flowerMat, 900);
-  const reedGeo = new THREE.CylinderGeometry(0.03, 0.05, 1, 3, 1);
-  reedGeo.translate(0, 0.5, 0);
-  const reeds = new THREE.InstancedMesh(reedGeo, lambert({ color: 0x80903f }, { wind: 0.12 }), 160);
+  const reeds = new THREE.InstancedMesh(horsetailGeometry(), lambert({ vertexColors: true }, { wind: 0.12 }), 180);
 
   const m = new THREE.Matrix4();
   const c = new THREE.Color();
@@ -470,13 +556,14 @@ export function createWorld(scene: THREE.Scene): World {
     const y = groundAt(x, z);
     if (y > WATER_LEVEL + 0.3 || y < WATER_LEVEL - 0.5) continue;
     if (pathDistance(x, z) < 1.5) continue;
-    const h = 0.8 + rand() * 0.9;
+    const h = 1.1 + rand() * 1.1;
     m.compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler((rand() - 0.5) * 0.2, 0, (rand() - 0.5) * 0.2)), new THREE.Vector3(1, h, 1));
     reeds.setMatrixAt(ri++, m);
   }
   grass.count = gi;
   flowers.count = fi;
   reeds.count = ri;
+  for (let i = 0; i < ri; i++) reeds.setColorAt(i, c.set(rand() < 0.5 ? 0xffffff : 0xd9dcc4));
   for (const im of [grass, flowers, reeds]) {
     im.instanceMatrix.needsUpdate = true;
     if (im.instanceColor) im.instanceColor.needsUpdate = true;
@@ -510,41 +597,8 @@ export function createWorld(scene: THREE.Scene): World {
     moteGeo.attributes.position.needsUpdate = true;
   });
 
-  // ---- butterflies -------------------------------------------------------
-  const wingGeo = new THREE.PlaneGeometry(0.22, 0.16);
-  wingGeo.translate(0.11, 0, 0);
-  wingGeo.rotateX(-Math.PI / 2);
-  const butterflyColors = [0xf2e6c4, 0xf0b870, 0xe6a9a0, 0xc9a0d0];
-  const butterflies = Array.from({ length: 10 }, (_, i) => {
-    const g = new THREE.Group();
-    const mat = new THREE.MeshLambertMaterial({ color: butterflyColors[i % butterflyColors.length], side: THREE.DoubleSide });
-    const l = new THREE.Mesh(wingGeo, mat);
-    const r = new THREE.Mesh(wingGeo, mat);
-    r.scale.x = -1;
-    g.add(l, r);
-    g.userData = { l, r, cx: (rand() - 0.5) * 50, cz: (rand() - 0.5) * 50, p: rand() * 100, rad: 2 + rand() * 4 };
-    scene.add(g);
-    return g;
-  });
-  animated.push((t) => {
-    for (const b of butterflies) {
-      const u = b.userData;
-      const k = t * 0.35 + u.p;
-      const x = u.cx + Math.sin(k) * u.rad + Math.sin(k * 2.3) * 0.8;
-      const z = u.cz + Math.cos(k * 0.8) * u.rad;
-      const y = groundAt(x, z) + 0.8 + Math.sin(k * 3.1) * 0.35 + Math.abs(Math.sin(t * 9 + u.p)) * 0.1;
-      const dx = x - b.position.x;
-      const dz = z - b.position.z;
-      b.position.set(x, y, z);
-      if (dx * dx + dz * dz > 1e-6) b.rotation.y = Math.atan2(dx, dz);
-      const flap = Math.sin(t * 18 + u.p) * 1.1;
-      u.l.rotation.z = flap;
-      u.r.rotation.z = -flap;
-    }
-  });
-
   // ---- commit batches ----------------------------------------------------
-  scene.add(bark.build(barkMat), leaves.build(leafMat), stones.build(stoneMat), planks.build(plankMat), plain.build(plainMat));
+  scene.add(bark.build(barkMat), leaves.build(leafMat), stones.build(stoneMat), plain.build(plainMat));
 
   return {
     colliders,
@@ -579,6 +633,19 @@ function flowerGeometry(): THREE.BufferGeometry {
   b.add(stem, xf(0, 0, 0, 0, 0, 0, 1, 0.34, 1), { color: 0x9aa068, vary: 0 });
   b.add(new THREE.IcosahedronGeometry(0.08, 0), xf(0, 0.36, 0, 0, 0, 0, 1, 0.6, 1), { color: 0xffffff, vary: 0.1 });
   b.add(new THREE.IcosahedronGeometry(0.03, 0), xf(0, 0.4, 0), { color: 0xf0b870, vary: 0 });
+  return b.build(new THREE.MeshBasicMaterial()).geometry;
+}
+
+/** Horsetail: a jointed green stalk with dark rings and a little cone on top. */
+function horsetailGeometry(): THREE.BufferGeometry {
+  const b = new Batch();
+  const stalk = new THREE.CylinderGeometry(0.035, 0.05, 1, 5, 1);
+  stalk.translate(0, 0.5, 0);
+  b.add(stalk, new THREE.Matrix4(), { color: 0x80903f, vary: 0 });
+  const ring = new THREE.CylinderGeometry(0.06, 0.06, 0.03, 5, 1);
+  for (const y of [0.25, 0.48, 0.7]) b.add(ring, xf(0, y, 0), { color: 0x33442a, vary: 0 });
+  const cone = new THREE.ConeGeometry(0.05, 0.14, 5, 1);
+  b.add(cone, xf(0, 1.05, 0), { color: 0x9e7b52, vary: 0 });
   return b.build(new THREE.MeshBasicMaterial()).geometry;
 }
 
