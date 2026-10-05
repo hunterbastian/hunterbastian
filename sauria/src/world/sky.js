@@ -35,7 +35,7 @@ const MOON_RADIUS = 0.036;
 // Key light intensity by elevation (sine of altitude). The low sun stays
 // strong enough for a proper golden hour instead of fading out with the sky.
 const SUN_INTENSITY = [[-0.04, 0], [0.0, 0.35], [0.05, 1.0], [0.12, 1.65], [0.25, 2.3], [0.45, 2.75], [0.85, 2.95]];
-const MOON_INTENSITY = [[-0.05, 0], [0.0, 0.12], [0.1, 0.5], [0.3, 0.85], [0.7, 0.95]];
+const MOON_INTENSITY = [[-0.05, 0], [0.0, 0.18], [0.1, 0.75], [0.3, 1.3], [0.7, 1.45]];
 const MOON_LIGHT = new THREE.Color("#9db3e2"); // cool blue moonlight
 const MOON_DISC = new THREE.Color("#eef2fa");
 const MOON_HALO = new THREE.Color("#7f95c4");
@@ -59,10 +59,10 @@ const SHADOW_DEPTH = 340; // near..far range of the shadow camera
 // fraction of viewDistance. `glow` is the warm band hugging the horizon around
 // the sun; `hemi*` drive the HemisphereLight; `cloud*` shade the clouds.
 const RAW_KEYS = [
-  { p: 0.0, zenith: "#04070f", horizon: "#121c30", glow: "#1b2540", glowAmt: 0, hemiSky: "#3a4f78", hemiGround: "#10141c", hemi: 1.5, cloudLit: "#161d2e", cloudDark: "#06080f", near: 0.04, far: 0.72 },
-  { p: 0.17, zenith: "#050812", horizon: "#141e33", glow: "#1d2744", glowAmt: 0, hemiSky: "#3a4f78", hemiGround: "#10141c", hemi: 1.45, cloudLit: "#171e2f", cloudDark: "#070910", near: 0.04, far: 0.7 },
-  { p: 0.21, zenith: "#0c1328", horizon: "#2a2c48", glow: "#6a4a6a", glowAmt: 0.35, hemiSky: "#424e74", hemiGround: "#141419", hemi: 1.3, cloudLit: "#34344f", cloudDark: "#10131f", near: 0.02, far: 0.6 },
-  { p: 0.235, zenith: "#1f2c55", horizon: "#806a7c", glow: "#d98a78", glowAmt: 0.7, hemiSky: "#6c6e8c", hemiGround: "#2a2420", hemi: 1.05, cloudLit: "#b48092", cloudDark: "#3c3a55", near: 0.0, far: 0.46 },
+  { p: 0.0, zenith: "#04070f", horizon: "#121c30", glow: "#1b2540", glowAmt: 0, hemiSky: "#3a4f78", hemiGround: "#10141c", hemi: 2.2, cloudLit: "#161d2e", cloudDark: "#06080f", near: 0.04, far: 0.72 },
+  { p: 0.17, zenith: "#050812", horizon: "#141e33", glow: "#1d2744", glowAmt: 0, hemiSky: "#3a4f78", hemiGround: "#10141c", hemi: 2.1, cloudLit: "#171e2f", cloudDark: "#070910", near: 0.04, far: 0.7 },
+  { p: 0.21, zenith: "#0c1328", horizon: "#2a2c48", glow: "#6a4a6a", glowAmt: 0.35, hemiSky: "#424e74", hemiGround: "#141419", hemi: 1.8, cloudLit: "#34344f", cloudDark: "#10131f", near: 0.02, far: 0.6 },
+  { p: 0.235, zenith: "#1f2c55", horizon: "#806a7c", glow: "#d98a78", glowAmt: 0.7, hemiSky: "#6c6e8c", hemiGround: "#2a2420", hemi: 1.3, cloudLit: "#b48092", cloudDark: "#3c3a55", near: 0.0, far: 0.46 },
   { p: 0.255, zenith: "#3d5a8e", horizon: "#d6a289", glow: "#ffa060", glowAmt: 1.0, hemiSky: "#b0a4a8", hemiGround: "#4a3a2c", hemi: 1.15, cloudLit: "#ffc29a", cloudDark: "#6a5a70", near: 0.0, far: 0.42 },
   { p: 0.285, zenith: "#5884bb", horizon: "#e8c9a6", glow: "#ffc68a", glowAmt: 0.6, hemiSky: "#c4c8cc", hemiGround: "#5a4a36", hemi: 1.3, cloudLit: "#fff0dc", cloudDark: "#8e8e9e", near: 0.02, far: 0.52 },
   { p: 0.34, zenith: "#5791cb", horizon: "#cfd9d6", glow: "#ffe6c0", glowAmt: 0.2, hemiSky: "#b6cce0", hemiGround: "#5c5440", hemi: 1.45, cloudLit: "#ffffff", cloudDark: "#a3b0c2", near: 0.07, far: 0.78 },
@@ -72,9 +72,9 @@ const RAW_KEYS = [
   { p: 0.68, zenith: "#5279ad", horizon: "#dcd0b4", glow: "#ffcc8a", glowAmt: 0.3, hemiSky: "#c4c4c4", hemiGround: "#62523c", hemi: 1.4, cloudLit: "#fff0d6", cloudDark: "#9c98a4", near: 0.1, far: 0.88 },
   { p: 0.725, zenith: "#3e5688", horizon: "#e4ae84", glow: "#ffa058", glowAmt: 0.75, hemiSky: "#c0a8a0", hemiGround: "#523e2e", hemi: 1.2, cloudLit: "#ffb27a", cloudDark: "#6c5a6c", near: 0.06, far: 0.76 },
   { p: 0.75, zenith: "#2a3868", horizon: "#c97e66", glow: "#ff7440", glowAmt: 1.0, hemiSky: "#9a8094", hemiGround: "#3a2c28", hemi: 1.1, cloudLit: "#ff9a6a", cloudDark: "#4e3e58", near: 0.04, far: 0.7 },
-  { p: 0.77, zenith: "#18214a", horizon: "#6e4c62", glow: "#d0566a", glowAmt: 0.6, hemiSky: "#605c80", hemiGround: "#1e1a1e", hemi: 1.0, cloudLit: "#8a5068", cloudDark: "#2a2438", near: 0.04, far: 0.68 },
-  { p: 0.795, zenith: "#0c1330", horizon: "#2a3050", glow: "#5a3e62", glowAmt: 0.25, hemiSky: "#425078", hemiGround: "#12141a", hemi: 1.35, cloudLit: "#30324e", cloudDark: "#10131f", near: 0.04, far: 0.68 },
-  { p: 0.84, zenith: "#060a16", horizon: "#141e33", glow: "#1d2744", glowAmt: 0, hemiSky: "#3a4f78", hemiGround: "#10141c", hemi: 1.5, cloudLit: "#171e2f", cloudDark: "#070910", near: 0.04, far: 0.72 },
+  { p: 0.77, zenith: "#18214a", horizon: "#6e4c62", glow: "#d0566a", glowAmt: 0.6, hemiSky: "#605c80", hemiGround: "#1e1a1e", hemi: 1.4, cloudLit: "#8a5068", cloudDark: "#2a2438", near: 0.04, far: 0.68 },
+  { p: 0.795, zenith: "#0c1330", horizon: "#2a3050", glow: "#5a3e62", glowAmt: 0.25, hemiSky: "#425078", hemiGround: "#12141a", hemi: 1.9, cloudLit: "#30324e", cloudDark: "#10131f", near: 0.04, far: 0.68 },
+  { p: 0.84, zenith: "#060a16", horizon: "#141e33", glow: "#1d2744", glowAmt: 0, hemiSky: "#3a4f78", hemiGround: "#10141c", hemi: 2.2, cloudLit: "#171e2f", cloudDark: "#070910", near: 0.04, far: 0.72 },
 ];
 
 const COLOR_FIELDS = ["zenith", "horizon", "glow", "hemiSky", "hemiGround", "cloudLit", "cloudDark"];
@@ -649,8 +649,14 @@ export class Sky {
     this.lightDirection.lerpVectors(_liftB, _liftA, w).normalize();
     this.sunLight.intensity = lerp(moonI, sunI, w);
     this.sunLight.color.lerpColors(MOON_LIGHT, this.sunColor, w);
-    // Moon shadows are softer; low sun shadows fade a little into the haze.
-    this.sunLight.shadow.intensity = lerp(0.6, 0.92, w) * lerp(0.75, 1, smoothstep(0.02, 0.2, Math.max(sunY, moonY)));
+    // Moon shadows are softer; low sun shadows fade a little into the haze;
+    // and shadows vanish entirely while the key direction swings overhead
+    // during the hand-off, so they never visibly sweep across the ground.
+    const swing = 4 * w * (1 - w);
+    this.sunLight.shadow.intensity =
+      lerp(0.6, 0.92, w) *
+      lerp(0.75, 1, smoothstep(0.02, 0.2, Math.max(sunY, moonY))) *
+      (1 - smoothstep(0.25, 0.85, swing));
 
     this.hemiLight.color.copy(K.hemiSky);
     this.hemiLight.groundColor.copy(K.hemiGround);

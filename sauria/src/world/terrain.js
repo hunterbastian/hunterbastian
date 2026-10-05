@@ -784,8 +784,14 @@ export class Terrain {
       const rx = (wx * cr + wz * sr) / stretch;
       const rz = (-wx * sr + wz * cr) * stretch;
       let c = 1 - Math.sqrt(rx * rx + rz * rz) / R;
-      c += 0.21 * fbm2D(g.nCoast, x * 0.0029, z * 0.0029, 5);
-      c += 0.035 * g.nCove(x * 0.011, z * 0.011);
+      // A 5-octave fBm split in two: the coarse octaves everywhere, the fine
+      // ones (worth ≤ ±0.05) only near the shoreline where they carve coves.
+      c += 0.19 * fbm2D(g.nCoast, x * 0.0029, z * 0.0029, 3);
+      if (c > -0.22 && c < 0.25) {
+        c += 0.0135 * g.nCoast(x * 0.0232 + 57.9, z * 0.0232 - 23.2);
+        c += 0.0068 * g.nCoast(x * 0.0464 - 31.3, z * 0.0464 + 77.1);
+        c += 0.035 * g.nCove(x * 0.011, z * 0.011);
+      }
       for (let b = 0; b < bays.length; b++) {
         const bay = bays[b];
         const dx = x - bay.x;
@@ -880,11 +886,11 @@ export class Terrain {
               const plateau = (24 + 12 * pn) * hm;
               const hb = h + plateau;
               // Noise-shifted steps so the risers wander instead of striping.
-              const step = 10;
+              const step = 12;
               const tq = (hb + pn * 14) / step;
               const fl = Math.floor(tq);
               const terr = (fl + smoothstep(0.2, 0.8, tq - fl)) * step - pn * 14;
-              h = lerp(hb, terr, hm * 0.7);
+              h = lerp(hb, terr, hm * 0.55);
             }
             if (mm > 0) {
               // Ridged crests; cliff-steep where the range meets the sea.
@@ -1092,58 +1098,77 @@ export class Terrain {
     };
     const lakeNode = (id) => (node) => g.lakeId[vIdx(node)] === id;
 
-    // Spring candidates on the foothills of the range.
-    const springs = [];
-    for (let t = 0; t < 3000; t++) {
-      const ix = randInt(rng, 4, n - 5);
-      const iz = randInt(rng, 4, n - 5);
-      const i = iz * n + ix;
-      const hm = g.highland[i];
-      if (hm < 0.3 || hm > 0.85 || g.mountain[i] > 0.12) continue;
-      if (H[i] < 12 || H[i] > 36) continue;
-      springs.push({ x: this._designX(ix, k), z: this._designX(iz, k) });
-    }
+    // Spring candidates on the foothills of the range, relaxed in steps so
+    // every seed ends up with its rivers.
+    const findSprings = (minHm, maxHm, minH, maxH, maxMtn) => {
+      const out = [];
+      for (let t = 0; t < 2500; t++) {
+        const ix = randInt(rng, 4, n - 5);
+        const iz = randInt(rng, 4, n - 5);
+        const i = iz * n + ix;
+        const hm = g.highland[i];
+        if (hm < minHm || hm > maxHm || g.mountain[i] > maxMtn || g.coast[i] < 0.12) continue;
+        if (H[i] < minH || H[i] > maxH) continue;
+        out.push({ x: this._designX(ix, k), z: this._designX(iz, k) });
+      }
+      return out;
+    };
+    let springs = findSprings(0.15, 0.8, 7, 20, 0.05);
+    if (springs.length < 60) springs = springs.concat(findSprings(0.02, 1, 5, 26, 0.12));
+    if (springs.length < 60) springs = springs.concat(findSprings(0, 1, 4, 30, 0.2));
 
-    const segments = []; // { pts (design), w0, w1 }
+    const segments = []; // { pts (design), w0, w1, mouth }
     const used = [];
-    const farFromUsed = (s, min) => used.every((u) => Math.hypot(u.x - s.x, u.z - s.z) > min);
+    const rejected = [];
+    let riverCount = 0;
+    const farFromUsed = (s, min) =>
+      used.every((u) => Math.hypot(u.x - s.x, u.z - s.z) > min) &&
+      rejected.every((u) => Math.hypot(u.x - s.x, u.z - s.z) > 70);
+    const endsNearExisting = (pts) =>
+      segments.some(
+        (sg) => Math.hypot(sg.pts[sg.pts.length - 2] - pts[pts.length - 2], sg.pts[sg.pts.length - 1] - pts[pts.length - 1]) < 60
+      );
 
-    // River 1: spring → nearest suitable lake → out to the sea.
-    if (g.lakes.length && springs.length) {
-      let bestPlan = null;
-      for (let li = 0; li < g.lakes.length && !bestPlan; li++) {
-        const L = g.lakes[li];
-        const cands = springs
-          .map((s) => ({ s, d: Math.hypot(s.x - L.x, s.z - L.z) }))
-          .filter((o) => o.d > 220 && o.d < 560)
-          .sort((a, b) => a.d - b.d);
-        if (cands.length) bestPlan = { L, li, s: cands[Math.min(cands.length - 1, randInt(rng, 0, 3))].s };
-      }
-      if (bestPlan) {
-        const { L, li, s } = bestPlan;
+    // River 1: spring → a lake → out to the sea.
+    for (let li = 0; li < g.lakes.length && riverCount === 0; li++) {
+      const L = g.lakes[li];
+      const cands = springs
+        .map((s) => ({ s, d: Math.hypot(s.x - L.x, s.z - L.z) }))
+        .filter((o) => o.d > 200 && o.d < 600)
+        .sort((a, b) => a.d - b.d);
+      for (let c = 0; c < Math.min(3, cands.length); c++) {
+        const s = cands[Math.min(cands.length - 1, c * 2 + randInt(rng, 0, 1))].s;
         const inlet = search([nodeAt(s.x, s.z)], lakeNode(li), isOcean);
-        if (inlet && inlet.length > 8) {
-          segments.push({ pts: toDesign(inlet), w0: 10, w1: 16 });
-          used.push(s);
-        }
+        if (!inlet || inlet.length < 12) continue;
         const outlet = search([nodeAt(L.x, L.z)], isOcean, null);
+        segments.push({ pts: toDesign(inlet), w0: 10, w1: 16 });
         if (outlet && outlet.length > 4) segments.push({ pts: toDesign(outlet), w0: 17, w1: 24, mouth: true });
+        used.push(s);
+        riverCount++;
+        break;
       }
     }
 
-    // River 2: another spring straight to the sea (or into any lake on the way).
+    // Further rivers: a spring straight to the sea, or into any lake on the way.
     const anyLake = (node) => g.lakeId[vIdx(node)] >= 0 || isOcean(node);
-    const shuffled = springs.filter((s) => farFromUsed(s, 480));
-    for (let attempt = 0; attempt < 6 && shuffled.length; attempt++) {
-      const s = shuffled[randInt(rng, 0, shuffled.length - 1)];
+    for (let attempt = 0; attempt < 18 && riverCount < 2; attempt++) {
+      const pool = springs.filter((s) => farFromUsed(s, 380));
+      if (!pool.length) break;
+      const s = pool[randInt(rng, 0, pool.length - 1)];
       const path = search([nodeAt(s.x, s.z)], anyLake, null);
-      if (!path) continue;
-      const pts = toDesign(path);
-      if (polylineLength(pts) < 260) continue;
+      const pts = path && toDesign(path);
+      // Long enough to read as a river, and not sharing another river's mouth.
+      if (!path || polylineLength(pts) < 230 || endsNearExisting(pts)) {
+        if (globalThis.DBG) console.log("reject", !!path, path && polylineLength(pts).toFixed(0), path && endsNearExisting(pts), pool.length);
+        rejected.push(s);
+        continue;
+      }
       segments.push({ pts, w0: 11, w1: 21, mouth: isOcean(path[path.length - 1]) });
       used.push(s);
-      break;
+      riverCount++;
     }
+    g.riverCount = riverCount;
+    if (globalThis.DBG) console.log("springs", springs.length, "rivers", riverCount);
 
     // Smooth, meander and carve.
     const dist = new Float32Array(n * n);
@@ -1178,6 +1203,7 @@ export class Terrain {
 
       dist.fill(1e9);
       this._rasterPolyline(resample(pts, 12), RIVER_REACH, k, dist, param);
+
       for (let i = 0; i < n * n; i++) {
         const d = dist[i];
         if (d >= RIVER_REACH) continue;
@@ -1186,7 +1212,11 @@ export class Terrain {
         const depth = lerp(1.5, 2.7, t);
         let T;
         if (d < hw) T = -depth * (1 - (d / hw) * (d / hw)) - 0.15;
-        else T = bankProfile(d - hw, 22);
+        else {
+          // Wobble the bank distance so valley sides aren't perfect offsets of the channel.
+          const wob = g.nDetail(this._designX(i % n, k) * 0.012 + 91, this._designX((i / n) | 0, k) * 0.012);
+          T = bankProfile((d - hw) * (1 + 0.25 * wob), 22);
+        }
         if (d > RIVER_REACH - 25) T = lerp(T, 1e4, smoothstep(RIVER_REACH - 25, RIVER_REACH, d));
         H[i] = smin(H[i], T, 1.1);
       }
@@ -1247,31 +1277,38 @@ export class Terrain {
     }
     this._waterClass = wc;
 
-    // Count separate bodies of fresh water (lakes joined by rivers count once).
-    const comp = new Int32Array(N).fill(-1);
+    // Count separate bodies of fresh water (lakes joined by rivers count once)
+    // and fill stray 1–5 vertex puddles left by surface noise.
+    const seen = new Uint8Array(N);
     let bodies = 0;
     let bigBodies = 0;
     for (let i = 0; i < N; i++) {
-      if (wc[i] !== W_FRESH || comp[i] >= 0) continue;
-      let size = 0;
+      if (wc[i] !== W_FRESH || seen[i]) continue;
       qh = 0;
       qt = 0;
       queue[qt++] = i;
-      comp[i] = bodies;
+      seen[i] = 1;
+      let carved = false;
       while (qh < qt) {
         const j = queue[qh++];
-        size++;
+        if (freshCarved[j]) carved = true;
         const x = j % n;
-        const nb = [x > 0 ? j - 1 : -1, x < n - 1 ? j + 1 : -1, j - n, j + n];
-        for (const q of nb) {
-          if (q >= 0 && q < N && wc[q] === W_FRESH && comp[q] < 0) {
-            comp[q] = bodies;
-            queue[qt++] = q;
-          }
+        if (x > 0 && wc[j - 1] === W_FRESH && !seen[j - 1]) (seen[j - 1] = 1), (queue[qt++] = j - 1);
+        if (x < n - 1 && wc[j + 1] === W_FRESH && !seen[j + 1]) (seen[j + 1] = 1), (queue[qt++] = j + 1);
+        if (j >= n && wc[j - n] === W_FRESH && !seen[j - n]) (seen[j - n] = 1), (queue[qt++] = j - n);
+        if (j < N - n && wc[j + n] === W_FRESH && !seen[j + n]) (seen[j + n] = 1), (queue[qt++] = j + n);
+      }
+      if (qt < 6 && !carved) {
+        for (let q = 0; q < qt; q++) {
+          H[queue[q]] = 0.12;
+          wc[queue[q]] = W_LAND;
         }
+        freshCells -= qt;
+        land += qt;
+        continue;
       }
       bodies++;
-      if (size >= 20) bigBodies++;
+      if (qt >= 20) bigBodies++;
     }
 
     const cs = this.cellSize;
@@ -1294,7 +1331,7 @@ export class Terrain {
     this.stats.freshBodies = bigBodies;
     this.stats.ponds = bodies - bigBodies;
     this.stats.lakes = this.lakes.length;
-    this.stats.rivers = this.rivers.length;
+    this.stats.rivers = g.riverCount;
     this.stats.islets = g.islets.length;
   }
 
