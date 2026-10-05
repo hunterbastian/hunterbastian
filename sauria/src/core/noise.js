@@ -1,5 +1,7 @@
-// Seeded 2D simplex noise plus the two fractal flavours the world is built
-// from: fBm (soft rolling shapes) and ridged multifractal (mountain spines).
+// Seeded 2D simplex noise plus the fractal flavours the world is built from:
+// fBm (soft rolling shapes), ridged multifractal (mountain spines) and an
+// "eroded" fBm that uses the noise's analytic gradient to keep slopes smooth
+// and pile detail onto flats and crests, the way weathering does.
 // Pure math, no allocations per sample, deterministic for a given seed.
 
 import { makeRng } from "./rng.js";
@@ -26,12 +28,8 @@ for (let i = 0; i < GRAD_COUNT; i++) {
 // guards the rare overshoot.
 const SCALE = 99;
 
-/**
- * Create a seeded 2D simplex noise function.
- * @param {number} seed
- * @returns {(x: number, y: number) => number} noise in [-1, 1]
- */
-export function createNoise2D(seed = 1) {
+/** Seeded permutation tables shared by both simplex flavours. */
+function makePermutation(seed) {
   const rng = makeRng(seed);
   // Fisher–Yates shuffle of 0..255, doubled so lookups never need wrapping.
   const p = new Uint8Array(256);
@@ -48,6 +46,16 @@ export function createNoise2D(seed = 1) {
     perm[i] = p[i & 255];
     permGrad[i] = perm[i] % GRAD_COUNT;
   }
+  return { perm, permGrad };
+}
+
+/**
+ * Create a seeded 2D simplex noise function.
+ * @param {number} seed
+ * @returns {(x: number, y: number) => number} noise in [-1, 1]
+ */
+export function createNoise2D(seed = 1) {
+  const { perm, permGrad } = makePermutation(seed);
 
   return function noise2D(x, y) {
     // Which simplex cell are we in?
@@ -100,6 +108,90 @@ export function createNoise2D(seed = 1) {
   };
 }
 
+/**
+ * Seeded 2D simplex noise that also reports its analytic gradient. For the
+ * same seed its value matches `createNoise2D` (minus the final clamp), so the
+ * two can be mixed freely.
+ * @param {number} seed
+ * @returns {(x: number, y: number, out: Float64Array | number[]) => number}
+ *   noise ≈ [-1, 1]; writes ∂n/∂x into out[0] and ∂n/∂y into out[1]
+ */
+export function createNoise2DGrad(seed = 1) {
+  const { perm, permGrad } = makePermutation(seed);
+
+  return function noise2DGrad(x, y, out) {
+    const s = (x + y) * F2;
+    const i = Math.floor(x + s);
+    const j = Math.floor(y + s);
+    const t = (i + j) * G2;
+    const x0 = x - (i - t);
+    const y0 = y - (j - t);
+    let i1;
+    let j1;
+    if (x0 > y0) {
+      i1 = 1;
+      j1 = 0;
+    } else {
+      i1 = 0;
+      j1 = 1;
+    }
+    const x1 = x0 - i1 + G2;
+    const y1 = y0 - j1 + G2;
+    const x2 = x0 - 1 + 2 * G2;
+    const y2 = y0 - 1 + 2 * G2;
+    const ii = i & 255;
+    const jj = j & 255;
+    let n = 0;
+    let dx = 0;
+    let dy = 0;
+
+    // Each corner contributes t⁴·(g·d) with t = ½ − |d|²; its gradient is
+    // t⁴·g − 8·t³·(g·d)·d.
+    let t0 = 0.5 - x0 * x0 - y0 * y0;
+    if (t0 > 0) {
+      const g = permGrad[ii + perm[jj]];
+      const gx = GRAD_X[g];
+      const gy = GRAD_Y[g];
+      const gd = gx * x0 + gy * y0;
+      const t2 = t0 * t0;
+      const t4 = t2 * t2;
+      const k = -8 * t2 * t0 * gd;
+      n += t4 * gd;
+      dx += t4 * gx + k * x0;
+      dy += t4 * gy + k * y0;
+    }
+    let t1 = 0.5 - x1 * x1 - y1 * y1;
+    if (t1 > 0) {
+      const g = permGrad[ii + i1 + perm[jj + j1]];
+      const gx = GRAD_X[g];
+      const gy = GRAD_Y[g];
+      const gd = gx * x1 + gy * y1;
+      const t2 = t1 * t1;
+      const t4 = t2 * t2;
+      const k = -8 * t2 * t1 * gd;
+      n += t4 * gd;
+      dx += t4 * gx + k * x1;
+      dy += t4 * gy + k * y1;
+    }
+    let t2c = 0.5 - x2 * x2 - y2 * y2;
+    if (t2c > 0) {
+      const g = permGrad[ii + 1 + perm[jj + 1]];
+      const gx = GRAD_X[g];
+      const gy = GRAD_Y[g];
+      const gd = gx * x2 + gy * y2;
+      const t2 = t2c * t2c;
+      const t4 = t2 * t2;
+      const k = -8 * t2 * t2c * gd;
+      n += t4 * gd;
+      dx += t4 * gx + k * x2;
+      dy += t4 * gy + k * y2;
+    }
+    out[0] = dx * SCALE;
+    out[1] = dy * SCALE;
+    return n * SCALE;
+  };
+}
+
 /* --- Fractal sums --------------------------------------------------------- */
 
 // Each octave is shifted by an irrational-ish offset so the octaves don't all
@@ -144,6 +236,37 @@ export function ridged2D(noise, x, y, octaves = 5, lacunarity = 2, gain = 0.5) {
     weight = n * 2;
     if (weight > 1) weight = 1;
     sum += n * amp;
+    norm += amp;
+    amp *= gain;
+    freq *= lacunarity;
+  }
+  return sum / norm;
+}
+
+const gradScratch = new Float64Array(2);
+
+/**
+ * "Eroded" fBm (after Iñigo Quilez): every octave is damped by the slope the
+ * previous octaves already built, so steep flanks stay clean and smooth while
+ * small detail settles on flats, crests and valley floors — a cheap stand-in
+ * for weathering that never produces spiky noise on hillsides.
+ * @param {(x: number, y: number, out: Float64Array) => number} noiseGrad from createNoise2DGrad
+ * @param {number} erosion how strongly accumulated slope suppresses detail (≈ 0.5–2)
+ * @returns {number} ≈ [-1, 1] (typically within ±0.6)
+ */
+export function erodedFbm2D(noiseGrad, x, y, octaves = 5, lacunarity = 2, gain = 0.5, erosion = 1) {
+  let sum = 0;
+  let amp = 1;
+  let norm = 0;
+  let freq = 1;
+  let dx = 0;
+  let dy = 0;
+  for (let o = 0; o < octaves; o++) {
+    const n = noiseGrad(x * freq + o * OCT_OX, y * freq + o * OCT_OY, gradScratch);
+    // Slope of the sum so far, in the units of the first octave.
+    dx += gradScratch[0] * amp * freq;
+    dy += gradScratch[1] * amp * freq;
+    sum += (amp * n) / (1 + erosion * (dx * dx + dy * dy));
     norm += amp;
     amp *= gain;
     freq *= lacunarity;
