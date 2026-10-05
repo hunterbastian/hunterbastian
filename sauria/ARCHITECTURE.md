@@ -38,10 +38,26 @@ working (add, don't rename) and note it in your report.
   vectors.
 - Every module must be safe to construct and update without a DOM other than what
   it is handed (no `document.getElementById` reaching into other modules' DOM).
-- **Art direction:** stylised low-poly, flat-shaded, vertex-coloured. Moody and
-  atmospheric — muted greens, ochre grasslands, dark conifer forests, soft golden
-  fog at dawn, deep blue moonlit nights. Think *The Isle* mood with a clean,
-  designed, slightly painterly low-poly look. Fog does a lot of the work.
+- **Art direction — naturalistic & detailed, NOT low-poly.** The user explicitly
+  rejected the faceted low-poly look. Build **smooth-shaded, higher-poly** geometry
+  with organic silhouettes (never `flatShading: true`; the only exception is rock that
+  should read as hard-edged stone), plus **procedural surface detail in shaders**:
+  noise-blended grass/dirt/rock/sand/mud on the terrain, bark, leaf/frond cards with
+  alpha cut-outs, scaled/banded dinosaur skin with countershading, roughness
+  variation, small normal perturbations. Mood: *The Isle*'s moody naturalism —
+  muted greens, ochre grasslands, dark conifer forests, soft golden dawn mist, deep
+  blue moonlit nights; fog and light do a lot of the work. Generate textures
+  procedurally at load (canvas / DataTexture, mip-mapped, `SRGBColorSpace` for
+  colour maps) — no image files. Keep it fast: instancing, LOD where it pays,
+  shared materials, texture atlases.
+- **Two render styles, same assets.** `"detailed"` (default — full resolution, MSAA)
+  and `"pixel"` (retro, *Carnivores '98* / PS1 vibe: the 3D scene is rendered to a
+  low-resolution target — ≈ 270–400 px tall — and upscaled with nearest-neighbour,
+  with optional ordered dithering and gentle colour quantisation; the DOM UI stays
+  crisp on top). `main.js` owns this pipeline (settings + `?style=pixel`). Assets
+  must look good in both: avoid high-frequency detail that shimmers when
+  pixelated (mip-mapped textures, smooth shader noise, alpha-to-coverage or
+  alphaTest with mips for foliage).
 
 ## Conventions
 
@@ -90,7 +106,7 @@ sauria/
   src/hunter/weapons.js HUNTER-GUNS [hunter] weapon defs, WeaponSystem, ballistics, hit effects
   src/hunter/viewmodel.js HUNTER-GUNS [hunter] first-person gun + hands meshes & animation
   src/hunter/hunt.js    HUNT        [hunter] HuntSession: loadout, trophies, scoring, radar, lure, extraction, profile
-  src/hunter/helicopter.js HUNT     [hunter] low-poly helicopter + drop-off / extraction flight
+  src/hunter/helicopter.js HUNT     [hunter] detailed helicopter + drop-off / extraction flight
   src/ui/hunterHud.js   HUNTER-UI   [hunter] crosshair, ammo, wind, scope/binoculars, radar, summary
   src/ui/hunterMenu.js  HUNTER-UI   [hunter] loadout / target selection / trophy room
   hunter.css            HUNTER-UI   [hunter] styles for the hunter UI (uses the design tokens from style.css)
@@ -183,7 +199,8 @@ export class Terrain {
   constructor({ size, resolution, seed, seaLevel, maxHeight })
   size; half; resolution; cellSize; seaLevel; maxHeight;
   heights;            // Float32Array, (resolution+1)², index = iz*(resolution+1) + ix, x = -half + ix*cellSize
-  mesh;               // THREE.Mesh — vertex coloured, flatShading, receiveShadow
+  mesh;               // THREE.Mesh — SMOOTH normals, receiveShadow; MeshStandardMaterial extended via
+                      //   onBeforeCompile with procedural detail (see "Terrain look" below)
   heightTexture;      // THREE.DataTexture (RedFormat, FloatType, LinearFilter) of `heights`, for the water shader
   heightAt(x, z)      // bilinear; outside the tile → deep ocean (≈ -30)
   normalAt(x, z, target = new THREE.Vector3())
@@ -205,6 +222,16 @@ Island shape: one main landmass (~0.42 × size radius) with a noisy coastline an
 beaches; a ridged mountain range with highlands and rock on steep faces; rolling
 plains; forest bands; swampy lowlands; **3–5 freshwater lakes** and **1–2 rivers**
 carved below sea level (fresh). A few small offshore islets are welcome.
+
+**Terrain look.** Resolution comes from the constructor (`WORLD.resolution` = 512 on
+high ≈ 3.1 m cells; `quality.terrainResolution` may lower it on phones) — heights come
+from a continuous function so gameplay is identical at any resolution. Smooth
+normals. Per-vertex attributes carry material weights (e.g. grass / dirt / rock / sand
+/ mud / snow-free) and a cavity/AO term; the fragment shader blends tiling procedural
+detail textures (generated once at load, mip-mapped) sampled in world space
+(tri-planar or slope-aware for cliffs so rock doesn't stretch), with macro colour
+variation from low-frequency noise so it never looks tiled. It must hold up both
+at the player's feet (a juvenile is < 1 m tall) and from 300 m away.
 
 ### `world/water.js` (ATMOSPHERE)
 
@@ -321,8 +348,15 @@ export class DinoModel {
   dispose()
 }
 ```
-Procedural low-poly meshes from a joint hierarchy (hips → spine → chest → neck →
-head/jaw; tail chain; 2 or 4 legs with thigh/shin/foot; arms). Procedural animation:
+Procedural, **smooth, organic** meshes on a joint hierarchy (hips → spine → chest →
+neck → head/jaw; tail chain; 2 or 4 legs with thigh/shin/foot; arms). Recommended:
+loft the body/neck/tail as one continuous skin along a spine curve from varying
+elliptical cross-sections (plus lofted limbs and a sculpted head/jaw), smooth normals,
+**smooth skin weights** blended across neighbouring bones (organic bending, no
+cracks), one `SkinnedMesh` per dinosaur (one draw call); roughly 6–15k triangles
+(diplodocus up to ~20k). Skin detail via a shared procedural texture/shader (scales,
+bands/stripes/spots, countershading, darker dorsal, slight sheen on wet), eyes with
+a highlight, teeth on carnivores, claws. Procedural animation:
 gait cycles by distance travelled, tail sway, breathing, head bob, jaw open on
 bite/call, lie down on rest, fall on side when dead. Each species must read
 clearly from a third-person camera (stego plates & thagomizer, gastonia spikes/
@@ -506,6 +540,9 @@ export class Menu {
   onHunter = () => {};                                 // [hunter] a clear secondary entry on the title
                                                        //   screen: "Hunter mode" (Carnivores-style) → main opens HunterMenu
   setLoading(progress /* 0..1 */, label)               // loading state before the world is ready
+  settings;                                            // { style: "detailed"|"pixel", quality: "auto"|"high"|"low",
+                                                       //   muted: bool, sensitivity: 0.5..2 } — a Settings panel on the title
+  onSettingsChange = (settings) => {};                 //   screen (and reachable from pause) edits these; main applies + saves
 }
 export class MapView {
   constructor(root, terrain)
@@ -559,12 +596,13 @@ export class World {
 }
 ```
 `main.js` boots the renderer (ACES tone mapping, sRGB, PCF soft shadows when
-enabled), picks quality, builds the world, runs the state machine
+enabled), owns the render-style pipeline (`"detailed"` direct render vs `"pixel"`
+low-res target + nearest upscale + dither pass), picks quality, builds the world, runs the state machine
 (`menu` → `playing` ⇄ `paused` → `dead`), saves/loads, handles resize/visibility,
 and exposes a test hook `window.__sauria`.
 
 URL params: `?species=<id>` autostart · `?growth=0..1` · `?t=0..1` time of day
-(pauses the clock) · `?seed=N` · `?quality=low|high` · `?debug=1` (fps/overlay) ·
+(pauses the clock) · `?seed=N` · `?quality=low|high` · `?style=detailed|pixel` · `?debug=1` (fps/overlay) ·
 `?pos=x,z` spawn position · `?mute=1`.
 
 ---
@@ -688,7 +726,8 @@ export class WeaponSystem {
   raycast(origin, dir, maxDist) // → { creature, part, point, distance } | { terrain|tree, point } | null
 }
 // viewmodel.js
-export function createViewmodel(weaponId) // → { object, update(dt, state), dispose } low-poly gun + gloved hands:
+export function createViewmodel(weaponId) // → { object, update(dt, state), dispose } detailed, smooth gun + gloved hands
+                                           //   (bevelled steel, procedural wood grain, worn edges; PBR-ish materials):
                                            //   idle sway, walk bob, recoil kick, reload animation, ADS pose, muzzle point
 ```
 Hit detection marches the ray against the terrain heightfield, tree trunks
@@ -718,7 +757,7 @@ export class HuntSession {
 }
 export class Helicopter {      // helicopter.js
   constructor(scene)
-  object; active; position;    // low-poly, stylised; spinning rotors; landing light at night; rotor-wash dust
+  object; active; position;    // detailed, smooth-shaded; spinning rotors; landing light at night; rotor-wash dust
   dropOff(point, onDone); pickUp(point, onArrive); update(dt); dispose();
 }
 ```

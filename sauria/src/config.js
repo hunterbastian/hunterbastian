@@ -4,7 +4,7 @@
 export const WORLD = {
   seed: 20260,
   size: 1600, // metres, square island tile centred on the origin
-  resolution: 320, // terrain grid segments per side (5 m cells)
+  resolution: 512, // terrain grid segments per side (~3.1 m cells); phones may lower it
   seaLevel: 0, // y of every body of water (ocean, lakes, rivers)
   maxHeight: 140, // tallest peaks
 };
@@ -25,6 +25,13 @@ export const GAME = {
 
 // Two render profiles. main.js picks one (auto: low on touch / small screens),
 // and `?quality=low|high` overrides it.
+// Render styles (same assets): "detailed" draws at full resolution; "pixel" draws the
+// 3D scene into a low-res target and upscales it with nearest-neighbour filtering.
+export const STYLE = {
+  default: "detailed",
+  pixelHeight: { high: 360, low: 270 }, // target height in pixels for "pixel"
+};
+
 export const QUALITY = {
   high: {
     pixelRatioCap: 2,
@@ -32,8 +39,10 @@ export const QUALITY = {
     shadowMapSize: 2048,
     vegetationDensity: 1,
     grass: true,
-    viewDistance: 520,
+    viewDistance: 560,
     npcScale: 1,
+    terrainResolution: 512,
+    antialias: true,
   },
   low: {
     pixelRatioCap: 1.25,
@@ -41,7 +50,9 @@ export const QUALITY = {
     shadowMapSize: 1024,
     vegetationDensity: 0.45,
     grass: false,
-    viewDistance: 340,
+    viewDistance: 360,
     npcScale: 0.6,
+    terrainResolution: 320,
+    antialias: false,
   },
 };
