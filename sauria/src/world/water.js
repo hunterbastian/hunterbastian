@@ -132,9 +132,9 @@ void main() {
   slope += swell(p, vec2(0.2, -0.98), 1.13, 2.3, 0.022);
   slope *= swellAmt;
   float rippleAmt = 1.0 - smoothstep(25.0, 220.0, dist);
-  vec3 r1 = gnoised(p * 0.42 + vec2(uTime * 0.11, uTime * 0.07));
-  vec3 r2 = gnoised(p * 1.05 - vec2(uTime * 0.05, -uTime * 0.17));
-  slope += (r1.yz * 0.42 * 0.16 + r2.yz * 1.05 * 0.055) * rippleAmt;
+  vec3 r1 = gnoised(p * 0.22 + vec2(uTime * 0.07, uTime * 0.045));
+  vec3 r2 = gnoised(p * 0.55 - vec2(uTime * 0.035, -uTime * 0.11));
+  slope += (r1.yz * (0.22 * 0.22) + r2.yz * (0.55 * 0.07)) * rippleAmt;
   vec3 N = normalize(vec3(-slope.x, 1.0, -slope.y));
 
   /* Water body: depth tint, lit like the rest of the scene, then tone mapped

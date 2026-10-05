@@ -29,6 +29,7 @@ const W_FRESH = 2;
 const OUTSIDE_HEIGHT = -30; // what heightAt reports off the tile: deep ocean
 const DESIGN_SIZE = 1600; // shapes below are authored in metres for this tile
 const SHORE_BUCKET = 48; // metres per spatial-hash cell for shore queries
+const RIVER_REACH = 230; // design metres a river valley may influence
 
 const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
 
@@ -134,6 +135,16 @@ function chamfer(n, cell, seed) {
     }
   }
   return d;
+}
+
+/**
+ * Height of a carved bank `out` metres from the waterline: a gentle,
+ * walkable shore shelf of `shelf` metres, then a valley side that steepens
+ * until it is above any terrain — so a carve never ends in a wall.
+ */
+function bankProfile(out, shelf) {
+  const o2 = Math.max(0, out - 60);
+  return out * 0.075 + Math.max(0, out - shelf) * 0.2 + o2 * o2 * 0.0045;
 }
 
 /** Chaikin corner cutting on an [x0, z0, x1, z1, …] polyline (keeps endpoints). */
@@ -745,7 +756,7 @@ export class Terrain {
     const cx = Math.cos(ra) * rc;
     const cz = Math.sin(ra) * rc;
     const dirA = ra + Math.PI / 2 + rand(rng, -0.4, 0.4);
-    const halfLen = R * rand(rng, 0.5, 0.6);
+    const halfLen = R * rand(rng, 0.44, 0.56);
     const bend = R * rand(rng, -0.22, 0.22);
     const ax = cx - Math.cos(dirA) * halfLen;
     const az = cz - Math.sin(dirA) * halfLen;
@@ -768,13 +779,13 @@ export class Terrain {
 
     // Base coast field (before islets) — reused to place the islets.
     const coastAt = (x, z) => {
-      const wx = x + 135 * fbm2D(g.nWarpA, x * 0.0012, z * 0.0012, 3);
-      const wz = z + 135 * fbm2D(g.nWarpB, x * 0.0012, z * 0.0012, 3);
+      const wx = x + 165 * fbm2D(g.nWarpA, x * 0.0012, z * 0.0012, 3);
+      const wz = z + 165 * fbm2D(g.nWarpB, x * 0.0012, z * 0.0012, 3);
       const rx = (wx * cr + wz * sr) / stretch;
       const rz = (-wx * sr + wz * cr) * stretch;
       let c = 1 - Math.sqrt(rx * rx + rz * rz) / R;
-      c += 0.17 * fbm2D(g.nCoast, x * 0.0029, z * 0.0029, 4);
-      c += 0.03 * g.nCove(x * 0.011, z * 0.011);
+      c += 0.21 * fbm2D(g.nCoast, x * 0.0029, z * 0.0029, 5);
+      c += 0.035 * g.nCove(x * 0.011, z * 0.011);
       for (let b = 0; b < bays.length; b++) {
         const bay = bays[b];
         const dx = x - bay.x;
@@ -797,9 +808,9 @@ export class Terrain {
       const z = Math.sin(a) * d;
       if (Math.max(Math.abs(x), Math.abs(z)) > dHalf - 120) continue;
       const c = coastAt(x, z);
-      if (c > -0.13 || c < -0.5) continue;
+      if (c > -0.2 || c < -0.5) continue;
       if (islets.some((o) => Math.hypot(o.x - x, o.z - z) < 260)) continue;
-      islets.push({ x, z, r: rand(rng, 30, 62), peak: rand(rng, 5, 20) });
+      islets.push({ x, z, r: rand(rng, 34, 66), peak: rand(rng, 6, 22) });
     }
     g.islets = islets;
 
@@ -842,8 +853,8 @@ export class Terrain {
         if (m < 0) {
           // Sea floor: a shallow shelf off the beaches, then a drop to the deep.
           const mo = -m;
-          h = -(0.05 * mo + 27 * smoothstep(25, 230, mo));
-          h += 1.2 * g.nDetail(x * 0.01, z * 0.01) * smoothstep(5, 60, mo);
+          h = -(0.06 * mo + 28 * smoothstep(12, 170, mo));
+          h += 1.4 * g.nDetail(x * 0.01, z * 0.01) * smoothstep(20, 90, mo);
           if (h < -30) h = -30;
         } else {
           const inland = smoothstep(20, 240, m);
@@ -859,33 +870,36 @@ export class Terrain {
             const st = spineT[i];
             const w = rangeWidth * (0.55 + 0.45 * Math.sin(Math.PI * st));
             const dd = sd + 60 * fbm2D(g.nRangeWarp, x * 0.004, z * 0.004, 2);
-            const hm = smoothstep(w * 3.0, w * 1.05, dd) * fall;
+            const hm = smoothstep(w * 2.5, w * 0.95, dd) * fall;
             const mm = smoothstep(w * 1.1, w * 0.1, dd);
             g.highland[i] = hm;
             g.mountain[i] = mm;
             if (hm > 0) {
               // Tableland, softly terraced into plateaus with steeper risers.
-              const plateau = (24 + 12 * fbm2D(g.nPlateau, x * 0.0032, z * 0.0032, 3)) * hm;
+              const pn = fbm2D(g.nPlateau, x * 0.0032, z * 0.0032, 3);
+              const plateau = (24 + 12 * pn) * hm;
               const hb = h + plateau;
-              const step = 8;
-              const tq = hb / step;
+              // Noise-shifted steps so the risers wander instead of striping.
+              const step = 10;
+              const tq = (hb + pn * 14) / step;
               const fl = Math.floor(tq);
-              const terr = (fl + smoothstep(0.25, 0.75, tq - fl)) * step;
-              h = lerp(hb, terr, hm * 0.85);
+              const terr = (fl + smoothstep(0.2, 0.8, tq - fl)) * step - pn * 14;
+              h = lerp(hb, terr, hm * 0.7);
             }
             if (mm > 0) {
               // Ridged crests; cliff-steep where the range meets the sea.
-              const r = ridged2D(g.nRidge, x * 0.0052, z * 0.0052, 5);
-              mtn = mm * mm * (14 + 120 * Math.pow(r, 1.35)) * smoothstep(0, 14, m);
+              const r = ridged2D(g.nRidge, x * 0.0042, z * 0.0042, 5);
+              mtn = mm * mm * (26 + 105 * Math.pow(r, 1.25)) * smoothstep(0, 14, m);
               mtn += mm * 5 * g.nDetail(x * 0.024, z * 0.024);
             }
           }
 
           // Swampy lowlands: flatten toward just above sea level.
-          const sw = fbm2D(g.nSwamp, x * 0.0024, z * 0.0024, 3);
-          const S = smoothstep(0.1, 0.32, sw) * (1 - g.highland[i]) * smoothstep(15, 80, m);
+          // Only ground that is already low sinks, so no trenches through hills.
+          const sw = fbm2D(g.nSwamp, x * 0.0019, z * 0.0019, 2);
+          const S = smoothstep(0.08, 0.34, sw) * (1 - g.highland[i]) * smoothstep(15, 80, m) * (1 - smoothstep(7, 15, h));
           g.swamp[i] = S;
-          if (S > 0) h = lerp(h, 0.9 + 0.5 * g.nDetail(x * 0.03, z * 0.03), S * 0.92);
+          if (S > 0) h = lerp(h, 0.9 + 0.5 * g.nDetail(x * 0.03, z * 0.03), S * 0.9);
 
           // Faceted surface detail.
           h += fall * 0.7 * g.nDetail(x * 0.035 + 40, z * 0.035);
@@ -970,7 +984,7 @@ export class Terrain {
     lakes.forEach((L, id) => {
       const ca = Math.cos(L.angle);
       const sa = Math.sin(L.angle);
-      const reach = L.r / L.aspect + 160;
+      const reach = L.r * 1.4 / L.aspect + 170;
       const ix0 = Math.max(0, Math.floor(((L.x - reach) * k + this.half) / this.cellSize));
       const ix1 = Math.min(n - 1, Math.ceil(((L.x + reach) * k + this.half) / this.cellSize));
       const iz0 = Math.max(0, Math.floor(((L.z - reach) * k + this.half) / this.cellSize));
@@ -993,7 +1007,10 @@ export class Terrain {
             if (d < 0.75) g.lakeId[i] = id;
           } else {
             const out = (d - 1) * rr;
-            T = out * 0.09 + Math.max(0, out - 26) * 0.2 + 0.25 * g.nDetail(x * 0.06, z * 0.06);
+            T = bankProfile(out, 26) + 0.25 * g.nDetail(x * 0.06, z * 0.06);
+            // Fade out at the edge of the influence square (bank is far above ground there anyway).
+            const edgeD = Math.max(Math.abs(dx), Math.abs(dz));
+            if (edgeD > reach - 20) T = lerp(T, 1e4, smoothstep(reach - 20, reach, edgeD));
           }
           H[i] = smin(H[i], T, 1.4);
         }
@@ -1160,16 +1177,17 @@ export class Terrain {
       pts = chaikin(meandered, 1);
 
       dist.fill(1e9);
-      this._rasterPolyline(pts, 150, k, dist, param);
+      this._rasterPolyline(resample(pts, 12), RIVER_REACH, k, dist, param);
       for (let i = 0; i < n * n; i++) {
         const d = dist[i];
-        if (d > 149) continue;
+        if (d >= RIVER_REACH) continue;
         const t = param[i];
         const hw = lerp(seg.w0, seg.w1, t) * 0.5;
         const depth = lerp(1.5, 2.7, t);
         let T;
         if (d < hw) T = -depth * (1 - (d / hw) * (d / hw)) - 0.15;
-        else T = (d - hw) * 0.075 + Math.max(0, d - hw - 22) * 0.2;
+        else T = bankProfile(d - hw, 22);
+        if (d > RIVER_REACH - 25) T = lerp(T, 1e4, smoothstep(RIVER_REACH - 25, RIVER_REACH, d));
         H[i] = smin(H[i], T, 1.1);
       }
       const line = [];
@@ -1538,7 +1556,7 @@ export class Terrain {
       let nx = e1y * e2z - e1z * e2y;
       let ny = e1z * e2x - e1x * e2z;
       let nz = e1x * e2y - e1y * e2x;
-      const nl = Math.hypot(nx, ny, nz) || 1;
+      const nl = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
       nx /= nl;
       ny /= nl;
       nz /= nl;

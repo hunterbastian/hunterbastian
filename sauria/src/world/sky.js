@@ -32,13 +32,15 @@ const MOON_RADIUS = 0.036;
 
 /* --- Lighting constants (r180 physical units, tuned for ACES @ exposure 1) --- */
 
-const SUN_INTENSITY = 3.1; // directional light at noon
-const MOON_INTENSITY = 0.62; // directional light with the moon high
+// Key light intensity by elevation (sine of altitude). The low sun stays
+// strong enough for a proper golden hour instead of fading out with the sky.
+const SUN_INTENSITY = [[-0.04, 0], [0.0, 0.35], [0.05, 1.0], [0.12, 1.65], [0.25, 2.3], [0.45, 2.75], [0.85, 2.95]];
+const MOON_INTENSITY = [[-0.05, 0], [0.0, 0.08], [0.1, 0.34], [0.3, 0.55], [0.7, 0.62]];
 const MOON_LIGHT = new THREE.Color("#8fa9e0"); // cool blue moonlight
 const MOON_DISC = new THREE.Color("#eef2fa");
 const MOON_HALO = new THREE.Color("#7f95c4");
 const BELT_COLOR = new THREE.Color("#b58aa5"); // pink anti-twilight band ("Belt of Venus")
-const WHITE = new THREE.Color(1, 1, 1);
+const _white03 = new THREE.Color(0.3, 0.3, 0.3);
 
 // Lights never shine from below the horizon: near the crossing the key
 // direction is lifted to at least this elevation (sine), which also lets the
@@ -58,22 +60,22 @@ const SHADOW_DEPTH = 340; // near..far range of the shadow camera
 // fraction of viewDistance. `glow` is the warm band hugging the horizon around
 // the sun; `hemi*` drive the HemisphereLight; `cloud*` shade the clouds.
 const RAW_KEYS = [
-  { p: 0.0, zenith: "#04070f", horizon: "#121c30", glow: "#1b2540", glowAmt: 0, hemiSky: "#35496f", hemiGround: "#0e1219", hemi: 0.95, cloudLit: "#29344c", cloudDark: "#0b0f18", near: 0.04, far: 0.72 },
-  { p: 0.17, zenith: "#050812", horizon: "#141e33", glow: "#1d2744", glowAmt: 0, hemiSky: "#35496f", hemiGround: "#0e1219", hemi: 0.9, cloudLit: "#29344c", cloudDark: "#0b0f18", near: 0.04, far: 0.7 },
-  { p: 0.21, zenith: "#0c1328", horizon: "#2a2c48", glow: "#6a4a6a", glowAmt: 0.35, hemiSky: "#3e4a70", hemiGround: "#121218", hemi: 0.8, cloudLit: "#3a3a58", cloudDark: "#121522", near: 0.02, far: 0.6 },
-  { p: 0.235, zenith: "#1f2c55", horizon: "#806a7c", glow: "#d98a78", glowAmt: 0.7, hemiSky: "#6a6c8a", hemiGround: "#2a2420", hemi: 0.8, cloudLit: "#b48092", cloudDark: "#3c3a55", near: 0.0, far: 0.46 },
-  { p: 0.255, zenith: "#3d5a8e", horizon: "#d6a289", glow: "#ffa060", glowAmt: 1.0, hemiSky: "#b0a4a4", hemiGround: "#4a3a2c", hemi: 0.85, cloudLit: "#ffc29a", cloudDark: "#6a5a70", near: 0.0, far: 0.42 },
-  { p: 0.285, zenith: "#5884bb", horizon: "#e8c9a6", glow: "#ffc68a", glowAmt: 0.6, hemiSky: "#c4c8c8", hemiGround: "#5a4a36", hemi: 0.95, cloudLit: "#fff0dc", cloudDark: "#8e8e9e", near: 0.02, far: 0.52 },
-  { p: 0.34, zenith: "#5791cb", horizon: "#cfd9d6", glow: "#ffe6c0", glowAmt: 0.2, hemiSky: "#b6cce0", hemiGround: "#5c5440", hemi: 1.05, cloudLit: "#ffffff", cloudDark: "#a3b0c2", near: 0.07, far: 0.78 },
-  { p: 0.42, zenith: "#4c88c8", horizon: "#c2d4de", glow: "#fff2d8", glowAmt: 0.06, hemiSky: "#b0c8e2", hemiGround: "#5e5844", hemi: 1.1, cloudLit: "#ffffff", cloudDark: "#a8b6c8", near: 0.12, far: 0.95 },
-  { p: 0.5, zenith: "#4a86c7", horizon: "#c0d3de", glow: "#fff4e0", glowAmt: 0.04, hemiSky: "#b0c8e2", hemiGround: "#605a46", hemi: 1.1, cloudLit: "#ffffff", cloudDark: "#a8b6c8", near: 0.13, far: 1.0 },
-  { p: 0.6, zenith: "#4c86c4", horizon: "#c6d5da", glow: "#fff0d4", glowAmt: 0.06, hemiSky: "#b4c8de", hemiGround: "#625a44", hemi: 1.1, cloudLit: "#ffffff", cloudDark: "#aab4c4", near: 0.12, far: 0.95 },
-  { p: 0.68, zenith: "#5279ad", horizon: "#dcd0b4", glow: "#ffcc8a", glowAmt: 0.3, hemiSky: "#c4c4c0", hemiGround: "#62523c", hemi: 1.0, cloudLit: "#fff0d6", cloudDark: "#9c98a4", near: 0.1, far: 0.88 },
-  { p: 0.725, zenith: "#3e5688", horizon: "#e4ae84", glow: "#ffa058", glowAmt: 0.75, hemiSky: "#c0a89c", hemiGround: "#523e2e", hemi: 0.9, cloudLit: "#ffb27a", cloudDark: "#6c5a6c", near: 0.06, far: 0.76 },
-  { p: 0.75, zenith: "#2a3868", horizon: "#c97e66", glow: "#ff7440", glowAmt: 1.0, hemiSky: "#9a8090", hemiGround: "#3a2c28", hemi: 0.85, cloudLit: "#ff9a6a", cloudDark: "#4e3e58", near: 0.04, far: 0.7 },
-  { p: 0.77, zenith: "#18214a", horizon: "#6e4c62", glow: "#d0566a", glowAmt: 0.6, hemiSky: "#5e5a7c", hemiGround: "#1e1a1e", hemi: 0.8, cloudLit: "#9a5a72", cloudDark: "#2a2438", near: 0.04, far: 0.68 },
-  { p: 0.795, zenith: "#0c1330", horizon: "#2a3050", glow: "#5a3e62", glowAmt: 0.25, hemiSky: "#3e4c74", hemiGround: "#12141a", hemi: 0.85, cloudLit: "#3a3c5a", cloudDark: "#121622", near: 0.04, far: 0.68 },
-  { p: 0.84, zenith: "#060a16", horizon: "#141e33", glow: "#1d2744", glowAmt: 0, hemiSky: "#35496f", hemiGround: "#0e1219", hemi: 0.95, cloudLit: "#29344c", cloudDark: "#0b0f18", near: 0.04, far: 0.72 },
+  { p: 0.0, zenith: "#04070f", horizon: "#121c30", glow: "#1b2540", glowAmt: 0, hemiSky: "#3a4f78", hemiGround: "#10141c", hemi: 1.15, cloudLit: "#1d2539", cloudDark: "#080b13", near: 0.04, far: 0.72 },
+  { p: 0.17, zenith: "#050812", horizon: "#141e33", glow: "#1d2744", glowAmt: 0, hemiSky: "#3a4f78", hemiGround: "#10141c", hemi: 1.1, cloudLit: "#1f283c", cloudDark: "#090c15", near: 0.04, far: 0.7 },
+  { p: 0.21, zenith: "#0c1328", horizon: "#2a2c48", glow: "#6a4a6a", glowAmt: 0.35, hemiSky: "#424e74", hemiGround: "#141419", hemi: 1.0, cloudLit: "#34344f", cloudDark: "#10131f", near: 0.02, far: 0.6 },
+  { p: 0.235, zenith: "#1f2c55", horizon: "#806a7c", glow: "#d98a78", glowAmt: 0.7, hemiSky: "#6c6e8c", hemiGround: "#2a2420", hemi: 1.05, cloudLit: "#b48092", cloudDark: "#3c3a55", near: 0.0, far: 0.46 },
+  { p: 0.255, zenith: "#3d5a8e", horizon: "#d6a289", glow: "#ffa060", glowAmt: 1.0, hemiSky: "#b0a4a8", hemiGround: "#4a3a2c", hemi: 1.15, cloudLit: "#ffc29a", cloudDark: "#6a5a70", near: 0.0, far: 0.42 },
+  { p: 0.285, zenith: "#5884bb", horizon: "#e8c9a6", glow: "#ffc68a", glowAmt: 0.6, hemiSky: "#c4c8cc", hemiGround: "#5a4a36", hemi: 1.3, cloudLit: "#fff0dc", cloudDark: "#8e8e9e", near: 0.02, far: 0.52 },
+  { p: 0.34, zenith: "#5791cb", horizon: "#cfd9d6", glow: "#ffe6c0", glowAmt: 0.2, hemiSky: "#b6cce0", hemiGround: "#5c5440", hemi: 1.45, cloudLit: "#ffffff", cloudDark: "#a3b0c2", near: 0.07, far: 0.78 },
+  { p: 0.42, zenith: "#4c88c8", horizon: "#c2d4de", glow: "#fff2d8", glowAmt: 0.06, hemiSky: "#b0c8e2", hemiGround: "#5e5844", hemi: 1.55, cloudLit: "#ffffff", cloudDark: "#a8b6c8", near: 0.12, far: 0.95 },
+  { p: 0.5, zenith: "#4a86c7", horizon: "#c0d3de", glow: "#fff4e0", glowAmt: 0.04, hemiSky: "#b0c8e2", hemiGround: "#605a46", hemi: 1.55, cloudLit: "#ffffff", cloudDark: "#a8b6c8", near: 0.13, far: 1.0 },
+  { p: 0.6, zenith: "#4c86c4", horizon: "#c6d5da", glow: "#fff0d4", glowAmt: 0.06, hemiSky: "#b4c8de", hemiGround: "#625a44", hemi: 1.55, cloudLit: "#ffffff", cloudDark: "#aab4c4", near: 0.12, far: 0.95 },
+  { p: 0.68, zenith: "#5279ad", horizon: "#dcd0b4", glow: "#ffcc8a", glowAmt: 0.3, hemiSky: "#c4c4c4", hemiGround: "#62523c", hemi: 1.4, cloudLit: "#fff0d6", cloudDark: "#9c98a4", near: 0.1, far: 0.88 },
+  { p: 0.725, zenith: "#3e5688", horizon: "#e4ae84", glow: "#ffa058", glowAmt: 0.75, hemiSky: "#c0a8a0", hemiGround: "#523e2e", hemi: 1.2, cloudLit: "#ffb27a", cloudDark: "#6c5a6c", near: 0.06, far: 0.76 },
+  { p: 0.75, zenith: "#2a3868", horizon: "#c97e66", glow: "#ff7440", glowAmt: 1.0, hemiSky: "#9a8094", hemiGround: "#3a2c28", hemi: 1.1, cloudLit: "#ff9a6a", cloudDark: "#4e3e58", near: 0.04, far: 0.7 },
+  { p: 0.77, zenith: "#18214a", horizon: "#6e4c62", glow: "#d0566a", glowAmt: 0.6, hemiSky: "#605c80", hemiGround: "#1e1a1e", hemi: 1.0, cloudLit: "#8a5068", cloudDark: "#2a2438", near: 0.04, far: 0.68 },
+  { p: 0.795, zenith: "#0c1330", horizon: "#2a3050", glow: "#5a3e62", glowAmt: 0.25, hemiSky: "#425078", hemiGround: "#12141a", hemi: 1.05, cloudLit: "#30324e", cloudDark: "#10131f", near: 0.04, far: 0.68 },
+  { p: 0.84, zenith: "#060a16", horizon: "#141e33", glow: "#1d2744", glowAmt: 0, hemiSky: "#3a4f78", hemiGround: "#10141c", hemi: 1.15, cloudLit: "#1f283c", cloudDark: "#090c15", near: 0.04, far: 0.72 },
 ];
 
 const COLOR_FIELDS = ["zenith", "horizon", "glow", "hemiSky", "hemiGround", "cloudLit", "cloudDark"];
@@ -122,6 +124,17 @@ const SUN_COLOR_KEYS = [
   { y: 0.42, c: new THREE.Color("#ffedd6") },
   { y: 1.0, c: new THREE.Color("#fff4e6") },
 ];
+
+/** Piecewise-linear lookup in [[x, value], ...] (clamped at both ends). */
+function sampleCurve(keys, x) {
+  if (x <= keys[0][0]) return keys[0][1];
+  for (let i = 0; i < keys.length - 1; i++) {
+    const a = keys[i];
+    const b = keys[i + 1];
+    if (x <= b[0]) return lerp(a[1], b[1], (x - a[0]) / (b[0] - a[0]));
+  }
+  return keys[keys.length - 1][1];
+}
 
 function sampleSunColor(y, out) {
   const k = SUN_COLOR_KEYS;
@@ -302,7 +315,7 @@ void main() {
   float mu2 = mu * mu;
   float mu8 = mu2 * mu2;
   mu8 *= mu8;
-  col += uSunHalo * (mu8 * 0.16 + pow(mu, 90.0) * 0.45 + pow(mu, 1400.0) * 1.4) * smoothstep(-0.12, 0.02, y);
+  col += uSunHalo * (mu8 * 0.16 + pow(mu, 90.0) * 0.4 + pow(mu, 2200.0) * 0.7) * smoothstep(-0.12, 0.02, y);
   col = mix(col, uSunDisc, smoothstep(SUN_COS_OUT, SUN_COS_IN, mu) * aboveHorizon);
 
   /* Moon: soft halo, then a full disc with darker maria and limb darkening. */
@@ -528,7 +541,7 @@ export class Sky {
     u.uTime.value = this._time;
     u.uCloudOffset.value.x = (u.uCloudOffset.value.x + dt * 0.0042) % 1000;
     u.uCloudOffset.value.y = (u.uCloudOffset.value.y + dt * 0.0017) % 1000;
-    u.uCloudCover.value = 0.52 + 0.06 * Math.sin(this._time * 0.0021 + 1.3) + 0.03 * Math.sin(this._time * 0.0057);
+    u.uCloudCover.value = 0.48 + 0.06 * Math.sin(this._time * 0.0021 + 1.3) + 0.03 * Math.sin(this._time * 0.0057);
 
     this._apply();
 
@@ -629,8 +642,8 @@ export class Sky {
     /* Key light: sun by day, moon by night. Around the horizon crossing both
        are faint; the direction blends between the two lifted directions
        (swinging overhead) while the intensity dips, so nothing ever pops. */
-    const sunI = SUN_INTENSITY * smoothstep(-0.03, 0.42, sunY);
-    const moonI = MOON_INTENSITY * smoothstep(-0.05, 0.32, moonY);
+    const sunI = sampleCurve(SUN_INTENSITY, sunY);
+    const moonI = sampleCurve(MOON_INTENSITY, moonY);
     const w = smoothstep(-0.09, 0.05, sunY);
     liftDir(sun, _liftA);
     liftDir(moon, _liftB);
@@ -660,8 +673,9 @@ export class Sky {
     u.uSunDir.value.copy(sun);
     const sunVis = smoothstep(-0.22, 0.03, sunY);
     u.uSunHalo.value.copy(this.sunColor).multiplyScalar(sunVis);
-    // Disc: tinted at the horizon, nearly white high up; > 1 clips to a hot core.
-    u.uSunDisc.value.copy(this.sunColor).lerp(WHITE, 0.55 * smoothstep(0.0, 0.35, sunY)).multiplyScalar(1.8);
+    // Disc: values > 1 clip, so a strong tint plus a little white reads as a
+    // hot pale-gold core at the horizon and plain white high in the sky.
+    u.uSunDisc.value.copy(this.sunColor).multiplyScalar(2.2).add(_white03);
     u.uMoonDir.value.copy(moon);
     // A pale, translucent day moon; a solid bright disc at night.
     u.uMoonAlpha.value = this.moonlight * lerp(1, 0.4, this.daylight);
