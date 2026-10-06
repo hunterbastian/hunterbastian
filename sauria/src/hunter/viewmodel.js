@@ -213,7 +213,7 @@ function buildTextures(lowDetail) {
   const wood = textureSet(lowDetail ? 256 : 512, (u, v, s) => {
     const w1 = tfbm(n, u, v, 1, 2, 4);
     const w2 = n(u * 4, v * 32, 4, 32);
-    const g = v * 26 + w1 * 3.4 + w2 * 0.18;
+    const g = v * 26 + w1 * 2.4 + w2 * 0.16;
     const ring = g - Math.floor(g);
     const late = smoothstep(0.55, 0.93, ring) * (1 - smoothstep(0.94, 1, ring));
     const fig = tfbm(n2, u, v, 2, 3, 4) * 0.5 + 0.5;
@@ -1184,15 +1184,16 @@ function buildHand(L, pose, detail) {
   // Back-of-hand panel stitched over the metacarpals.
   P.add(xform(ellipsoid(0.03, 0.0055, 0.034, S + 4, 9), 0.0, 0.0122, -0.045), L.gloveDark);
 
-  // Gauntlet cuff with a hook-and-loop strap.
-  const cuff = lathe([[0.0305, -0.02], [0.034, -0.002], [0.0372, 0.03], [0.0405, 0.058], [0.0418, 0.0635], [0.0402, 0.0668], [0.0365, 0.0672]], S + 10, { sy: 0.78 });
+  // Gauntlet cuff with a hook-and-loop strap. It ends just past the wrist
+  // pivot, tucked under the sleeve hem, so a bent wrist never exposes its rim.
+  const cuff = lathe([[0.0305, -0.02], [0.034, -0.002], [0.0372, 0.022], [0.0395, 0.042], [0.0402, 0.0475], [0.0388, 0.0502], [0.036, 0.0507]], S + 10, { sy: 0.78 });
   P.add(cuff, L.glove);
-  P.add(lathe([[0.0388, 0.019], [0.0402, 0.0205], [0.0404, 0.0405], [0.039, 0.042]], S + 10, { sy: 0.8 }), L.strap);
-  P.add(rbox([-0.012, 0.012], [0.0298, 0.0352], [0.017, 0.044], 0.0024), L.strap);
+  P.add(lathe([[0.0378, 0.012], [0.0392, 0.0135], [0.0395, 0.0315], [0.038, 0.033]], S + 10, { sy: 0.8 }), L.strap);
+  P.add(rbox([-0.012, 0.012], [0.0292, 0.0346], [0.01, 0.036], 0.0024), L.strap);
 
   // Canvas sleeve with a rolled hem and soft wrinkles, bent at the wrist.
   const sleeve = lathe(
-    [[0.0425, 0.052], [0.0478, 0.0535], [0.0495, 0.06], [0.049, 0.068], [0.0468, 0.073], [0.0475, 0.1], [0.05, 0.16], [0.053, 0.24], [0.055, 0.33], [0.056, 0.44]],
+    [[0.0415, 0.043], [0.0475, 0.0447], [0.0496, 0.052], [0.0492, 0.06], [0.047, 0.066], [0.0475, 0.1], [0.05, 0.16], [0.053, 0.24], [0.055, 0.33], [0.056, 0.44]],
     S + 14,
     {
       sy: 0.86,
@@ -1544,7 +1545,8 @@ function buildRevolver(L, S) {
 
   rig.muzzle.position.set(0, yb, -0.193);
   rig.gun.add(rig.muzzle);
-  rig.sights = { rear: [0, ys, 0.026], front: [0, ys, -0.18], eye: 0.34 };
+  // Held out at arm's length when aimed, so the forearm falls away below the view.
+  rig.sights = { rear: [0, ys, 0.026], front: [0, ys, -0.18], eye: 0.5 };
   rig.hip = { pos: [0.118, -0.122, -0.31], rot: [0.03, 0.07, -0.05] };
   rig.flashSize = 0.13;
   rig.kick = { back: 0.05, rot: 0.32, yaw: 0.05 };

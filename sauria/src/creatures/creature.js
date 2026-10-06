@@ -32,7 +32,7 @@ const DOT_EVENT_INTERVAL = 1; // starvation / bleeding "damage" events once a se
 const REST_LOCK = 2; // seconds a hit keeps a creature from lying back down
 const GOOD_SWIMMER = 0.7; // swim ability at which swimming costs no stamina
 const LEG_HEAL_TIME = 70; // seconds a broken leg takes to heal (resting heals ×2)
-const QUADRUPEDS = new Set(["stegosaurus", "gastonia", "diplodocus", "camptosaurus"]); // fallback when body.plan is absent
+const QUADRUPEDS = new Set(["stegosaurus", "gastonia", "diplodocus", "brontosaurus", "camptosaurus"]); // fallback when body.plan is absent
 const ATTACK_TYPES = { bite: true, tail: true, kick: true };
 
 // One-shot attack timing: total duration and the moment (0..1) the blow lands.

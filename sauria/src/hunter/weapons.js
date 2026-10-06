@@ -304,9 +304,10 @@ function particleAtlas() {
       let a = 0;
       let lum = 1;
       if (cell === 0) {
+        // Full-bodied, soft-edged puff with a lumpy rim.
         const n = noise(x * 6 + 8, y * 6 + 8) * 0.6 + noise(x * 13 + 3, y * 13 + 5) * 0.4;
-        a = clamp(1 - r / (0.62 + n * 0.3), 0, 1);
-        a = a * a * (0.65 + n * 0.5);
+        a = clamp(1 - r / (0.8 + n * 0.2), 0, 1);
+        a = a * (1.6 - 0.6 * a) * (0.7 + n * 0.45);
         lum = 0.82 + n * 0.25 - r * 0.15;
       } else if (cell === 1) {
         a = clamp((0.8 - r) * 6, 0, 1);
@@ -496,7 +497,8 @@ class ParticleField {
       P[i * 3] = this.px[i];
       P[i * 3 + 1] = this.py[i];
       P[i * 3 + 2] = this.pz[i];
-      D[i * 4] = this.s0[i] + (this.s1[i] - this.s0[i]) * (1 - (1 - t) * (1 - t));
+      const g = 1 - t;
+      D[i * 4] = this.s0[i] + (this.s1[i] - this.s0[i]) * (1 - g * g * g);
       D[i * 4 + 1] = this.rot[i];
       // Quick fade-in, long ease-out.
       D[i * 4 + 2] = this.a0[i] * Math.min(1, t * 12) * (1 - t) * (1 - t * 0.35);
@@ -630,20 +632,20 @@ class Tracers {
 
 const lin = (hex) => new THREE.Color(hex);
 const DUST = {
-  sand: lin(0xc6b38c),
-  beach: lin(0xc6b38c),
-  plains: lin(0x8a7a5c),
-  forest: lin(0x5e5240),
-  swamp: lin(0x4e4632),
-  highland: lin(0x878068),
-  rock: lin(0x8c857c),
-  default: lin(0x857558),
+  sand: lin(0xd8c8a2),
+  beach: lin(0xd8c8a2),
+  plains: lin(0xae9d7c),
+  forest: lin(0x8a7a62),
+  swamp: lin(0x7a6e56),
+  highland: lin(0xa89f88),
+  rock: lin(0xa8a198),
+  default: lin(0xa89878),
 };
-const WOOD = lin(0xa98a62);
-const BARK = lin(0x4a3a2a);
-const ROCK = lin(0x8a847c);
+const WOOD = lin(0xb8976a);
+const SAWDUST = lin(0x9c8462);
+const ROCK = lin(0x9a948a);
 const BLOOD = lin(0x5a0606);
-const BLOOD_MIST = lin(0x6e1010);
+const BLOOD_MIST = lin(0x8a1610);
 const WATER = lin(0xdfe9ec);
 const SMOKE = lin(0xb9b6ae);
 
@@ -1487,54 +1489,63 @@ export class WeaponSystem {
     const p = hit.point;
     const n = hit.normal;
     const rnd = Math.random;
+    // Puffs grow with distance so a hit still reads at 100 m (where a true-size
+    // puff would be a couple of pixels); debris grows more gently.
+    const far = clamp(hit.distance / 12, 1, 6);
+    const farS = Math.sqrt(far);
+    const puff = far * 1.5;
     if (hit.creature) {
-      const sz = clamp((hit.creature.scale ?? 1) * 0.6, 0.4, 1.4) * scale;
-      for (let i = 0; i < 3; i++) {
-        P.spawn(p.x, p.y, p.z, n.x * 0.8 + (rnd() - 0.5), n.y * 0.8 + rnd() * 0.4, n.z * 0.8 + (rnd() - 0.5), 0.45 + rnd() * 0.25, 0.12 * sz, 0.65 * sz, BLOOD_MIST.r, BLOOD_MIST.g, BLOOD_MIST.b, 0.75, 0, 3.5, 0.4);
+      const sz = clamp((hit.creature.scale ?? 1) * 0.7, 0.5, 1.4) * scale;
+      for (let i = 0; i < 5; i++) {
+        P.spawn(p.x, p.y, p.z, n.x * 0.9 + (rnd() - 0.5) * 0.8, n.y * 0.6 + rnd() * 0.5, n.z * 0.9 + (rnd() - 0.5) * 0.8, 0.6 + rnd() * 0.3, 0.3 * sz * puff, (0.9 + rnd() * 0.5) * sz * puff, BLOOD_MIST.r, BLOOD_MIST.g, BLOOD_MIST.b, 0.92, 0, 3.2, 0.5);
       }
-      for (let i = 0; i < 9; i++) {
+      for (let i = 0; i < 12; i++) {
         // Exit spray along the shot plus a little back-spatter.
-        const back = i < 3 ? -0.4 : 1;
-        const s = 2.5 + rnd() * 4;
-        P.spawn(p.x, p.y, p.z, (dir.x * back + (rnd() - 0.5) * 0.7) * s, (dir.y * back + rnd() * 0.5) * s, (dir.z * back + (rnd() - 0.5) * 0.7) * s, 0.5 + rnd() * 0.3, 0.035 * sz, 0.05 * sz, BLOOD.r, BLOOD.g, BLOOD.b, 0.95, 1, 0.6, 9.8);
+        const back = i < 4 ? -0.5 : 1;
+        const sp = 2.5 + rnd() * 4.5;
+        P.spawn(p.x, p.y, p.z, (dir.x * back + (rnd() - 0.5) * 0.8) * sp, (dir.y * back + rnd() * 0.6) * sp, (dir.z * back + (rnd() - 0.5) * 0.8) * sp, 0.45 + rnd() * 0.35, 0.045 * sz * farS, 0.06 * sz * farS, BLOOD.r, BLOOD.g, BLOOD.b, 1, 1, 0.6, 9.8);
       }
       return;
     }
     if (hit.water) {
-      for (let i = 0; i < 12; i++) {
+      for (let i = 0; i < 14; i++) {
         const a = rnd() * TAU;
-        const s = 0.6 + rnd() * 1.4;
-        P.spawn(p.x, p.y + 0.02, p.z, Math.cos(a) * s, 2.5 + rnd() * 3.5, Math.sin(a) * s, 0.7 + rnd() * 0.3, 0.06, 0.04, WATER.r, WATER.g, WATER.b, 0.85, 1, 0.3, 9.8);
+        const sp = 0.6 + rnd() * 1.5;
+        P.spawn(p.x, p.y + 0.02, p.z, Math.cos(a) * sp, 2.8 + rnd() * 3.8, Math.sin(a) * sp, 0.7 + rnd() * 0.35, 0.07 * farS, 0.05 * farS, WATER.r, WATER.g, WATER.b, 0.9, 1, 0.3, 9.8);
       }
-      for (let i = 0; i < 3; i++) P.spawn(p.x + (rnd() - 0.5) * 0.2, p.y + 0.15, p.z + (rnd() - 0.5) * 0.2, 0, 0.6 + rnd() * 0.4, 0, 0.9, 0.25, 1.1, WATER.r, WATER.g, WATER.b, 0.35, 0, 2);
-      P.spawn(p.x, p.y + 0.01, p.z, 0, 0, 0, 1.4, 0.3, 2.6 * scale, WATER.r, WATER.g, WATER.b, 0.55, 3, 0, 0, 1);
-      P.spawn(p.x, p.y + 0.01, p.z, 0, 0, 0, 1.0, 0.2, 1.4 * scale, WATER.r, WATER.g, WATER.b, 0.5, 3, 0, 0, 1);
+      // Spray column and the mist it leaves.
+      for (let i = 0; i < 5; i++) {
+        P.spawn(p.x + (rnd() - 0.5) * 0.2, p.y + 0.2, p.z + (rnd() - 0.5) * 0.2, (rnd() - 0.5) * 0.4, 1.4 + rnd() * 1.8, (rnd() - 0.5) * 0.4, 0.9 + rnd() * 0.4, 0.35 * puff * scale, (1.2 + rnd() * 0.6) * puff * scale, WATER.r, WATER.g, WATER.b, 0.75, 0, 2.2, 1.2);
+      }
+      P.spawn(p.x, p.y + 0.01, p.z, 0, 0, 0, 1.5, 0.3, 2.8 * scale * farS, WATER.r, WATER.g, WATER.b, 0.6, 3, 0, 0, 1);
+      P.spawn(p.x, p.y + 0.01, p.z, 0, 0, 0, 1.1, 0.2, 1.5 * scale * farS, WATER.r, WATER.g, WATER.b, 0.55, 3, 0, 0, 1);
       return;
     }
     if (hit.tree) {
       const c = hit.tree;
       const rocky = c.kind === "boulder" || c.kind === "rock" || c.type === "boulder" || c.type === "rock";
       const chip = rocky ? ROCK : WOOD;
-      for (let i = 0; i < 9; i++) {
-        const s = 2 + rnd() * 4;
-        P.spawn(p.x, p.y, p.z, (n.x - dir.x * 0.4 + (rnd() - 0.5) * 0.9) * s, (0.3 + rnd() * 0.9) * s, (n.z - dir.z * 0.4 + (rnd() - 0.5) * 0.9) * s, 0.7 + rnd() * 0.5, 0.035 + rnd() * 0.03, 0.03, chip.r, chip.g, chip.b, 1, 2, 0.5, 9.8);
+      for (let i = 0; i < 11; i++) {
+        const sp = 2 + rnd() * 4;
+        P.spawn(p.x, p.y, p.z, (n.x - dir.x * 0.4 + (rnd() - 0.5) * 0.9) * sp, (0.3 + rnd() * 0.9) * sp, (n.z - dir.z * 0.4 + (rnd() - 0.5) * 0.9) * sp, 0.7 + rnd() * 0.5, (0.04 + rnd() * 0.035) * farS, 0.035 * farS, chip.r, chip.g, chip.b, 1, 2, 0.5, 9.8);
       }
-      const dust = rocky ? ROCK : BARK;
-      for (let i = 0; i < 3; i++) P.spawn(p.x + n.x * 0.1, p.y, p.z + n.z * 0.1, n.x * 0.8 + (rnd() - 0.5) * 0.4, 0.2 + rnd() * 0.3, n.z * 0.8 + (rnd() - 0.5) * 0.4, 1.0 + rnd() * 0.5, 0.15, 0.7 * scale, dust.r, dust.g, dust.b, 0.45, 0, 2.2, -0.05);
+      const dust = rocky ? ROCK : SAWDUST;
+      for (let i = 0; i < 5; i++) P.spawn(p.x + n.x * 0.1, p.y, p.z + n.z * 0.1, n.x * 0.9 + (rnd() - 0.5) * 0.5, 0.2 + rnd() * 0.3, n.z * 0.9 + (rnd() - 0.5) * 0.5, 1.0 + rnd() * 0.5, 0.25 * puff * scale, (0.8 + rnd() * 0.4) * scale * puff, dust.r, dust.g, dust.b, 0.8, 0, 2.2, -0.05);
       return;
     }
-    // Terrain: a dust puff tinted by the ground, plus clods.
+    // Terrain: a dust puff tinted by the ground (airborne dust reads lighter
+    // than the soil it came from), plus clods.
     let biome = "default";
     const T = this.world.terrain;
     if (T && typeof T.biomeAt === "function") biome = T.biomeAt(p.x, p.z) || "default";
     const c = DUST[biome] || DUST.default;
-    for (let i = 0; i < 5; i++) {
-      const s = 0.4 + rnd() * 1.2;
-      P.spawn(p.x + n.x * 0.05, p.y + n.y * 0.05, p.z + n.z * 0.05, (n.x + (rnd() - 0.5) * 0.8) * s, (n.y * 0.8 + rnd() * 0.6) * s, (n.z + (rnd() - 0.5) * 0.8) * s, 1.2 + rnd() * 0.8, 0.2 * scale, (1.0 + rnd() * 0.8) * scale, c.r, c.g, c.b, 0.55, 0, 2.6, -0.08);
-    }
     for (let i = 0; i < 7; i++) {
-      const s = 2 + rnd() * 3;
-      P.spawn(p.x, p.y + 0.03, p.z, (n.x + (rnd() - 0.5) * 1.2) * s, (n.y + rnd() * 0.6) * s, (n.z + (rnd() - 0.5) * 1.2) * s, 0.6 + rnd() * 0.4, 0.04 + rnd() * 0.03, 0.035, c.r * 0.7, c.g * 0.7, c.b * 0.7, 1, 2, 0.4, 9.8);
+      const sp = 0.4 + rnd() * 1.2;
+      P.spawn(p.x + n.x * 0.05, p.y + n.y * 0.05, p.z + n.z * 0.05, (n.x + (rnd() - 0.5) * 0.8) * sp, (n.y * 0.8 + rnd() * 0.6) * sp, (n.z + (rnd() - 0.5) * 0.8) * sp, 1.2 + rnd() * 0.8, 0.35 * scale * puff, (1.3 + rnd() * 0.9) * scale * puff, c.r, c.g, c.b, 0.9, 0, 2.6, -0.08);
+    }
+    for (let i = 0; i < 8; i++) {
+      const sp = 2 + rnd() * 3;
+      P.spawn(p.x, p.y + 0.03, p.z, (n.x + (rnd() - 0.5) * 1.2) * sp, (n.y + rnd() * 0.6) * sp, (n.z + (rnd() - 0.5) * 1.2) * sp, 0.6 + rnd() * 0.4, (0.045 + rnd() * 0.03) * farS, 0.04 * farS, c.r * 0.55, c.g * 0.55, c.b * 0.55, 1, 2, 0.4, 9.8);
     }
   }
 
