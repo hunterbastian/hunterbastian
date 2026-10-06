@@ -11,10 +11,12 @@
 // samples ONE mip-mapped atlas through ONE material, so a whole forest is a
 // handful of draw calls (≈19 + shadow casters). Trees and rocks have two LODs
 // (detailed near the focus, simplified far away); the per-chunk instance lists
-// are rebuilt only when the focus has moved ~12 m, and the hand-over between
-// LODs is a screen-door dither driven by the live focus in the shader, so
-// nothing pops. Grass and forest-floor undergrowth are generated per 12 m chunk
-// around the focus and shrink to nothing at the edge of their radius.
+// are rebuilt only when the focus has moved ~12 m. The hand-over is per
+// instance, at its own hashed distance inside the LOD band: for a few metres
+// the far version is drawn around a slightly shrunken near one, then the near
+// one goes — never a screen-door dither, which reads as dotted noise (and turns
+// into chunky noise in the pixel style). Food plants, logs, grass and
+// forest-floor undergrowth shrink to nothing at the edge of their radius.
 //
 // Shadows: foliage casts through a custom depth material (subclass of
 // MeshDepthMaterial so three's internal per-material clone keeps the wind hook)
@@ -51,6 +53,8 @@ const TREE_H = { araucaria: 26, podocarp: 19, ginkgo: 15, treefern: 6.5, snag: 1
 const HASH_CELL = 16; // spatial hash cell (m) for colliders and plants
 const LOD_CHUNK = 32; // trees / rocks are bucketed into chunks this big for LOD lists
 const LOD_REBUILD = 12; // rebuild LOD lists after the focus moves this far (m)
+const FAR_VIEW_MARGIN = 48; // m of slack around the frustum / fog end for far-LOD lists
+const FAR_TOP = 42; // m above its base a far-LOD instance can reach (chunk boxes for view tests)
 
 /* --- Atlas layout ------------------------------------------------------------ */
 
@@ -935,15 +939,19 @@ function buildRockTexture(size, seed) {
 
 // Per-vertex `aWind`: x = bend (metres of sway at full gust, unit instance scale),
 // y = flutter weight (leaf tips), z = 1 for foliage cards / 0 for bark.
-// `uLod` = (fadeStart, fadeEnd, invert, -): an instance is visible below fadeStart
-// (or above fadeEnd when inverted, i.e. the far LOD) and dithers out in between.
+// `uLod` = (bandStart, bandEnd, far, overlap). Swap mode (trees): each instance
+// hands over at its own hashed distance in [bandStart, bandEnd - overlap]; over the
+// next `overlap` metres the near version shrinks to LOD_INSET inside the (slightly
+// larger) far version, which is already drawn, then collapses. `far` = 1 selects
+// the far side. VEG_SHRINK mode (plants, logs, grass): scale to nothing across
+// the band.
+const LOD_INSET = 0.88;
 const VEG_VERT_PARS = /* glsl */ `
 uniform float uTime;
 uniform vec3 uWind;
 uniform vec3 uFocus;
 uniform vec4 uLod;
 attribute vec3 aWind;
-varying float vFade;
 varying float vLeaf;
 `;
 
@@ -958,8 +966,14 @@ const VEG_VERT_MAIN = /* glsl */ `
     vegM = mat3( instanceMatrix );
   #endif
   float vegScale = length( vegM[ 1 ] );
-  float vegT = smoothstep( uLod.x, uLod.y, distance( vegBase.xz, uFocus.xz ) );
-  vFade = mix( 1.0 - vegT, vegT, uLod.z );
+  float vegDist = distance( vegBase.xz, uFocus.xz );
+  #ifdef VEG_SHRINK
+    float vegKeep = 1.0 - smoothstep( uLod.x, uLod.y, vegDist );
+  #else
+    float vegAt = mix( uLod.x, uLod.y - uLod.w, fract( sin( dot( vegBase.xz, vec2( 41.37, 17.91 ) ) ) * 23421.631 ) );
+    float vegT = clamp( ( vegDist - vegAt ) / max( uLod.w, 0.001 ), 0.0, 1.0 );
+    float vegKeep = uLod.z > 0.5 ? step( vegAt, vegDist ) : ( vegT < 1.0 ? mix( 1.0, ${LOD_INSET.toFixed(3)}, vegT ) : 0.0 );
+  #endif
   vLeaf = aWind.z;
   float vegPh = dot( vegBase.xz, vec2( 0.071, 0.053 ) ) + fract( sin( dot( vegBase.xz, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 ) * 6.2832;
   float vegGust = uWind.z;
@@ -978,11 +992,7 @@ const VEG_VERT_MAIN = /* glsl */ `
   #else
     transformed += vegD;
   #endif
-  #ifdef VEG_SHRINK
-    transformed *= vFade;
-    vFade = 1.0;
-  #endif
-  if ( vFade < 0.004 ) transformed = vec3( 0.0 ); // collapse: no fragments at all
+  transformed *= vegKeep; // 0 collapses the instance: no fragments at all
 }
 `;
 
@@ -1002,7 +1012,6 @@ const VEG_COLOR_VERTEX = /* glsl */ `
 
 const VEG_FRAG_PARS = /* glsl */ `
 uniform float uAtlasSize;
-varying float vFade;
 varying float vLeaf;
 float vegDither( vec2 p ) {
   return fract( 52.9829189 * fract( dot( p, vec2( 0.06711056, 0.00583715 ) ) ) );
@@ -1010,8 +1019,7 @@ float vegDither( vec2 p ) {
 `;
 
 // Before <alphatest_fragment>: bark is opaque whatever its texel alpha, foliage
-// alpha is boosted with the mip level so canopies don't thin out with distance,
-// and LOD hand-over is a screen-door dither.
+// alpha is boosted with the mip level so canopies don't thin out with distance.
 const VEG_FRAG_ALPHA = /* glsl */ `
 #ifdef USE_MAP
 {
@@ -1022,7 +1030,6 @@ const VEG_FRAG_ALPHA = /* glsl */ `
   diffuseColor.a = vLeaf < 0.5 ? 1.0 : diffuseColor.a * ( 1.0 + vegLod * 0.24 );
 }
 #endif
-if ( vFade < 0.999 && vFade < vegDither( gl_FragCoord.xy ) ) discard;
 #ifdef VEG_DEPTH
   // Canopies let some light through: a fine hole pattern in the shadow map that
   // PCF blurs into partial transmission, so forest floors stay dappled, not black.
@@ -1093,7 +1100,7 @@ class PlantDepthMaterial extends THREE.MeshDepthMaterial {
     super({ depthPacking: THREE.RGBADepthPacking, ...(params || {}) });
     this.vegShared = veg.shared || null;
     this.vegLod = veg.lod || { value: new THREE.Vector4(1e7, 2e7, 0, 0) };
-    this.vegShrink = false;
+    this.vegShrink = !!veg.shrink;
   }
   copy(src) {
     super.copy(src);
@@ -1106,11 +1113,11 @@ class PlantDepthMaterial extends THREE.MeshDepthMaterial {
     patchVegShader(shader, this, true);
   }
   customProgramCacheKey() {
-    return "sauria-veg-depth";
+    return this.vegShrink ? "sauria-veg-depth-shrink" : "sauria-veg-depth";
   }
 }
 
-/** Boulders: object-space triplanar stone texture, moss on upward faces, LOD dither. */
+/** Boulders: object-space triplanar stone texture, moss on upward faces, per-instance LOD swap. */
 class RockMaterial extends THREE.MeshStandardMaterial {
   constructor(params, veg = {}) {
     super(params);
@@ -1137,8 +1144,7 @@ attribute float aMoss;
 varying vec3 vRockP;
 varying vec3 vRockN;
 varying float vRockUp;
-varying float vMoss;
-varying float vFade;`)
+varying float vMoss;`)
       .replace("#include <begin_vertex>", /* glsl */ `#include <begin_vertex>
 {
   vec3 rBase = vec3( 0.0 );
@@ -1147,13 +1153,15 @@ varying float vFade;`)
     rBase = instanceMatrix[ 3 ].xyz;
     rM = mat3( instanceMatrix );
   #endif
-  float rT = smoothstep( uLod.x, uLod.y, distance( rBase.xz, uFocus.xz ) );
-  vFade = mix( 1.0 - rT, rT, uLod.z );
+  // Whole-rock swap at a hashed distance inside the band (see VEG_VERT_PARS).
+  float rAt = mix( uLod.x, uLod.y, fract( sin( dot( rBase.xz, vec2( 41.37, 17.91 ) ) ) * 23421.631 ) );
+  float rKeep = step( rAt, distance( rBase.xz, uFocus.xz ) );
+  if ( uLod.z < 0.5 ) rKeep = 1.0 - rKeep;
   vRockP = position * vec3( length( rM[ 0 ] ), length( rM[ 1 ] ), length( rM[ 2 ] ) );
   vRockN = normal;
   vRockUp = normalize( rM * normal ).y;
   vMoss = aMoss;
-  if ( vFade < 0.004 ) transformed = vec3( 0.0 );
+  transformed *= rKeep;
 }`);
     shader.fragmentShader = shader.fragmentShader
       .replace("#include <common>", /* glsl */ `#include <common>
@@ -1161,14 +1169,9 @@ uniform sampler2D uRockMap;
 varying vec3 vRockP;
 varying vec3 vRockN;
 varying float vRockUp;
-varying float vMoss;
-varying float vFade;
-float rockDither( vec2 p ) {
-  return fract( 52.9829189 * fract( dot( p, vec2( 0.06711056, 0.00583715 ) ) ) );
-}`)
+varying float vMoss;`)
       .replace("#include <map_fragment>", /* glsl */ `#include <map_fragment>
 {
-  if ( vFade < 0.999 && vFade < rockDither( gl_FragCoord.xy ) ) discard;
   vec3 rw = pow( abs( normalize( vRockN ) ), vec3( 4.0 ) );
   rw /= rw.x + rw.y + rw.z;
   vec3 rp = vRockP * 0.38;
@@ -2091,13 +2094,23 @@ function markInstances(mesh, count, extra = null) {
 }
 
 /**
- * Two-LOD instance lists for one family of objects (trees or rocks), bucketed
- * into LOD_CHUNK chunks. `rebuild` refills the near/far InstancedMeshes with
- * every chunk that can contain a visible instance until the focus has moved
- * LOD_REBUILD metres; the exact per-instance cross-fade happens in the shader.
+ * Two-LOD instance lists for one family of objects (trees, rocks; or one-LOD
+ * food plants and logs with no far meshes), bucketed into LOD_CHUNK chunks.
+ * `update` refills the near/far InstancedMeshes with every chunk that can
+ * contain a visible instance until the focus has moved LOD_REBUILD metres; the
+ * exact per-instance hand-over happens in the shader. With `slots`, `slot[i]`
+ * is item i's current near-mesh instance (-1 when not listed) so single
+ * instances can be rewritten in place.
+ *
+ * The far list (which casts no shadows) is also culled to the last rendered
+ * view (`view`, see Vegetation#_onView): chunks outside the frustum, or whose
+ * nearest point is deeper than the fog's far end (pure fog colour), are left
+ * out. `checkView` rebuilds it only when something on screen is missing or a
+ * lot of what is listed has left the view, keeping a margin so turning is cheap
+ * (the view is one frame old when the lists draw; the margin covers that too).
  */
 class LodSet {
-  constructor(half, items, nearMeshes, farMeshes, { nearR, band, farR }) {
+  constructor(half, items, nearMeshes, farMeshes, { nearR, band, farR, slots = false }) {
     this.half = half;
     this.items = items; // { count, type: Uint8Array, mat: Float32Array, col: Float32Array, extra: Float32Array|null }
     this.near = nearMeshes;
@@ -2122,8 +2135,23 @@ class LodSet {
     this.start = start;
     this.nn = new Int32Array(nearMeshes.length);
     this.fn = new Int32Array(farMeshes.length);
+    this.slot = slots ? new Int32Array(items.count).fill(-1) : null;
     this.lastX = Infinity;
     this.lastZ = Infinity;
+    /** Last rendered view { planes, px, py, pz, dx, dy, dz, fogFar } or null (no culling). */
+    this.view = null;
+    if (farMeshes.length) {
+      // Vertical extent per chunk (instance bases up to FAR_TOP above) for the view tests.
+      this.ylo = new Float32Array(nc2).fill(1e9);
+      this.yhi = new Float32Array(nc2).fill(-1e9);
+      for (let i = 0; i < items.count; i++) {
+        const c = chunkOf[i];
+        const y = items.mat[i * 16 + 13];
+        if (y < this.ylo[c]) this.ylo[c] = y;
+        if (y + FAR_TOP > this.yhi[c]) this.yhi[c] = y + FAR_TOP;
+      }
+      this.farOn = new Uint8Array(nc2); // chunk is in the far lists right now
+    }
   }
 
   update(fx, fz, force = false) {
@@ -2132,42 +2160,125 @@ class LodSet {
     if (!force && dx * dx + dz * dz < LOD_REBUILD * LOD_REBUILD) return false;
     this.lastX = fx;
     this.lastZ = fz;
-    const { items, nn, fn, near, far, nc, half } = this;
+    const { items, nn, near, nc, half, slot } = this;
     nn.fill(0);
-    fn.fill(0);
+    if (slot) slot.fill(-1);
     const nearMax = this.nearR + LOD_REBUILD;
-    const farMin = this.nearR - this.band - LOD_REBUILD;
-    const farMax = this.farR + LOD_REBUILD;
-    for (let cz = 0; cz < nc; cz++) {
+    const cz0 = clamp(Math.floor((fz - nearMax + half) / LOD_CHUNK), 0, nc - 1);
+    const cz1 = clamp(Math.floor((fz + nearMax + half) / LOD_CHUNK), 0, nc - 1);
+    const cx0 = clamp(Math.floor((fx - nearMax + half) / LOD_CHUNK), 0, nc - 1);
+    const cx1 = clamp(Math.floor((fx + nearMax + half) / LOD_CHUNK), 0, nc - 1);
+    for (let cz = cz0; cz <= cz1; cz++) {
       const z0 = -half + cz * LOD_CHUNK;
       const ddz = Math.max(z0 - fz, 0, fz - (z0 + LOD_CHUNK));
-      const fdz = Math.max(Math.abs(fz - z0), Math.abs(fz - z0 - LOD_CHUNK));
-      for (let cx = 0; cx < nc; cx++) {
+      for (let cx = cx0; cx <= cx1; cx++) {
         const c = cz * nc + cx;
         const s0 = this.start[c];
         const s1 = this.start[c + 1];
         if (s0 === s1) continue;
         const x0 = -half + cx * LOD_CHUNK;
         const ddx = Math.max(x0 - fx, 0, fx - (x0 + LOD_CHUNK));
-        const fdx = Math.max(Math.abs(fx - x0), Math.abs(fx - x0 - LOD_CHUNK));
-        const dn = Math.sqrt(ddx * ddx + ddz * ddz);
-        const df = Math.sqrt(fdx * fdx + fdz * fdz);
-        const inNear = dn < nearMax;
-        const inFar = df > farMin && dn < farMax;
-        if (!inNear && !inFar) continue;
+        if (ddx * ddx + ddz * ddz >= nearMax * nearMax) continue;
         for (let k = s0; k < s1; k++) {
           const i = this.order[k];
           const t = items.type[i];
-          if (inNear) this._copy(i, near[t], nn[t]++);
-          if (inFar && far[t]) this._copy(i, far[t], fn[t]++);
+          if (slot) slot[i] = nn[t];
+          this._copy(i, near[t], nn[t]++);
         }
       }
     }
-    for (let t = 0; t < near.length; t++) {
-      this._finish(near[t], nn[t], fx, fz, this.nearR + LOD_REBUILD + 40);
-      if (far[t]) this._finish(far[t], fn[t], fx, fz, this.farR + LOD_REBUILD + 40);
-    }
+    for (let t = 0; t < near.length; t++) this._finish(near[t], nn[t], fx, fz, this.nearR + LOD_REBUILD + 40);
+    if (this.far.length) this._rebuildFar();
     return true;
+  }
+
+  /** Is chunk `c` of the far ring around the last focus (and its 0/1 view state with `margin`)? */
+  _farWanted(c, cx, cz, margin) {
+    const fx = this.lastX;
+    const fz = this.lastZ;
+    const x0 = -this.half + cx * LOD_CHUNK;
+    const z0 = -this.half + cz * LOD_CHUNK;
+    const ddx = Math.max(x0 - fx, 0, fx - (x0 + LOD_CHUNK));
+    const ddz = Math.max(z0 - fz, 0, fz - (z0 + LOD_CHUNK));
+    const fdx = Math.max(Math.abs(fx - x0), Math.abs(fx - x0 - LOD_CHUNK));
+    const fdz = Math.max(Math.abs(fz - z0), Math.abs(fz - z0 - LOD_CHUNK));
+    const farMin = this.nearR - this.band - LOD_REBUILD;
+    const farMax = this.farR + LOD_REBUILD;
+    if (fdx * fdx + fdz * fdz <= farMin * farMin || ddx * ddx + ddz * ddz >= farMax * farMax) return false;
+    const v = this.view;
+    if (!v) return true;
+    const x1 = x0 + LOD_CHUNK;
+    const z1 = z0 + LOD_CHUNK;
+    const y0 = this.ylo[c];
+    const y1 = this.yhi[c];
+    // Frustum (planes pushed out by `margin`).
+    for (let i = 0; i < 6; i++) {
+      const pl = v.planes[i];
+      const n = pl.normal;
+      if (n.x * (n.x > 0 ? x1 : x0) + n.y * (n.y > 0 ? y1 : y0) + n.z * (n.z > 0 ? z1 : z0) + pl.constant < -margin) return false;
+    }
+    // Nearest view depth of the box vs the fog's far end.
+    const d =
+      (v.dx > 0 ? x0 : x1) * v.dx + (v.dy > 0 ? y0 : y1) * v.dy + (v.dz > 0 ? z0 : z1) * v.dz - (v.px * v.dx + v.py * v.dy + v.pz * v.dz);
+    return d < v.fogFar + margin;
+  }
+
+  _rebuildFar() {
+    const { items, fn, far, nc, farOn } = this;
+    fn.fill(0);
+    farOn.fill(0);
+    const fx = this.lastX;
+    const fz = this.lastZ;
+    const r = this.farR + LOD_REBUILD;
+    const cz0 = clamp(Math.floor((fz - r + this.half) / LOD_CHUNK), 0, nc - 1);
+    const cz1 = clamp(Math.floor((fz + r + this.half) / LOD_CHUNK), 0, nc - 1);
+    const cx0 = clamp(Math.floor((fx - r + this.half) / LOD_CHUNK), 0, nc - 1);
+    const cx1 = clamp(Math.floor((fx + r + this.half) / LOD_CHUNK), 0, nc - 1);
+    for (let cz = cz0; cz <= cz1; cz++) {
+      for (let cx = cx0; cx <= cx1; cx++) {
+        const c = cz * nc + cx;
+        const s0 = this.start[c];
+        const s1 = this.start[c + 1];
+        if (s0 === s1 || !this._farWanted(c, cx, cz, FAR_VIEW_MARGIN)) continue;
+        farOn[c] = 1;
+        for (let k = s0; k < s1; k++) {
+          const i = this.order[k];
+          const t = items.type[i];
+          if (far[t]) this._copy(i, far[t], fn[t]++);
+        }
+      }
+    }
+    for (let t = 0; t < far.length; t++) if (far[t]) this._finish(far[t], fn[t], fx, fz, this.farR + LOD_REBUILD + 40);
+    this.farRebuilds = (this.farRebuilds || 0) + 1;
+  }
+
+  /** After the view changed: rebuild the far lists if needed (see class comment). */
+  checkView() {
+    if (!this.far.length || !Number.isFinite(this.lastX)) return;
+    const { nc, farOn } = this;
+    const fx = this.lastX;
+    const fz = this.lastZ;
+    const r = this.farR + LOD_REBUILD;
+    const cz0 = clamp(Math.floor((fz - r + this.half) / LOD_CHUNK), 0, nc - 1);
+    const cz1 = clamp(Math.floor((fz + r + this.half) / LOD_CHUNK), 0, nc - 1);
+    const cx0 = clamp(Math.floor((fx - r + this.half) / LOD_CHUNK), 0, nc - 1);
+    const cx1 = clamp(Math.floor((fx + r + this.half) / LOD_CHUNK), 0, nc - 1);
+    let have = 0;
+    let want = 0;
+    for (let cz = cz0; cz <= cz1; cz++) {
+      for (let cx = cx0; cx <= cx1; cx++) {
+        const c = cz * nc + cx;
+        const n = this.start[c + 1] - this.start[c];
+        if (!n) continue;
+        const wide = this._farWanted(c, cx, cz, FAR_VIEW_MARGIN);
+        if (farOn[c]) have += n;
+        if (wide) want += n;
+        // Something about to come on screen isn't listed: rebuild now. The view is
+        // a frame old by the time the lists draw, so test with half the margin.
+        if (wide && !farOn[c] && this._farWanted(c, cx, cz, FAR_VIEW_MARGIN * 0.5)) return this._rebuildFar();
+      }
+    }
+    if (have > want * 1.3 + 64) this._rebuildFar();
   }
 
   _copy(i, mesh, j) {
@@ -2187,7 +2298,9 @@ class LodSet {
 
   _finish(mesh, count, fx, fz, radius) {
     mesh.count = count;
-    mesh.visible = count > 0;
+    // The view anchor stays "visible" with no instances (three skips the empty
+    // draw) so its onBeforeRender keeps reporting the camera.
+    mesh.visible = count > 0 || mesh.userData.vegViewAnchor === true;
     markInstances(mesh, count, this.items.extra ? mesh.geometry.attributes.aMoss : null);
     mesh.boundingSphere.center.set(fx, 0, fz);
     mesh.boundingSphere.radius = radius;
@@ -2197,6 +2310,7 @@ class LodSet {
 /* --- Grass & undergrowth around the focus ------------------------------------------------- */
 
 const GRASS_CHUNK = 12;
+const GRASS_BUILDS = 3; // new grass chunks generated per frame while walking (each ≈1 ms); the rest follow
 const UNDER_TRIES = 40; // undergrowth candidates per chunk
 const GRASS_DENSITY = { plains: 0.62, forest: 0.13, swamp: 0.42, highland: 0.3, beach: 0.04, rock: 0.02 };
 const UNDER_DENSITY = { forest: 0.24, swamp: 0.1, plains: 0.018, highland: 0.006 };
@@ -2229,6 +2343,7 @@ class GrassField {
     this.grass.name = "veg-grass";
     this.under.name = "veg-undergrowth";
     this.cache = new Map();
+    this.pending = false; // some chunks in reach still to be generated
     this.lastX = Infinity;
     this.lastZ = Infinity;
   }
@@ -2237,11 +2352,16 @@ class GrassField {
     const dx = fx - this.lastX;
     const dz = fz - this.lastZ;
     const step = GRASS_CHUNK * 0.5;
-    if (!force && dx * dx + dz * dz < step * step) return;
+    const moved = dx * dx + dz * dz;
+    if (!force && !this.pending && moved < step * step) return;
     this.lastX = fx;
     this.lastZ = fz;
     const half = this.veg.terrain.half;
     const reach = this.radius + step;
+    // Walking only uncovers chunks at the faded rim: build a few per frame
+    // instead of a whole row at once (a ~15 ms hitch). Jumps build everything.
+    let budget = force || moved > reach * reach * 0.25 ? Infinity : GRASS_BUILDS;
+    this.pending = false;
     const c0x = Math.floor((fx - reach + half) / GRASS_CHUNK);
     const c1x = Math.floor((fx + reach + half) / GRASS_CHUNK);
     const c0z = Math.floor((fz - reach + half) / GRASS_CHUNK);
@@ -2259,6 +2379,13 @@ class GrassField {
         const x0 = cx * GRASS_CHUNK - half;
         const ddx = Math.max(x0 - fx, 0, fx - x0 - GRASS_CHUNK);
         if (ddx * ddx + ddz * ddz > reach * reach) continue;
+        if (!this.cache.has(cz * 4096 + cx)) {
+          if (budget <= 0) {
+            this.pending = true;
+            continue;
+          }
+          budget--;
+        }
         const ch = this._chunk(cx, cz);
         if (ch.gn && ng + ch.gn <= this.grassCap) {
           gm.set(ch.gm, ng * 16);
@@ -2435,6 +2562,7 @@ const _axis = new V3();
 const _nrm = new V3();
 const UP = new V3(0, 1, 0);
 const ZAXIS = new V3(0, 0, 1);
+const _pv = new THREE.Matrix4();
 
 export class Vegetation {
   /**
@@ -2478,10 +2606,12 @@ export class Vegetation {
     this._windZ = Math.cos(wy);
     this._windS = 0.35;
     this._a2cChecked = false;
+    this._view = null; // last rendered camera, for far-LOD culling (see _onView)
     this._regrowing = [];
     this._lod = {
       treeNear: low ? 95 : 135,
       treeBand: low ? 18 : 24,
+      treeOverlap: 6, // metres both tree LODs overlap during an instance's hand-over
       treeFar: low ? 400 : 600,
       rockNear: low ? 60 : 90,
       rockBand: 14,
@@ -2550,7 +2680,57 @@ export class Vegetation {
     this._u.uTime.value = this.time;
     this._updateWind(dt);
     this._refocus(this._fx, this._fz, false);
+    const v = this._view;
+    if (v && v.dirty) {
+      v.dirty = false;
+      this._treeLod.view = v;
+      this._rockLod.view = v;
+      this._treeLod.checkView();
+      this._rockLod.checkView();
+    }
     if (this._regrowing.length) this._updateRegrowth(dt);
+  }
+
+  /**
+   * Called while the scene renders (onBeforeRender of one far-tree mesh): note
+   * the camera so the next update() can cull the far-LOD lists to it. Lists are
+   * never touched mid-render (instance uploads for this frame already happened).
+   */
+  _onView(scene, camera) {
+    if (!camera || !camera.isPerspectiveCamera) return;
+    const v =
+      this._view ||
+      (this._view = { frustum: new THREE.Frustum(), planes: null, px: 0, py: 0, pz: 0, dx: 0, dy: 0, dz: 1, fogFar: Infinity, p0: 0, p5: 0, dirty: false });
+    const e = camera.matrixWorld.elements;
+    const px = e[12];
+    const py = e[13];
+    const pz = e[14];
+    const len = Math.hypot(e[8], e[9], e[10]) || 1;
+    const dx = -e[8] / len;
+    const dy = -e[9] / len;
+    const dz = -e[10] / len;
+    const fog = scene && scene.fog && scene.fog.isFog ? scene.fog.far : Infinity;
+    const pm = camera.projectionMatrix.elements;
+    const same =
+      v.planes &&
+      (px - v.px) ** 2 + (py - v.py) ** 2 + (pz - v.pz) ** 2 < 1 &&
+      dx * v.dx + dy * v.dy + dz * v.dz > 0.9997 &&
+      !(Math.abs(fog - v.fogFar) > 4) &&
+      pm[0] === v.p0 &&
+      pm[5] === v.p5;
+    if (same) return;
+    v.frustum.setFromProjectionMatrix(_pv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+    v.planes = v.frustum.planes;
+    v.px = px;
+    v.py = py;
+    v.pz = pz;
+    v.dx = dx;
+    v.dy = dy;
+    v.dz = dz;
+    v.fogFar = fog;
+    v.p0 = pm[0];
+    v.p5 = pm[5];
+    v.dirty = true;
   }
 
   /* --- Queries (gameplay) ----------------------------------------------------------------------- */
@@ -2703,6 +2883,8 @@ export class Vegetation {
     this._u.uFocus.value.set(fx, 0, fz);
     this._treeLod.update(fx, fz, force);
     this._rockLod.update(fx, fz, force);
+    this._plantLod.update(fx, fz, force);
+    this._logLod.update(fx, fz, force);
     if (this._grass) this._grass.update(fx, fz, force);
   }
 
@@ -2754,14 +2936,18 @@ export class Vegetation {
   /** Rewrite one food plant's instance matrix from its food level (partial upload). */
   _writePlant(p) {
     const id = p.id;
-    const mesh = this._plantMesh[p.kind];
-    const k = this._pInst[id];
     const vis = lerp(EATEN_SCALE, 1, clamp(p.food / p.maxFood, 0, 1));
     const s = this._pScale[id] * vis;
-    writeTRS(mesh.instanceMatrix.array, k * 16, p.x, this._pY[id], p.z, this._pYaw[id], s, s * this._pSy[id]);
+    const src = this._plantItems.mat;
+    writeTRS(src, id * 16, p.x, this._pY[id], p.z, this._pYaw[id], s, s * this._pSy[id]);
+    this._pVis[id] = vis;
+    // Listed near the focus right now: patch that one instance too (partial upload).
+    const k = this._plantLod.slot[id];
+    if (k < 0) return;
+    const mesh = this._plantMesh[p.kind];
+    mesh.instanceMatrix.array.set(src.subarray(id * 16, id * 16 + 16), k * 16);
     mesh.instanceMatrix.addUpdateRange(k * 16, 16);
     mesh.instanceMatrix.needsUpdate = true;
-    this._pVis[id] = vis;
   }
 
   _detectA2C(renderer) {
@@ -2788,16 +2974,16 @@ export class Vegetation {
       roughness: 0.82,
       metalness: 0,
     };
-    const mk = (a, b, inv, shrink = false) => {
+    const mk = (a, b, far, shrink, overlap = 0) => {
       const m = new PlantMaterial(base, { shared, shrink });
-      m.vegLod.value.set(a, b, inv, 0);
+      m.vegLod.value.set(a, b, far, overlap);
       return m;
     };
     this._mat = {
-      near: mk(L.treeNear - L.treeBand, L.treeNear, 0),
-      far: mk(L.treeNear - L.treeBand, L.treeNear, 1),
-      plant: mk(L.plantFar - L.plantBand, L.plantFar, 0),
-      log: mk(L.logFar - 30, L.logFar, 0),
+      near: mk(L.treeNear - L.treeBand, L.treeNear, 0, false, L.treeOverlap),
+      far: mk(L.treeNear - L.treeBand, L.treeNear, 1, false, L.treeOverlap),
+      plant: mk(L.plantFar - L.plantBand, L.plantFar, 0, true),
+      log: mk(L.logFar - 30, L.logFar, 0, true),
       grass: mk(L.grass - L.grassBand, L.grass, 0, true),
       rockNear: new RockMaterial({ roughness: 0.93, metalness: 0 }, { shared, rockMap: this._rockTex }),
       rockFar: new RockMaterial({ roughness: 0.93, metalness: 0 }, { shared, rockMap: this._rockTex }),
@@ -2807,8 +2993,8 @@ export class Vegetation {
     for (const k of ["near", "far", "plant", "log", "grass"]) this._mat[k].name = `veg-${k}`;
     this._depth = {
       near: new PlantDepthMaterial(null, { shared, lod: this._mat.near.vegLod }),
-      plant: new PlantDepthMaterial(null, { shared, lod: this._mat.plant.vegLod }),
-      log: new PlantDepthMaterial(null, { shared, lod: this._mat.log.vegLod }),
+      plant: new PlantDepthMaterial(null, { shared, lod: this._mat.plant.vegLod, shrink: true }),
+      log: new PlantDepthMaterial(null, { shared, lod: this._mat.log.vegLod, shrink: true }),
     };
   }
 
@@ -3121,6 +3307,9 @@ export class Vegetation {
       this.group.add(near, far);
     });
     this._treeLod = new LodSet(half, this._treeItems, nearMeshes, farMeshes, { nearR: L.treeNear, band: L.treeBand, farR: L.treeFar });
+    const anchor = farMeshes[0];
+    anchor.userData.vegViewAnchor = true;
+    anchor.onBeforeRender = (renderer, scene, camera) => this._onView(scene, camera);
 
     /* Rocks. */
     const rc = this._rockItems.count;
@@ -3133,21 +3322,22 @@ export class Vegetation {
     this.group.add(rockNear, rockFar);
     this._rockLod = new LodSet(half, this._rockItems, [rockNear], [rockFar], { nearR: L.rockNear, band: L.rockBand, farR: L.rockFar });
 
-    /* Logs (one LOD, faded out at range). */
+    /* Logs (one LOD, shrunk away at range): only the ones near the focus are listed. */
     const li = this._logItems;
-    const logs = makeInstanced(g.log, this._mat.log, li.count, { cast: true, receive: true, depth: this._depth.log });
+    li.type = new Uint8Array(li.count);
+    li.extra = null;
+    const logs = makeInstanced(g.log, this._mat.log, li.count, { dynamic: true, cast: true, receive: true, depth: this._depth.log });
     logs.name = "veg-logs";
-    logs.instanceMatrix.array.set(li.mat);
-    logs.instanceColor.array.set(li.col);
-    this._finishStatic(logs, li.count);
     this.group.add(logs);
+    this._logLod = new LodSet(half, li, [logs], [], { nearR: L.logFar, band: 0, farR: 0 });
 
-    /* Food plants: fixed instance per plant so eating only touches that one matrix. */
-    const lists = {};
-    for (const kind of PLANT_KINDS) lists[kind] = [];
-    for (const p of this.plants) lists[p.kind].push(p);
+    /* Food plants: like logs, listed per chunk near the focus (the whole island's
+       worth would cost hundreds of thousands of triangles, mostly shrunk to
+       nothing by the shader). Each plant's matrix lives in `_plantItems.mat` by
+       plant id; eating rewrites it there and in its listed slot, if any. */
     const n = this.plants.length;
-    this._pInst = new Int32Array(n);
+    const pItems = { count: n, type: new Uint8Array(n), mat: new Float32Array(n * 16), col: new Float32Array(n * 3).fill(1), extra: null };
+    this._plantItems = pItems;
     this._pYaw = new Float32Array(n);
     this._pScale = new Float32Array(n);
     this._pSy = new Float32Array(n);
@@ -3156,31 +3346,27 @@ export class Vegetation {
     this._pWait = new Float32Array(n);
     this._pListed = new Uint8Array(n);
     this._plantMesh = {};
-    for (const kind of PLANT_KINDS) {
-      const list = lists[kind];
-      const mesh = makeInstanced(g.plant[kind], this._mat.plant, list.length, { cast: true, receive: true, depth: this._depth.plant });
+    const byPlantKind = PLANT_KINDS.map(() => 0);
+    for (const p of this.plants) {
+      const t = PLANT_KINDS.indexOf(p.kind);
+      const d = this._pData[p.id];
+      byPlantKind[t]++;
+      pItems.type[p.id] = t;
+      this._pYaw[p.id] = d.yaw;
+      this._pScale[p.id] = d.s;
+      this._pSy[p.id] = d.sy;
+      this._pY[p.id] = d.y;
+      writeTRS(pItems.mat, p.id * 16, p.x, d.y, p.z, d.yaw, d.s, d.s * d.sy);
+      pItems.col.set(d.tint, p.id * 3);
+    }
+    const plantMeshes = PLANT_KINDS.map((kind, t) => {
+      const mesh = makeInstanced(g.plant[kind], this._mat.plant, byPlantKind[t], { dynamic: true, cast: true, receive: true, depth: this._depth.plant });
       mesh.name = `veg-${kind}`;
       this._plantMesh[kind] = mesh;
-      list.forEach((p, k) => {
-        const d = this._pData[p.id];
-        this._pInst[p.id] = k;
-        this._pYaw[p.id] = d.yaw;
-        this._pScale[p.id] = d.s;
-        this._pSy[p.id] = d.sy;
-        this._pY[p.id] = d.y;
-        writeTRS(mesh.instanceMatrix.array, k * 16, p.x, d.y, p.z, d.yaw, d.s, d.s * d.sy);
-        mesh.instanceColor.array.set(d.tint, k * 3);
-      });
-      this._finishStatic(mesh, list.length);
       this.group.add(mesh);
-    }
+      return mesh;
+    });
+    this._plantLod = new LodSet(half, pItems, plantMeshes, [], { nearR: L.plantFar, band: 0, farR: 0, slots: true });
     this._pData = null;
-  }
-
-  _finishStatic(mesh, count) {
-    mesh.count = count;
-    mesh.visible = count > 0;
-    markInstances(mesh, count);
-    if (count > 0) mesh.computeBoundingSphere();
   }
 }

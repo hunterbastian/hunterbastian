@@ -42,7 +42,34 @@ const RIVER_HEAD = 95; // design metres over which a spring's gully deepens into
 
 const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
 
+// Draw-time culling: the mesh's index buffer is laid out in CULL_CHUNKS² chunks
+// and, per frame, rewritten (only when the set changes) to hold just the chunks
+// inside the camera frustum — full detail where the fog hasn't swallowed them,
+// every COARSE_STEP-th vertex beyond (fog colour there anyway, but the
+// silhouettes still cut the sky glow). One draw call either way.
+const CULL_CHUNKS = 16;
+const COARSE_STEP = 4;
+const CULL_MARGIN = 45; // metres: draw a little beyond the frustum / fog so turning doesn't rebuild every frame
+const _frustum = new THREE.Frustum();
+const _projView = new THREE.Matrix4();
+const _camFwd = new THREE.Vector3();
+
 /* --- Small helpers ------------------------------------------------------- */
+
+/** AABB (6 floats at `o` in `box`) vs the module frustum, planes pushed out by `margin` m. */
+function boxInFrustum(box, o, margin) {
+  const planes = _frustum.planes;
+  for (let i = 0; i < 6; i++) {
+    const pl = planes[i];
+    const nx = pl.normal.x;
+    const ny = pl.normal.y;
+    const nz = pl.normal.z;
+    const d =
+      nx * (nx > 0 ? box[o + 3] : box[o]) + ny * (ny > 0 ? box[o + 4] : box[o + 1]) + nz * (nz > 0 ? box[o + 5] : box[o + 2]) + pl.constant;
+    if (d < -margin) return false;
+  }
+  return true;
+}
 
 /** Polynomial smooth minimum — blends carved basins into the land without creases. */
 function smin(a, b, k) {
@@ -3147,32 +3174,84 @@ export class Terrain {
       }
     }
     // Alternate the split diagonal (heightAt mirrors this) so long slopes
-    // don't all lean the same way.
+    // don't all lean the same way. Cells are emitted chunk by chunk (see
+    // CULL_CHUNKS), with a coarse twin of every chunk for beyond the fog.
+    const cc = Math.ceil(res / CULL_CHUNKS);
+    const nch = Math.ceil(res / cc);
     const index = new Uint32Array(res * res * 6);
+    const fineStart = new Int32Array(nch * nch + 1);
+    const coarse = [];
+    const coarseStart = new Int32Array(nch * nch + 1);
+    const box = new Float32Array(nch * nch * 6); // minX, minY, minZ, maxX, maxY, maxZ
     let p = 0;
-    for (let iz = 0; iz < res; iz++) {
-      for (let ix = 0; ix < res; ix++) {
-        const a = iz * n + ix;
-        const b = a + 1;
-        const c = a + n;
-        const d = c + 1;
-        if (((ix + iz) & 1) === 0) {
-          index[p++] = a;
-          index[p++] = c;
-          index[p++] = d;
-          index[p++] = a;
-          index[p++] = d;
-          index[p++] = b;
-        } else {
-          index[p++] = a;
-          index[p++] = c;
-          index[p++] = b;
-          index[p++] = b;
-          index[p++] = c;
-          index[p++] = d;
+    for (let cz = 0; cz < nch; cz++) {
+      for (let cx = 0; cx < nch; cx++) {
+        const ch = cz * nch + cx;
+        const x0 = cx * cc;
+        const z0 = cz * cc;
+        const x1 = Math.min(res, x0 + cc);
+        const z1 = Math.min(res, z0 + cc);
+        fineStart[ch] = p;
+        for (let iz = z0; iz < z1; iz++) {
+          for (let ix = x0; ix < x1; ix++) {
+            const a = iz * n + ix;
+            const b = a + 1;
+            const c = a + n;
+            const d = c + 1;
+            if (((ix + iz) & 1) === 0) {
+              index[p++] = a;
+              index[p++] = c;
+              index[p++] = d;
+              index[p++] = a;
+              index[p++] = d;
+              index[p++] = b;
+            } else {
+              index[p++] = a;
+              index[p++] = c;
+              index[p++] = b;
+              index[p++] = b;
+              index[p++] = c;
+              index[p++] = d;
+            }
+          }
         }
+        coarseStart[ch] = coarse.length;
+        for (let iz = z0; iz < z1; iz += COARSE_STEP) {
+          const jz = Math.min(z1, iz + COARSE_STEP);
+          for (let ix = x0; ix < x1; ix += COARSE_STEP) {
+            const jx = Math.min(x1, ix + COARSE_STEP);
+            const a = iz * n + ix;
+            const b = iz * n + jx;
+            const c = jz * n + ix;
+            const d = jz * n + jx;
+            coarse.push(a, c, d, a, d, b);
+          }
+        }
+        let lo = Infinity;
+        let hi = -Infinity;
+        for (let iz = z0; iz <= z1; iz++) {
+          for (let ix = x0; ix <= x1; ix++) {
+            const h = H[iz * n + ix];
+            if (h < lo) lo = h;
+            if (h > hi) hi = h;
+          }
+        }
+        box.set([-half + x0 * cs, lo, -half + z0 * cs, -half + x1 * cs, hi, -half + z1 * cs], ch * 6);
       }
     }
+    fineStart[nch * nch] = p;
+    coarseStart[nch * nch] = coarse.length;
+    this._cull = {
+      n: nch,
+      fine: index.slice(),
+      fineStart,
+      coarse: Uint32Array.from(coarse),
+      coarseStart,
+      box,
+      state: new Uint8Array(nch * nch), // what is in the GPU index now: 0 none, 1 coarse, 2 fine
+      want: new Uint8Array(nch * nch),
+      key: "",
+    };
 
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
@@ -3194,7 +3273,80 @@ export class Terrain {
     mesh.castShadow = false;
     mesh.matrixAutoUpdate = false;
     mesh.updateMatrix();
+    geo.index.setUsage(THREE.DynamicDrawUsage);
+    this._cull.state.fill(2); // starts with every chunk at full detail
+    mesh.onBeforeRender = (renderer, scene, camera) => this._cullChunks(scene, camera);
     return mesh;
+  }
+
+  /**
+   * Before the terrain draws: keep only frustum chunks in the index buffer
+   * (coarse ones where the view depth is past the fog). The buffer is only
+   * rewritten when a needed chunk is missing or a lot of what is drawn is no
+   * longer needed; the rebuild then keeps a margin so small turns are free.
+   */
+  _cullChunks(scene, camera) {
+    const C = this._cull;
+    // Perspective (view) cameras only: a shadow pass would thrash the buffer if the terrain ever cast.
+    if (!C || !camera || !camera.isPerspectiveCamera) return;
+    _frustum.setFromProjectionMatrix(_projView.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+    camera.getWorldDirection(_camFwd);
+    const e = camera.matrixWorld.elements;
+    const px = e[12];
+    const py = e[13];
+    const pz = e[14];
+    const fogFar = scene && scene.fog && scene.fog.isFog ? scene.fog.far : Infinity;
+    const { n, box, state, want, fineStart, coarseStart } = C;
+    const tris = (ch, w) => (w === 2 ? fineStart[ch + 1] - fineStart[ch] : w === 1 ? coarseStart[ch + 1] - coarseStart[ch] : 0);
+    // `want` gets the set with a margin (what a rebuild would draw); the strict
+    // set only decides whether something on screen is missing from the buffer.
+    let missing = false;
+    let haveTris = 0;
+    let wantTris = 0;
+    for (let ch = 0; ch < n * n; ch++) {
+      const o = ch * 6;
+      let strict = 0;
+      let wide = 0;
+      if (boxInFrustum(box, o, CULL_MARGIN)) {
+        // Smallest view depth over the box corners decides fine vs coarse.
+        let dmin = Infinity;
+        for (let q = 0; q < 8; q++) {
+          const d =
+            ((q & 1 ? box[o + 3] : box[o]) - px) * _camFwd.x +
+            ((q & 2 ? box[o + 4] : box[o + 1]) - py) * _camFwd.y +
+            ((q & 4 ? box[o + 5] : box[o + 2]) - pz) * _camFwd.z;
+          if (d < dmin) dmin = d;
+        }
+        wide = dmin < fogFar + CULL_MARGIN ? 2 : 1;
+        if (boxInFrustum(box, o, 0)) strict = dmin < fogFar ? 2 : 1;
+      }
+      want[ch] = wide;
+      const s = state[ch];
+      if (strict > s) missing = true;
+      haveTris += tris(ch, s);
+      wantTris += tris(ch, wide);
+    }
+    if (!missing && haveTris <= wantTris * 1.3 + 6000) return;
+    const geo = this.mesh.geometry;
+    const dst = geo.index.array;
+    let off = 0;
+    for (let ch = 0; ch < n * n; ch++) {
+      const w = want[ch];
+      state[ch] = w;
+      if (w === 2) {
+        dst.set(C.fine.subarray(fineStart[ch], fineStart[ch + 1]), off);
+        off += fineStart[ch + 1] - fineStart[ch];
+      } else if (w === 1) {
+        dst.set(C.coarse.subarray(coarseStart[ch], coarseStart[ch + 1]), off);
+        off += coarseStart[ch + 1] - coarseStart[ch];
+      }
+    }
+    geo.setDrawRange(0, off);
+    geo.index.clearUpdateRanges();
+    geo.index.addUpdateRange(0, Math.max(3, off));
+    geo.index.needsUpdate = true;
+    this.stats.drawnTriangles = off / 3;
+    this.stats.cullRebuilds = (this.stats.cullRebuilds || 0) + 1;
   }
 
   /**
