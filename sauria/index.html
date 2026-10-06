@@ -4,14 +4,70 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>Sauria</title>
+  <meta name="description" content="Sauria — survive a misty Late Jurassic island as a dinosaur, from fragile hatchling to apex adult, or stalk it as a human hunter. A naturalistic 3D survival game that runs in your browser." />
+  <meta name="theme-color" content="#12110d" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="format-detection" content="telephone=no" />
+
+  <!-- Home-screen web app (iOS & Android) -->
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Sauria" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+
+  <!-- Type: Fraunces (display), Archivo (UI), IBM Plex Mono (data). Offline the
+       system fallbacks in style.css take over and nothing breaks. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..700&family=Fraunces:ital,opsz,wght@0,9..144,300..700;1,9..144,300..600&family=IBM+Plex+Mono:wght@400;500&display=swap" />
   <link rel="stylesheet" href="style.css" />
+
   <script type="importmap">
     { "imports": { "three": "./vendor/three/three.module.min.js" } }
   </script>
 </head>
 <body>
-  <canvas id="game"></canvas>
+  <canvas id="game" aria-label="Sauria — the island"></canvas>
   <div id="ui"></div>
+
+  <aside class="rotate-hint" id="rotate-hint" role="note">
+    <svg class="rotate-hint__ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="7.5" y="2.8" width="9" height="15.4" rx="1.8" /><path d="M11 15.4h2" /><path d="M3.5 13.5a8.6 8.6 0 0 0 7 7.7" /><path d="M8.6 20l1.9 1.2-1.1 1.9" />
+    </svg>
+    <span>Rotate for the best view</span>
+    <button type="button" class="icon-btn rotate-hint__close" aria-label="Dismiss">
+      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" /></svg>
+    </button>
+  </aside>
+
+  <noscript>
+    <div class="noscript">
+      <div>
+        <h1>Sauria</h1>
+        <p>The island needs JavaScript to grow its forests and wake its dinosaurs. Please enable it and reload.</p>
+      </div>
+    </div>
+  </noscript>
+
   <script type="module" src="src/main.js"></script>
+  <script>
+    // The rotate hint is advisory: one tap hides it for good on this device.
+    (function () {
+      var hint = document.getElementById("rotate-hint");
+      var KEY = "sauria.rotateHint";
+      try {
+        if (localStorage.getItem(KEY) === "dismissed") hint.classList.add("is-dismissed");
+      } catch (e) {}
+      hint.querySelector("button").addEventListener("click", function () {
+        hint.classList.add("is-dismissed");
+        try {
+          localStorage.setItem(KEY, "dismissed");
+        } catch (e) {}
+      });
+    })();
+  </script>
 </body>
 </html>

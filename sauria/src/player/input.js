@@ -76,6 +76,9 @@ const TOUCH_MOUSE_GUARD_MS = 900;
 // Esc while pointer-locked can arrive both as a keydown and as an unlock;
 // collapse them into one pause.
 const PAUSE_DEDUPE_MS = 300;
+// Chrome occasionally reports a locked mousemove as a jump to/from absolute
+// screen coordinates (hundreds of px). Real per-event deltas stay well below.
+const LOCKED_SPIKE_PX = 500;
 
 /* --- Touch button sets ------------------------------------------------------ */
 
@@ -127,7 +130,7 @@ const BUTTON_SETS = {
   dino: [
     { action: "bite", slot: "primary", icon: "bite", label: "Bite", kind: "hold" },
     { action: "sprint", slot: "arc0", icon: "sprint", label: "Sprint", kind: "latch" },
-    { action: "interact", slot: "arc1", icon: "interact", label: "Eat / Drink", kind: "hold" },
+    { action: "interact", slot: "arc1", icon: "interact", label: "Eat or drink", short: "Eat/Drink", kind: "hold" },
     { action: "sniff", slot: "arc2", icon: "sniff", label: "Sniff", kind: "tap" },
     { action: "crouch", slot: "arc3", icon: "crouch", label: "Crouch", kind: "tap" },
     { action: "rest", slot: "outer0", icon: "rest", label: "Rest", kind: "tap" },
@@ -141,9 +144,9 @@ const BUTTON_SETS = {
     { action: "reload", slot: "arc1", icon: "reload", label: "Reload", kind: "tap" },
     { action: "sprint", slot: "arc2", icon: "sprint", label: "Sprint", kind: "latch" },
     { action: "crouch", slot: "arc3", icon: "crouch", label: "Crouch", kind: "tap" },
-    { action: "swap", slot: "outer0", icon: "swap", label: "Switch weapon", kind: "tap" },
-    { action: "binoculars", slot: "outer1", icon: "binoculars", label: "Binoculars", kind: "tap" },
-    { action: "call", slot: "outer2", icon: "lure", label: "Lure call", kind: "tap" },
+    { action: "swap", slot: "outer0", icon: "swap", label: "Switch weapon", short: "Swap", kind: "tap" },
+    { action: "binoculars", slot: "outer1", icon: "binoculars", label: "Binoculars", short: "Binocs", kind: "tap" },
+    { action: "call", slot: "outer2", icon: "lure", label: "Lure call", short: "Lure", kind: "tap" },
     { action: "extract", slot: "top2", icon: "extract", label: "Call extraction", kind: "tap" },
     { action: "map", slot: "top1", icon: "map", label: "Map", kind: "tap" },
     { action: "pause", slot: "top0", icon: "pause", label: "Pause", kind: "tap" },
@@ -166,8 +169,9 @@ const BASE_CSS = `
 :where(.touch-stick--idle){opacity:.45;transition:opacity .25s ease,left .3s ease,top .3s ease}
 :where(.touch-stick__knob){position:absolute;left:50%;top:50%;width:56px;height:56px;margin:-28px 0 0 -28px;border-radius:50%;background:rgba(239,231,214,.82);box-shadow:0 2px 10px rgba(0,0,0,.35)}
 :where(.touch-btn){position:absolute;display:grid;place-items:center;width:58px;height:58px;padding:0;border:0;border-radius:50%;color:inherit;font:inherit;background:rgba(18,22,17,.42);box-shadow:inset 0 0 0 1.5px rgba(239,231,214,.32),0 2px 8px rgba(0,0,0,.25);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);transition:transform .08s ease,background-color .15s ease}
-:where(.touch-btn svg){width:46%;height:46%;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
-:where(.touch-btn__label){position:absolute;top:100%;margin-top:3px;font-size:10px;line-height:1;letter-spacing:.04em;white-space:nowrap;opacity:.75;text-shadow:0 1px 2px rgba(0,0,0,.6);pointer-events:none}
+:where(.touch-btn svg){width:44%;height:44%;margin-top:-9px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
+:where(.touch-btn__label){position:absolute;left:0;right:0;bottom:8px;font-size:8px;line-height:1;letter-spacing:.03em;text-align:center;white-space:nowrap;opacity:.8;pointer-events:none}
+:where(.touch-btn[data-slot="primary"] svg),:where(.touch-btn[data-slot^="top"] svg){margin-top:0}
 :where(.touch-btn--held){transform:scale(.92);background:rgba(239,231,214,.30)}
 :where(.touch-btn--active){background:rgba(146,163,94,.55);box-shadow:inset 0 0 0 2px rgba(239,231,214,.7)}
 :where(.touch-btn--hint){box-shadow:inset 0 0 0 2px var(--c-ochre,#d9a441),0 0 14px rgba(217,164,65,.55)}
@@ -188,6 +192,21 @@ const BASE_CSS = `
 :where(.touch-btn[data-slot="top0"]){right:calc(14px + env(safe-area-inset-right))}
 :where(.touch-btn[data-slot="top1"]){right:calc(66px + env(safe-area-inset-right))}
 :where(.touch-btn[data-slot="top2"]){right:calc(118px + env(safe-area-inset-right))}
+@media (max-width:520px){
+:where(.touch-stick){width:116px;height:116px;margin:-58px 0 0 -58px}
+:where(.touch-stick__knob){width:50px;height:50px;margin:-25px 0 0 -25px}
+:where(.touch-btn){width:48px;height:48px}
+:where(.touch-btn[data-slot="primary"]){right:calc(16px + env(safe-area-inset-right));bottom:calc(20px + env(safe-area-inset-bottom));width:72px;height:72px}
+:where(.touch-btn[data-slot="arc0"]){right:calc(130px + env(safe-area-inset-right));bottom:calc(32px + env(safe-area-inset-bottom))}
+:where(.touch-btn[data-slot="arc1"]){right:calc(116px + env(safe-area-inset-right));bottom:calc(83px + env(safe-area-inset-bottom))}
+:where(.touch-btn[data-slot="arc2"]){right:calc(79px + env(safe-area-inset-right));bottom:calc(120px + env(safe-area-inset-bottom))}
+:where(.touch-btn[data-slot="arc3"]){right:calc(28px + env(safe-area-inset-right));bottom:calc(134px + env(safe-area-inset-bottom))}
+:where(.touch-btn[data-slot^="outer"]){width:42px;height:42px}
+:where(.touch-btn[data-slot="outer0"]){right:calc(144px + env(safe-area-inset-right));bottom:calc(148px + env(safe-area-inset-bottom))}
+:where(.touch-btn[data-slot="outer1"]){right:calc(84px + env(safe-area-inset-right));bottom:calc(186px + env(safe-area-inset-bottom))}
+:where(.touch-btn[data-slot="outer2"]){right:calc(26px + env(safe-area-inset-right));bottom:calc(206px + env(safe-area-inset-bottom))}
+:where(.touch-btn__label){bottom:7px;font-size:7.5px;letter-spacing:.02em}
+}
 `;
 
 const STYLE_ID = "sauria-touch-base";
@@ -271,6 +290,8 @@ export class Input {
     this._latch = { sprint: false, aim: false };
     this._stick = { id: -1, cx: 0, cy: 0, x: 0, y: 0, radius: STICK_FALLBACK_RADIUS };
     this._look = { id: -1, x: 0, y: 0 };
+    this._rootLeft = 0;
+    this._rootTop = 0;
     this._buttons = new Map(); // action → { el, active, hint, cd }
     this.touchRoot = null;
 
@@ -586,6 +607,7 @@ export class Input {
     const canLock = this._lockSupported && !this.isTouch;
     const acts = !canLock || this._lockFailed;
     if (canLock) this.requestPointerLock();
+    e.preventDefault(); // a drag-look must not start a text selection across the HUD
     const d = this._drag;
     d.active = true;
     d.button = e.button;
@@ -623,8 +645,11 @@ export class Input {
         this._skipLockedMoves--;
         return;
       }
-      this._lookX += e.movementX || 0;
-      this._lookY += e.movementY || 0;
+      const mx = e.movementX || 0;
+      const my = e.movementY || 0;
+      if (Math.abs(mx) > LOCKED_SPIKE_PX || Math.abs(my) > LOCKED_SPIKE_PX) return;
+      this._lookX += mx;
+      this._lookY += my;
       return;
     }
     const d = this._drag;
@@ -762,7 +787,7 @@ export class Input {
       if (def.kind === "latch" || def.action === "crouch" || def.action === "rest") el.setAttribute("aria-pressed", "false");
       el.innerHTML =
         `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">${ICONS[def.icon]}</svg>` +
-        `<span class="touch-btn__label" aria-hidden="true">${def.label}</span>`;
+        `<span class="touch-btn__label" aria-hidden="true">${def.short || def.label}</span>`;
       el.addEventListener("pointerdown", (e) => this._btnDown(e, def, el), opts);
       for (const t of ["pointerup", "pointercancel", "lostpointercapture"]) {
         el.addEventListener(t, (e) => this._btnUp(e), opts);
@@ -851,7 +876,10 @@ export class Input {
     } catch {
       /* best-effort */
     }
+    // The layer can't move mid-drag, so measure it once per touch.
     const rect = this.touchRoot.getBoundingClientRect();
+    this._rootLeft = rect.left;
+    this._rootTop = rect.top;
     const s = this._stick;
     s.radius = this._stickRadius();
     s.id = e.pointerId;
@@ -870,9 +898,8 @@ export class Input {
   _stickMove(e) {
     const s = this._stick;
     if (e.pointerId !== s.id) return;
-    const rect = this.touchRoot.getBoundingClientRect();
-    const px = e.clientX - rect.left;
-    const py = e.clientY - rect.top;
+    const px = e.clientX - this._rootLeft;
+    const py = e.clientY - this._rootTop;
     let dx = px - s.cx;
     let dy = py - s.cy;
     let len = Math.hypot(dx, dy);

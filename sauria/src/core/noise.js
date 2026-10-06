@@ -57,7 +57,7 @@ function makePermutation(seed) {
 export function createNoise2D(seed = 1) {
   const { perm, permGrad } = makePermutation(seed);
 
-  return function noise2D(x, y) {
+  function noise2D(x, y) {
     // Which simplex cell are we in?
     const s = (x + y) * F2;
     const i = Math.floor(x + s);
@@ -105,7 +105,11 @@ export function createNoise2D(seed = 1) {
     }
     const v = n * SCALE;
     return v > 1 ? 1 : v < -1 ? -1 : v;
-  };
+  }
+  // Exposed so the fractal sums below can run the kernel inline (see there).
+  noise2D.perm = perm;
+  noise2D.permGrad = permGrad;
+  return noise2D;
 }
 
 /**
@@ -119,7 +123,7 @@ export function createNoise2D(seed = 1) {
 export function createNoise2DGrad(seed = 1) {
   const { perm, permGrad } = makePermutation(seed);
 
-  return function noise2DGrad(x, y, out) {
+  function noise2DGrad(x, y, out) {
     const s = (x + y) * F2;
     const i = Math.floor(x + s);
     const j = Math.floor(y + s);
@@ -189,10 +193,18 @@ export function createNoise2DGrad(seed = 1) {
     out[0] = dx * SCALE;
     out[1] = dy * SCALE;
     return n * SCALE;
-  };
+  }
+  noise2DGrad.perm = perm;
+  noise2DGrad.permGrad = permGrad;
+  return noise2DGrad;
 }
 
 /* --- Fractal sums --------------------------------------------------------- */
+// Performance note: the simplex kernel is too big for V8 to inline, and every
+// non-inlined call boxes its double arguments and result on the heap. With
+// tens of millions of samples per island that garbage dominated generation
+// time, so the sums below run the kernel inline (same maths as noise2D) when
+// the noise came from createNoise2D, and fall back to calling it otherwise.
 
 // Each octave is shifted by an irrational-ish offset so the octaves don't all
 // share a lattice origin (which shows up as a visible "knot" at 0,0).
@@ -204,12 +216,55 @@ const OCT_OY = -7.73;
  * @returns {number} ≈ [-1, 1] (typically within ±0.6)
  */
 export function fbm2D(noise, x, y, octaves = 5, lacunarity = 2, gain = 0.5) {
+  const perm = noise.perm;
+  const permGrad = noise.permGrad;
   let sum = 0;
   let amp = 1;
   let norm = 0;
   let freq = 1;
   for (let o = 0; o < octaves; o++) {
-    sum += amp * noise(x * freq + o * OCT_OX, y * freq + o * OCT_OY);
+    const px = x * freq + o * OCT_OX;
+    const py = y * freq + o * OCT_OY;
+    let v;
+    if (perm === undefined) v = noise(px, py);
+    else {
+      const s = (px + py) * F2;
+      const i = Math.floor(px + s);
+      const j = Math.floor(py + s);
+      const t = (i + j) * G2;
+      const x0 = px - (i - t);
+      const y0 = py - (j - t);
+      const i1 = x0 > y0 ? 1 : 0;
+      const j1 = 1 - i1;
+      const x1 = x0 - i1 + G2;
+      const y1 = y0 - j1 + G2;
+      const x2 = x0 - 1 + 2 * G2;
+      const y2 = y0 - 1 + 2 * G2;
+      const ii = i & 255;
+      const jj = j & 255;
+      let n = 0;
+      let t0 = 0.5 - x0 * x0 - y0 * y0;
+      if (t0 > 0) {
+        const g = permGrad[ii + perm[jj]];
+        t0 *= t0;
+        n += t0 * t0 * (GRAD_X[g] * x0 + GRAD_Y[g] * y0);
+      }
+      let t1 = 0.5 - x1 * x1 - y1 * y1;
+      if (t1 > 0) {
+        const g = permGrad[ii + i1 + perm[jj + j1]];
+        t1 *= t1;
+        n += t1 * t1 * (GRAD_X[g] * x1 + GRAD_Y[g] * y1);
+      }
+      let t2 = 0.5 - x2 * x2 - y2 * y2;
+      if (t2 > 0) {
+        const g = permGrad[ii + 1 + perm[jj + 1]];
+        t2 *= t2;
+        n += t2 * t2 * (GRAD_X[g] * x2 + GRAD_Y[g] * y2);
+      }
+      v = n * SCALE;
+      v = v > 1 ? 1 : v < -1 ? -1 : v;
+    }
+    sum += amp * v;
     norm += amp;
     amp *= gain;
     freq *= lacunarity;
@@ -230,7 +285,8 @@ export function ridged2D(noise, x, y, octaves = 5, lacunarity = 2, gain = 0.5) {
   let freq = 1;
   let weight = 1;
   for (let o = 0; o < octaves; o++) {
-    let n = 1 - Math.abs(noise(x * freq + o * OCT_OX, y * freq + o * OCT_OY));
+    // One octave at a time through fbm2D's inline kernel (1 octave = plain noise).
+    let n = 1 - Math.abs(fbm2D(noise, x * freq + o * OCT_OX, y * freq + o * OCT_OY, 1));
     n *= n;
     n *= weight;
     weight = n * 2;
@@ -255,6 +311,8 @@ const gradScratch = new Float64Array(2);
  * @returns {number} ≈ [-1, 1] (typically within ±0.6)
  */
 export function erodedFbm2D(noiseGrad, x, y, octaves = 5, lacunarity = 2, gain = 0.5, erosion = 1) {
+  const perm = noiseGrad.perm;
+  const permGrad = noiseGrad.permGrad;
   let sum = 0;
   let amp = 1;
   let norm = 0;
@@ -262,10 +320,74 @@ export function erodedFbm2D(noiseGrad, x, y, octaves = 5, lacunarity = 2, gain =
   let dx = 0;
   let dy = 0;
   for (let o = 0; o < octaves; o++) {
-    const n = noiseGrad(x * freq + o * OCT_OX, y * freq + o * OCT_OY, gradScratch);
+    const px = x * freq + o * OCT_OX;
+    const py = y * freq + o * OCT_OY;
+    let n;
+    let gx;
+    let gy;
+    if (perm === undefined) {
+      n = noiseGrad(px, py, gradScratch);
+      gx = gradScratch[0];
+      gy = gradScratch[1];
+    } else {
+      // Inline copy of noise2DGrad (see the performance note above).
+      const s = (px + py) * F2;
+      const i = Math.floor(px + s);
+      const j = Math.floor(py + s);
+      const t = (i + j) * G2;
+      const x0 = px - (i - t);
+      const y0 = py - (j - t);
+      const i1 = x0 > y0 ? 1 : 0;
+      const j1 = 1 - i1;
+      const x1 = x0 - i1 + G2;
+      const y1 = y0 - j1 + G2;
+      const x2 = x0 - 1 + 2 * G2;
+      const y2 = y0 - 1 + 2 * G2;
+      const ii = i & 255;
+      const jj = j & 255;
+      n = 0;
+      gx = 0;
+      gy = 0;
+      let t0 = 0.5 - x0 * x0 - y0 * y0;
+      if (t0 > 0) {
+        const g = permGrad[ii + perm[jj]];
+        const gd = GRAD_X[g] * x0 + GRAD_Y[g] * y0;
+        const t2 = t0 * t0;
+        const t4 = t2 * t2;
+        const k = -8 * t2 * t0 * gd;
+        n += t4 * gd;
+        gx += t4 * GRAD_X[g] + k * x0;
+        gy += t4 * GRAD_Y[g] + k * y0;
+      }
+      let t1 = 0.5 - x1 * x1 - y1 * y1;
+      if (t1 > 0) {
+        const g = permGrad[ii + i1 + perm[jj + j1]];
+        const gd = GRAD_X[g] * x1 + GRAD_Y[g] * y1;
+        const t2 = t1 * t1;
+        const t4 = t2 * t2;
+        const k = -8 * t2 * t1 * gd;
+        n += t4 * gd;
+        gx += t4 * GRAD_X[g] + k * x1;
+        gy += t4 * GRAD_Y[g] + k * y1;
+      }
+      let t2c = 0.5 - x2 * x2 - y2 * y2;
+      if (t2c > 0) {
+        const g = permGrad[ii + 1 + perm[jj + 1]];
+        const gd = GRAD_X[g] * x2 + GRAD_Y[g] * y2;
+        const t2 = t2c * t2c;
+        const t4 = t2 * t2;
+        const k = -8 * t2 * t2c * gd;
+        n += t4 * gd;
+        gx += t4 * GRAD_X[g] + k * x2;
+        gy += t4 * GRAD_Y[g] + k * y2;
+      }
+      n *= SCALE;
+      gx *= SCALE;
+      gy *= SCALE;
+    }
     // Slope of the sum so far, in the units of the first octave.
-    dx += gradScratch[0] * amp * freq;
-    dy += gradScratch[1] * amp * freq;
+    dx += gx * amp * freq;
+    dy += gy * amp * freq;
     sum += (amp * n) / (1 + erosion * (dx * dx + dy * dy));
     norm += amp;
     amp *= gain;
