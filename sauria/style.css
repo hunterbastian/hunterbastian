@@ -1386,6 +1386,15 @@ button:disabled {
   gap: 12px;
 }
 
+.field.is-disabled {
+  opacity: 0.42;
+  transition: opacity 0.2s var(--ease, ease);
+}
+
+.field.is-disabled .range {
+  cursor: not-allowed;
+}
+
 .field__value {
   font: 500 13px/1 var(--font-mono);
   color: var(--c-paper);

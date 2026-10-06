@@ -28,8 +28,11 @@ export const GAME = {
 // Render styles (same assets): "detailed" draws at full resolution; "pixel" draws the
 // 3D scene into a low-res target and upscales it with nearest-neighbour filtering.
 export const STYLE = {
-  default: "detailed",
-  pixelHeight: { high: 360, low: 270 }, // target height in pixels for "pixel"
+  default: "pixel",
+  // Rows of game pixels at the chunkiest pixel size; "in between" (0.5) sits
+  // halfway (geometrically) between this and the full render resolution.
+  pixelHeight: { high: 300, low: 230 },
+  pixelSize: 0.5,
 };
 
 export const QUALITY = {

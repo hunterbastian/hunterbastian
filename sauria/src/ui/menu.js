@@ -496,14 +496,19 @@ export function speciesSilhouette(species, { human = true } = {}) {
 /* --- Settings ------------------------------------------------------------------------ */
 
 /** Default player settings (see Menu#settings). */
-export const DEFAULT_SETTINGS = Object.freeze({ style: "detailed", quality: "auto", muted: false, sensitivity: 1 });
+export const DEFAULT_SETTINGS = Object.freeze({ style: "pixel", pixelSize: 0.5, quality: "auto", muted: false, sensitivity: 1 });
+
+/** Words for the pixel-size slider (0 fine … 1 chunky). */
+export const pixelSizeLabel = (v) => (v < 0.34 ? "Fine" : v < 0.67 ? "In between" : "Chunky");
 
 /** Coerce anything into a valid settings object. */
 export function normalizeSettings(s = {}) {
   const src = s && typeof s === "object" ? s : {};
   const sens = Number(src.sensitivity);
+  const pix = Number(src.pixelSize);
   return {
-    style: src.style === "pixel" ? "pixel" : "detailed",
+    style: src.style === "detailed" ? "detailed" : "pixel",
+    pixelSize: Number.isFinite(pix) ? clamp(Math.round(pix * 100) / 100, 0, 1) : 0.5,
     quality: ["auto", "high", "low"].includes(src.quality) ? src.quality : "auto",
     muted: Boolean(src.muted),
     sensitivity: Number.isFinite(sens) ? clamp(Math.round(sens * 100) / 100, 0.5, 2) : 1,
@@ -1084,6 +1089,11 @@ export class Menu {
               </label>
             </div>
           </fieldset>
+          <div class="field" data-field="pixel-size">
+            <div class="field__row"><label class="field__label" for="${id}-pix">Pixel size</label><output class="field__value" for="${id}-pix">In between</output></div>
+            <input class="range" id="${id}-pix" type="range" min="0" max="1" step="0.05" value="0.5" />
+            <div class="range__scale" aria-hidden="true"><span>Fine</span><span>In between</span><span>Chunky</span></div>
+          </div>
           <fieldset class="field">
             <legend class="field__label">Quality</legend>
             <div class="segmented">
@@ -1114,8 +1124,11 @@ export class Menu {
     this.root.appendChild(layer);
     this.settingsLayer = layer;
     this._close(layer);
-    this._sensInput = layer.querySelector(".range");
-    this._sensOut = layer.querySelector(".field__value");
+    this._sensInput = layer.querySelector(`#${id}-sens`);
+    this._sensOut = layer.querySelector(`output[for="${id}-sens"]`);
+    this._pixField = layer.querySelector('[data-field="pixel-size"]');
+    this._pixInput = layer.querySelector(`#${id}-pix`);
+    this._pixOut = layer.querySelector(`output[for="${id}-pix"]`);
     this._soundBtn = layer.querySelector(".switch");
     this._qualityHint = layer.querySelector('[data-hint="quality"]');
     const [detailed, pixel] = layer.querySelectorAll(".style-opt canvas");
@@ -1227,6 +1240,7 @@ export class Menu {
       sig,
     );
     this._sensInput.addEventListener("input", () => this._change({ sensitivity: Number(this._sensInput.value) }), sig);
+    this._pixInput.addEventListener("input", () => this._change({ pixelSize: Number(this._pixInput.value) }), sig);
 
     // Capture phase so Esc/Enter here never also reach the game's Input.
     window.addEventListener("keydown", (e) => this._onKey(e), { capture: true, signal: this._ac.signal });
@@ -1432,6 +1446,13 @@ export class Menu {
     if (Number(this._sensInput.value) !== s.sensitivity) this._sensInput.value = String(s.sensitivity);
     this._sensOut.textContent = `${s.sensitivity.toFixed(2)}×`;
     this._sensInput.style.setProperty("--fill", `${((s.sensitivity - 0.5) / 1.5) * 100}%`);
+    // Pixel size only means something in the pixel style.
+    const pixOn = s.style === "pixel";
+    this._pixInput.disabled = !pixOn;
+    this._pixField.classList.toggle("is-disabled", !pixOn);
+    if (Number(this._pixInput.value) !== s.pixelSize) this._pixInput.value = String(s.pixelSize);
+    this._pixOut.textContent = pixelSizeLabel(s.pixelSize);
+    this._pixInput.style.setProperty("--fill", `${s.pixelSize * 100}%`);
   }
 
   /* --- Layers & focus --- */

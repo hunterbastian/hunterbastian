@@ -56,6 +56,7 @@ const store = {
 };
 
 let settings = normalizeSettings({ ...DEFAULT_SETTINGS, ...(store.get(SETTINGS_KEY) || {}) });
+if (params.get("pixel") !== null) settings = normalizeSettings({ ...settings, pixelSize: Number(params.get("pixel")) });
 if (params.get("mute") === "1") settings = normalizeSettings({ ...settings, muted: true });
 
 const isTouch =
@@ -115,11 +116,23 @@ function resize() {
   const w = Math.max(1, Math.round(vv ? vv.width : window.innerWidth));
   const h = Math.max(1, Math.round(vv ? vv.height : window.innerHeight));
   if (style === "pixel") {
-    const targetH = STYLE.pixelHeight[qualityName] || 300;
-    const scale = Math.min(1, targetH / h);
+    // Pixel size slider: 0 = full render resolution, 1 = chunkiest. Blend the
+    // row count geometrically, then snap to a whole number of device pixels per
+    // game pixel so every pixel is the same square size on any screen.
+    const dpr = window.devicePixelRatio || 1;
+    const deviceH = h * dpr;
+    const nativeRows = h * Math.min(dpr, quality.pixelRatioCap);
+    const chunkyRows = Math.min(nativeRows, STYLE.pixelHeight[qualityName] || 260);
+    const amount = clamp(settings.pixelSize ?? STYLE.pixelSize, 0, 1);
+    const rows = Math.exp(Math.log(nativeRows) + (Math.log(chunkyRows) - Math.log(nativeRows)) * amount);
+    // On 1× screens snap to whole device pixels per game pixel (even, square
+    // pixels). On high-density screens a fractional scale is invisible, and
+    // snapping there would jump straight from "normal" to "chunky".
+    const exact = Math.max(1, deviceH / rows, deviceH / nativeRows);
+    const k = dpr >= 2 ? exact : Math.max(1, Math.round(exact), Math.ceil(deviceH / nativeRows - 1e-3));
     renderer.setPixelRatio(1);
-    renderer.setSize(Math.max(1, Math.round(w * scale)), Math.max(1, Math.round(h * scale)), false);
-    canvas.style.imageRendering = "pixelated";
+    renderer.setSize(Math.max(1, Math.round((w * dpr) / k)), Math.max(1, Math.round((h * dpr) / k)), false);
+    canvas.style.imageRendering = k > 1 ? "pixelated" : "";
   } else {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, quality.pixelRatioCap));
     renderer.setSize(w, h, false);
@@ -391,6 +404,8 @@ menu.onSettingsChange = (next) => {
   game.hunter?.setSensitivity?.(settings.sensitivity);
   if (params.get("style") === null && settings.style !== style) {
     style = settings.style === "pixel" ? "pixel" : "detailed";
+    resize();
+  } else if (style === "pixel" && settings.pixelSize !== prev.pixelSize) {
     resize();
   }
   if (settings.quality !== prev.quality && params.get("quality") === null) {
