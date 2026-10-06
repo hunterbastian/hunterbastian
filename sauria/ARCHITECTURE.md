@@ -75,13 +75,14 @@ working (add, don't rename) and note it in your report.
 
 ```
 sauria/
-  index.html            UI      import map, <canvas id="game">, <div id="ui">, loads src/main.js
+  index.html            UI      import map, <div id="app"> › <canvas id="game">, <div id="ui">, loads src/main.js
   style.css             UI      all CSS (HUD, menu, map, touch controls, overlays)
   icon.svg              UI
   src/config.js         (shared, done)
   src/core/rng.js       (shared, done)
   src/core/math.js      (shared, done)
   src/core/events.js    (shared, done)
+  src/core/screen.js    (shared)   the app frame: forced landscape on phones held upright (see below)
   src/core/noise.js     TERRAIN
   src/world/terrain.js  TERRAIN
   src/world/water.js    ATMOSPHERE
@@ -181,6 +182,35 @@ from Utah's Cedar Mountain Formation; the rest roamed the Morrison Formation.)
 ---
 
 ## Module contracts
+
+### `core/screen.js` (shared) — the app frame
+
+Everything the game draws lives in `#app`. On a touch phone (coarse pointer, shorter
+screen side < 600 CSS px) whose visual viewport is portrait, `#app` is laid out at
+landscape size (width = viewport height) and turned 90° clockwise
+(`html.is-rotated`), because iOS can't lock orientation; the player turns the phone
+counter-clockwise. Rules for modules:
+
+```js
+export function isRotated()                  // → boolean
+export function appSize(out = {w, h})        // the app's own (landscape-oriented) size, CSS px
+export function toApp(clientX, clientY, out = {x, y}) // client point → app-local point
+export function onAppResize(fn)              // fn({ w, h, rotated }); also window "app-resize"; → unsubscribe
+export function tryLockLandscape()           // Android fullscreen: screen.orientation.lock, errors ignored
+```
+- JS never sizes from `innerWidth`/`visualViewport` or positions from raw
+  `clientX`/`getBoundingClientRect()` (the rotated box in client space): use
+  `appSize()`, `toApp()` or layout sizes (`clientWidth`/`offsetWidth`).
+- CSS inside `#app` uses container units (`cqw`/`cqh`/`cqmin`/`cqmax`, never
+  `vw`/`vh`) and `@container app (…)` for width/height/orientation queries (nest
+  them in `@media` for pointer/hover). Safe areas come from `--sa-t/r/b/l` (or the
+  derived `--safe-*`), defined on `#app` and remapped while rotated — never `env()`
+  directly. `position: fixed` inside `#app` is relative to `#app`.
+- Browsers pan in screen axes (Chrome won't touch-scroll a rotated scroller at all),
+  so while rotated `touch-action` is `none` throughout `#app` and `screen.js` scrolls
+  `overflow: auto` containers (axis picked by the drag, fling, scroll-snap honoured)
+  and drags `<input type=range>` along the app's axes. New scrollable UI needs
+  nothing special; a drag never also fires a click.
 
 ### `core/noise.js` (TERRAIN)
 
@@ -550,7 +580,8 @@ export class MapView {
   update(dt, { player, cameraYaw, markers })
 }
 ```
-**Design tokens** (UI defines them on `:root` in `style.css`; the hunter UI reuses them):
+**Design tokens** (UI defines them on `:root` in `style.css` — the safe areas and gutters on
+`#app`, since they're measured in the app frame; the hunter UI reuses them):
 `--font-display`, `--font-ui`, `--font-mono`, `--c-bone`, `--c-paper`, `--c-ink`, `--c-moss`,
 `--c-ochre`, `--c-rust`, `--c-blood`, `--c-panel` (translucent dark panel bg), `--c-line`
 (hairline colour), `--radius`, `--shadow`, `--blur`, `--ease`, `--safe-b` (bottom safe area).

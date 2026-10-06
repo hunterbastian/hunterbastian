@@ -35,12 +35,12 @@
   --h-ui: var(--font-ui, "Archivo", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif);
   --h-mono: var(--font-mono, "IBM Plex Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace);
   --h-text-shadow: var(--text-shadow, 0 1px 2px rgba(0, 0, 0, 0.55), 0 0 18px rgba(0, 0, 0, 0.32));
-  --h-safe-t: var(--safe-t, env(safe-area-inset-top, 0px));
-  --h-safe-r: var(--safe-r, env(safe-area-inset-right, 0px));
-  --h-safe-b: var(--safe-b, env(safe-area-inset-bottom, 0px));
-  --h-safe-l: var(--safe-l, env(safe-area-inset-left, 0px));
-  --h-gutter: var(--hud-gutter, clamp(14px, 2.2vw, 28px));
-  --h-page: var(--gutter, clamp(18px, 3.6vw, 56px));
+  --h-safe-t: var(--safe-t, var(--sa-t, 0px));
+  --h-safe-r: var(--safe-r, var(--sa-r, 0px));
+  --h-safe-b: var(--safe-b, var(--sa-b, 0px));
+  --h-safe-l: var(--safe-l, var(--sa-l, 0px));
+  --h-gutter: var(--hud-gutter, clamp(14px, 2.2cqw, 28px));
+  --h-page: var(--gutter, clamp(18px, 3.6cqw, 56px));
 
   /* Hunter-only: field kit colours. */
   --h-brass: #c9a25c;
@@ -546,7 +546,7 @@
   position: absolute;
   top: calc(var(--h-safe-t) + 14px);
   left: 50%;
-  width: min(440px, 46vw);
+  width: min(440px, 46cqw);
   transform: translateX(-50%);
   z-index: 5;
 }
@@ -737,7 +737,7 @@
   position: absolute;
   top: calc(var(--h-safe-t) + 18px);
   left: calc(var(--h-gutter) + var(--h-safe-l));
-  max-width: min(30vw, 340px);
+  max-width: min(30cqw, 340px);
   z-index: 5;
 }
 
@@ -1296,7 +1296,7 @@
   display: grid;
   justify-items: center;
   gap: 8px;
-  width: min(520px, 90vw);
+  width: min(520px, 90cqw);
   transform: translateX(-50%);
   transition: top 0.4s var(--h-ease);
   z-index: 6;
@@ -1489,7 +1489,7 @@
   left: 50%;
   bottom: calc(var(--h-gutter) + var(--h-safe-b) + 28px);
   display: none;
-  width: min(560px, 90vw);
+  width: min(560px, 90cqw);
   text-align: center;
   transform: translateX(-50%);
   z-index: 5;
@@ -1529,17 +1529,11 @@
 /* --- Scope overlay --- */
 
 .hh-scope {
-  --lens: min(94vh, 94vw);
+  --lens: min(94cqh, 94cqw);
   position: absolute;
   inset: 0;
   display: none;
   z-index: 2;
-}
-
-@supports (height: 100dvh) {
-  .hh-scope {
-    --lens: min(94dvh, 94vw);
-  }
 }
 
 .hh[data-mode="scope"] .hh-scope {
@@ -1558,10 +1552,10 @@
   width: var(--lens);
   height: var(--lens);
   border-radius: 50%;
-  /* The 150vmax spread is the black tube; inset layers are the eyepiece's own
+  /* The 150cqmax spread is the black tube; inset layers are the eyepiece's own
      vignette, a dark rim, and red/blue fringes for a touch of chromatic edge. */
   box-shadow:
-    0 0 0 150vmax #040404,
+    0 0 0 150cqmax #040404,
     inset 0 0 0 2px rgba(0, 0, 0, 0.92),
     inset 0 0 calc(var(--lens) * 0.08) calc(var(--lens) * 0.03) rgba(0, 0, 0, 0.94),
     inset 6px 2px 10px -5px rgba(255, 74, 40, 0.5),
@@ -1799,7 +1793,7 @@
 }
 
 .hh--touch .hh-exp {
-  max-width: 34vw;
+  max-width: 34cqw;
 }
 
 .hh--touch .hh-exp__targets {
@@ -1840,7 +1834,7 @@
 
 .hh--touch .hh-radar.is-on ~ .hh-exp {
   left: calc(var(--h-gutter) + var(--h-safe-l) + 96px);
-  max-width: calc(32vw - 96px);
+  max-width: calc(32cqw - 96px);
 }
 
 .hh--touch .hh-radar.is-on ~ .hh-status {
@@ -1848,7 +1842,7 @@
 }
 
 .hh--touch .hh-compass {
-  width: min(400px, 36vw);
+  width: min(400px, 36cqw);
 }
 
 .hh--touch .hh-radar__face {
@@ -1867,13 +1861,13 @@
 
 /* --- Small screens --- */
 
-@media (max-width: 640px) {
+@container app (max-width: 640px) {
   .hh-compass {
-    width: min(440px, 58vw);
+    width: min(440px, 58cqw);
   }
 
   .hh-exp {
-    max-width: 40vw;
+    max-width: 40cqw;
   }
 
   .hh-exp__targets {
@@ -1894,7 +1888,7 @@
 
   .hh-bino__lcd {
     min-width: 0;
-    width: 80vw;
+    width: 80cqw;
   }
 
   .hh-bino__range {
@@ -1904,10 +1898,10 @@
 
 /* Portrait phones: the compass and its wind line own the top; below it two rows —
    quarry | ammo, then stealth & vitals | radar — and messages under those. */
-@media (orientation: portrait) and (max-width: 640px) {
+@container app (orientation: portrait) and (max-width: 640px) {
   .hh .hh-exp {
     top: calc(var(--h-safe-t) + 82px);
-    max-width: 48vw;
+    max-width: 48cqw;
   }
 
   .hh .hh-ammo {
@@ -1922,7 +1916,7 @@
   .hh .hh-status {
     top: calc(var(--h-safe-t) + 176px);
     bottom: auto;
-    width: min(214px, 52vw);
+    width: min(214px, 52cqw);
   }
 
   .hh .hh-radar {
@@ -1933,7 +1927,7 @@
 
   .hh .hh-radar.is-on ~ .hh-exp {
     left: calc(var(--h-gutter) + var(--h-safe-l));
-    max-width: 48vw;
+    max-width: 48cqw;
   }
 
   .hh .hh-radar.is-on ~ .hh-status {
@@ -1941,7 +1935,7 @@
   }
 
   .hh .hh-compass {
-    width: min(440px, 58vw);
+    width: min(440px, 58cqw);
   }
 
   .hh .hh-radar__face {
@@ -1967,7 +1961,7 @@
   }
 }
 
-@media (max-height: 460px) {
+@container app (max-height: 460px) {
   .hh-exp__targets {
     font-size: 16px;
     margin: 3px 0 5px;
@@ -2062,7 +2056,7 @@
   position: relative;
   width: min(860px, 100%);
   margin: auto;
-  padding: clamp(22px, 4vw, 46px) clamp(20px, 4.4vw, 52px) clamp(22px, 3.6vw, 40px);
+  padding: clamp(22px, 4cqw, 46px) clamp(20px, 4.4cqw, 52px) clamp(22px, 3.6cqw, 40px);
   border-radius: 3px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0) 26%),
@@ -2132,7 +2126,7 @@
 
 .hh-sheet__title h2 {
   max-width: 15ch;
-  font: 400 clamp(32px, 4.6vw, 50px)/1.02 var(--h-display);
+  font: 400 clamp(32px, 4.6cqw, 50px)/1.02 var(--h-display);
   letter-spacing: -0.018em;
   color: var(--h-ink);
 }
@@ -2363,7 +2357,7 @@
   align-items: baseline;
   gap: 8px;
   margin-top: 6px;
-  font: 500 clamp(52px, 7vw, 76px)/0.9 var(--h-mono);
+  font: 500 clamp(52px, 7cqw, 76px)/0.9 var(--h-mono);
   letter-spacing: -0.04em;
   color: #7f3e18;
 }
@@ -2483,7 +2477,7 @@
 }
 
 .hh-death__sil {
-  width: min(250px, 60vw);
+  width: min(250px, 60cqw);
   height: 76px;
   margin: 26px auto 0;
 }
@@ -2513,7 +2507,7 @@
 .hh-death h2 {
   margin: 12px auto 14px;
   max-width: 14ch;
-  font: 400 clamp(38px, 6.4vw, 68px)/1.02 var(--h-display);
+  font: 400 clamp(38px, 6.4cqw, 68px)/1.02 var(--h-display);
   letter-spacing: -0.018em;
   color: var(--h-paper);
 }
@@ -2590,7 +2584,7 @@
   margin-top: 34px;
 }
 
-@media (max-width: 640px) {
+@container app (max-width: 640px) {
   .hh-sheet__title {
     padding-top: 62px;
   }
@@ -2979,7 +2973,7 @@
 
 .hm-title {
   grid-column: 1;
-  font: 400 clamp(32px, 3.5vw, 50px)/1 var(--h-display);
+  font: 400 clamp(32px, 3.5cqw, 50px)/1 var(--h-display);
   letter-spacing: -0.018em;
   color: var(--h-paper);
 }
@@ -3956,7 +3950,7 @@
 
 /* --- Lodge: responsive --- */
 
-@media (max-width: 1180px) {
+@container app (max-width: 1180px) {
   .hm-arms {
     grid-template-columns: none;
     grid-auto-flow: column;
@@ -3996,7 +3990,7 @@
   }
 }
 
-@media (max-width: 760px) {
+@container app (max-width: 760px) {
   .hm-top {
     grid-template-columns: minmax(0, 1fr) auto;
     row-gap: 14px;
@@ -4056,7 +4050,7 @@
   }
 
   .hm-arms {
-    grid-auto-columns: minmax(232px, 72vw);
+    grid-auto-columns: minmax(232px, 72cqw);
   }
 
   .hm-grid {
@@ -4159,7 +4153,7 @@
 }
 
 /* Landscape phones: every pixel of height counts. */
-@media (max-height: 500px) {
+@container app (max-height: 500px) {
   .hm-top {
     padding-top: calc(var(--h-safe-t) + 10px);
   }
@@ -4274,7 +4268,7 @@
 
 /* Short landscape phones: the ammo block would run into the Crouch/Sprint arc,
    so it moves to the empty bottom-centre between the stick and the buttons. */
-@media (max-height: 380px) {
+@container app (max-height: 380px) {
   .hh--touch .hh-ammo {
     top: auto;
     bottom: calc(var(--h-safe-b, 0px) + 10px);
@@ -4285,7 +4279,7 @@
 }
 
 /* Portrait phones: drop the compass below the extract/map/pause row. */
-@media (max-width: 520px) and (orientation: portrait) {
+@container app (max-width: 520px) and (orientation: portrait) {
   .hh--touch .hh-compass {
     top: calc(var(--h-safe-t, 0px) + 66px);
   }

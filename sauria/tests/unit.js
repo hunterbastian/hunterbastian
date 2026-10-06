@@ -16,6 +16,7 @@ import { SPECIES, PLAYABLE, getSpecies, growthScale, growthStage } from "../src/
 import { Wind } from "../src/world/wind.js";
 import { WEAPONS, WEAPON_ORDER, HEADSHOT_MULTIPLIER, LIMB_MULTIPLIER, damageFalloff, partMultiplier } from "../src/hunter/weapons.js";
 import { World } from "../src/world/world.js";
+import { isRotated, appSize, toApp, onAppResize } from "../src/core/screen.js";
 
 /* --- Tiny harness --------------------------------------------------------- */
 
@@ -92,6 +93,22 @@ function render() {
 }
 
 /* --- core/rng.js ---------------------------------------------------------- */
+
+test("screen: a desktop window isn't turned; the app frame is the viewport", () => {
+  // tests/unit.html runs in a landscape desktop window: no rotation, toApp is
+  // the identity and appSize follows the (visual) viewport.
+  assert.equal(isRotated(), false, "rotated");
+  const s = appSize();
+  const vv = window.visualViewport;
+  assert.near(s.w, vv ? vv.width : innerWidth, 0.5, "width");
+  assert.near(s.h, vv ? vv.height : innerHeight, 0.5, "height");
+  const p = toApp(12.5, 40);
+  assert(p.x === 12.5 && p.y === 40, `toApp should be the identity, got ${fmt(p)}`);
+  assert.equal(document.documentElement.classList.contains("is-rotated"), false, "html.is-rotated");
+  const off = onAppResize(() => {});
+  assert.equal(typeof off, "function", "onAppResize returns an unsubscribe");
+  off();
+});
 
 test("rng: same seed → same sequence, values in [0, 1)", () => {
   const a = makeRng(42);

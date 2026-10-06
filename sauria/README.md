@@ -37,7 +37,8 @@ python3 -m http.server 8000
 ```
 
 or `npx serve sauria`. It runs best in a current Chrome, Edge, Firefox or Safari
-(desktop or iOS/Android) with WebGL 2.
+(desktop or iOS/Android) with WebGL 2. The layout uses CSS container queries, so
+it needs Safari 16 / iOS 16 or newer (Chrome 105+, Firefox 110+).
 
 ## Deploy (Vercel)
 
@@ -67,8 +68,15 @@ works from a sub-path (`https://<user>.github.io/<repo>/sauria/`). Publish the r
 or just the `sauria/` folder, as is.
 
 **On iPhone / Android:** open the site in Safari or Chrome and use *Add to Home
-Screen*. It launches full-screen in landscape like a native game (web manifest +
-apple-touch icon).
+Screen*. It launches full-screen like a native game (web manifest + apple-touch
+icon).
+
+Sauria always plays in **landscape**. iOS can't lock a web page's orientation,
+so on a phone held upright the game turns itself sideways: turn the phone
+counter-clockwise (home indicator on the right) to play. This works with
+Portrait Orientation Lock on, and if rotation is unlocked the phone simply
+switches to landscape and the game lays out normally. On Android, starting a
+game also asks Chrome to lock landscape when it's full-screen or installed.
 
 ## Survival
 
@@ -184,7 +192,7 @@ The in-game **Field notes** (H, or from the pause menu) show the same list.
 | Map · zoom | M · mouse wheel | M |
 | Pause · field notes | Esc or P · H | Esc or P · H |
 
-**Touch** (phones and tablets, landscape)
+**Touch** (phones and tablets, always landscape)
 
 - **Move:** put your thumb anywhere on the left half. The stick appears where you
   touch.
@@ -230,6 +238,7 @@ URL parameters, handy for sharing a moment or testing:
 | `?quality=low\|high` | force a quality profile |
 | `?seed=N` | a different island |
 | `?mute=1` · `?debug=1` | start muted · fps / draw-call overlay |
+| `?rotate=0\|1` | never turn the game sideways on a phone held upright · turn it for any portrait window (testing on desktop) |
 
 For example, `index.html?species=allosaurus&growth=1&t=0.27` drops you in as an
 adult Allosaurus at dawn.
@@ -263,6 +272,9 @@ there is one and otherwise falls back to the global install.
   - survival in both render styles, keyboard movement, pause, and death → death
     screen → hatch again
   - an iPhone-sized touch run (joystick, pause button, Pixel-size slider)
+  - an upright iPhone: the game turns sideways, the drawing buffer stays
+    landscape, and pushing the stick toward the phone's right edge (the app's
+    top) walks forward
   - a hunt: planner → helicopter drop-off → hunting → fire → quit
 - Screenshots land in `tests/out/` (gitignored). The run prints a PASS/FAIL summary
   and exits non-zero on failure. Any console error counts as a failure.
@@ -277,6 +289,9 @@ Plain ES modules under `src/`, loaded by `index.html` through an import map:
 - `main.js`: boot, the game state machine (menu → playing ⇄ paused → dead, plus
   hunter mode), the render-style pipeline, saves and the `window.__sauria` test
   hook
+- `core/screen.js`: the app frame (`#app`). On a phone held upright it lays the
+  game out at landscape size and rotates it 90°; everything that reads pointer
+  positions or the screen size goes through it
 - `world/`: terrain (heightfield island with lakes and rivers, procedural surface
   shader), water, sky and day/night, vegetation (instanced forests and food
   plants), wind

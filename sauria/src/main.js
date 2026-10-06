@@ -4,6 +4,9 @@
 // "playing" ⇄ "paused" → "dead" → (respawn | menu). Hunter mode is loaded on
 // demand from ./hunter/hunterMode.js and takes over the loop while it runs.
 
+// First: lays out the app frame (and turns it sideways on a phone held upright)
+// before anything measures it.
+import { appSize, onAppResize, tryLockLandscape } from "./core/screen.js";
 import * as THREE from "three";
 import { WORLD, TIME, GAME, QUALITY, STYLE } from "./config.js";
 import { clamp } from "./core/math.js";
@@ -109,12 +112,15 @@ scene.add(camera); // hunter viewmodels hang off the camera
  * Size the drawing buffer. "pixel" draws the 3D scene at a few hundred pixels
  * tall straight into the canvas and lets CSS upscale it with nearest-neighbour
  * filtering — identical colours/tone mapping to "detailed", zero extra passes,
- * and the DOM UI stays crisp on top.
+ * and the DOM UI stays crisp on top. Sized from the app frame (core/screen.js):
+ * on a phone held upright that's the landscape box turned sideways, so the
+ * buffer stays landscape-shaped.
  */
+const appBox = { w: 1, h: 1 };
 function resize() {
-  const vv = window.visualViewport;
-  const w = Math.max(1, Math.round(vv ? vv.width : window.innerWidth));
-  const h = Math.max(1, Math.round(vv ? vv.height : window.innerHeight));
+  appSize(appBox);
+  const w = Math.max(1, Math.round(appBox.w));
+  const h = Math.max(1, Math.round(appBox.h));
   if (style === "pixel") {
     // Pixel size slider: 0 = full render resolution, 1 = chunkiest. Blend the
     // row count geometrically, then snap to a whole number of device pixels per
@@ -147,8 +153,8 @@ function resize() {
   camera.updateProjectionMatrix();
 }
 resize();
-window.addEventListener("resize", resize);
-window.visualViewport?.addEventListener("resize", resize);
+window.addEventListener("resize", resize); // also catches devicePixelRatio changes
+onAppResize(resize); // visual viewport changes, turning sideways and back
 window.addEventListener("orientationchange", () => setTimeout(resize, 120));
 
 /* ----------------------------------------------------------------------- */
@@ -275,6 +281,7 @@ function startSurvival(speciesId, { growth = 0, from = null, pos = null } = {}) 
   const world = game.world;
   const species = getSpecies(speciesId);
   audio?.start();
+  tryLockLandscape(); // Android fullscreen / installed app; a no-op elsewhere
   world.mode = "survival";
   input.setMode?.("dino");
 
@@ -444,6 +451,7 @@ menu.onHunter = () => startHunterMode();
 /** Hunter mode lives in its own module; load it on first use. */
 async function startHunterMode() {
   audio?.start();
+  tryLockLandscape(); // inside the start gesture, before the module loads
   try {
     const mod = await import("./hunter/hunterMode.js");
     if (!game.hunterMode) {
@@ -491,8 +499,8 @@ function flashNotice(text) {
   el.setAttribute("role", "status");
   el.textContent = text;
   el.style.cssText =
-    "position:fixed;left:50%;bottom:calc(28px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:70;" +
-    "max-width:min(92vw,520px);padding:12px 18px;border-radius:var(--radius,6px);background:var(--c-panel,rgba(18,17,13,.86));" +
+    "position:fixed;left:50%;bottom:calc(28px + var(--safe-b,0px));transform:translateX(-50%);z-index:70;" +
+    "max-width:min(92cqw,520px);padding:12px 18px;border-radius:var(--radius,6px);background:var(--c-panel,rgba(18,17,13,.86));" +
     "color:var(--c-bone,#efe8d8);font:500 14px/1.4 var(--font-ui,system-ui,sans-serif);box-shadow:var(--shadow,0 8px 30px rgba(0,0,0,.4));" +
     "border:1px solid var(--c-line,rgba(239,232,216,.16));text-align:center;transition:opacity .4s";
   uiRoot.appendChild(el);
@@ -711,7 +719,7 @@ function updateDebug() {
     debugEl.style.cssText =
       "position:fixed;left:8px;bottom:8px;z-index:99;margin:0;padding:6px 8px;font:11px/1.35 ui-monospace,monospace;" +
       "color:#e8e2d4;background:rgba(10,12,10,.62);border-radius:4px;pointer-events:none;white-space:pre";
-    document.body.appendChild(debugEl);
+    (document.getElementById("app") || document.body).appendChild(debugEl);
   }
   if ((debugTimer += 1) % 15) return;
   const info = renderer.info.render;

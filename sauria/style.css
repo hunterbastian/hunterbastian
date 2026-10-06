@@ -41,13 +41,8 @@
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   --text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55), 0 0 18px rgba(0, 0, 0, 0.32);
 
-  /* Safe areas (notch, home bar) and gutters. */
-  --safe-t: env(safe-area-inset-top, 0px);
-  --safe-r: env(safe-area-inset-right, 0px);
-  --safe-b: env(safe-area-inset-bottom, 0px);
-  --safe-l: env(safe-area-inset-left, 0px);
-  --gutter: clamp(18px, 3.6vw, 56px);
-  --hud-gutter: clamp(14px, 2.2vw, 28px);
+  /* Safe areas (--safe-*) and gutters live on #app, below: they're measured
+     in the app's frame, which a phone held upright turns sideways. */
 
   /* Film grain, generated — no image files. */
   --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
@@ -89,13 +84,63 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* The game's frame (src/core/screen.js keeps --app-* in sync with the visual
+   viewport). Everything the game draws lives inside it, and it's a size query
+   container: rules inside size against it with container units (cqw/cqh) and
+   @container app queries, never the viewport — on a phone held upright the
+   app is laid out landscape and turned sideways, so the two differ. */
+#app {
+  /* Safe areas (notch, home bar) in the app's own frame; remapped while rotated. */
+  --sa-t: env(safe-area-inset-top, 0px);
+  --sa-r: env(safe-area-inset-right, 0px);
+  --sa-b: env(safe-area-inset-bottom, 0px);
+  --sa-l: env(safe-area-inset-left, 0px);
+  --safe-t: var(--sa-t);
+  --safe-r: var(--sa-r);
+  --safe-b: var(--sa-b);
+  --safe-l: var(--sa-l);
+  --gutter: clamp(18px, 3.6cqw, 56px);
+  --hud-gutter: clamp(14px, 2.2cqw, 28px);
+
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: var(--app-w, 100%);
+  height: var(--app-h, 100%);
+  overflow: hidden;
+  container: app / size;
+  /* Fixed-position descendants (HUD, overlays, touch layer) lay out in this
+     box, rotated or not. */
+  contain: layout;
+  transform-origin: 0 0;
+}
+
+/* Phone held upright: the app is landscape-sized and turned 90° clockwise, its
+   top edge along the phone's right edge — turn the phone counter-clockwise to
+   play. The phone's notch is now on the app's left, its home bar on the right. */
+html.is-rotated #app {
+  --sa-t: env(safe-area-inset-right, 0px);
+  --sa-r: env(safe-area-inset-bottom, 0px);
+  --sa-b: env(safe-area-inset-left, 0px);
+  --sa-l: env(safe-area-inset-top, 0px);
+  transform: translate(var(--app-x, 0px), var(--app-y, 0px)) rotate(90deg);
+}
+
+/* Browsers pan in screen axes, not a turned element's own (Chrome won't
+   touch-scroll a rotated scroller at all; iOS reads pan-x / pan-y against the
+   page). So turned sideways, native panning is off throughout and
+   src/core/screen.js scrolls lists and drags sliders along the app's axes. */
+html.is-rotated #app,
+html.is-rotated #app * {
+  touch-action: none;
+}
+
 #game {
   position: fixed;
   inset: 0;
   display: block;
-  width: 100vw;
-  height: 100vh;
-  height: 100dvh;
+  width: 100cqw;
+  height: 100cqh;
   touch-action: none;
   outline: none;
   background: radial-gradient(120% 90% at 62% 28%, #262b22 0%, #12110d 68%);
@@ -360,8 +405,8 @@ button:disabled {
   z-index: 30;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  padding: calc(var(--safe-t) + clamp(14px, 2.6vh, 26px)) calc(var(--safe-r) + var(--gutter))
-    calc(var(--safe-b) + clamp(14px, 3vh, 32px)) calc(var(--safe-l) + var(--gutter));
+  padding: calc(var(--safe-t) + clamp(14px, 2.6cqh, 26px)) calc(var(--safe-r) + var(--gutter))
+    calc(var(--safe-b) + clamp(14px, 3cqh, 32px)) calc(var(--safe-l) + var(--gutter));
   color: var(--c-bone);
   pointer-events: auto;
   visibility: hidden;
@@ -583,14 +628,14 @@ button:disabled {
   flex-direction: column;
   justify-content: flex-end;
   max-width: 660px;
-  padding-bottom: clamp(4px, 3vh, 40px);
+  padding-bottom: clamp(4px, 3cqh, 40px);
 }
 
 .title__eyebrow {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: clamp(12px, 2.2vh, 22px);
+  margin-bottom: clamp(12px, 2.2cqh, 22px);
   color: rgba(233, 224, 203, 0.78);
 }
 
@@ -603,7 +648,7 @@ button:disabled {
 
 .wordmark {
   margin: 0 0 0 -0.05em;
-  font: 300 clamp(3.9rem, min(13vw, 21vh), 10.5rem) / 0.84 var(--font-display);
+  font: 300 clamp(3.9rem, min(13cqw, 21cqh), 10.5rem) / 0.84 var(--font-display);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--c-paper);
@@ -612,8 +657,8 @@ button:disabled {
 
 .tagline {
   max-width: 32ch;
-  margin: clamp(12px, 2.2vh, 20px) 0 0;
-  font: italic 300 clamp(1.02rem, 1.6vw, 1.38rem) / 1.38 var(--font-display);
+  margin: clamp(12px, 2.2cqh, 20px) 0 0;
+  font: italic 300 clamp(1.02rem, 1.6cqw, 1.38rem) / 1.38 var(--font-display);
   color: rgba(244, 238, 223, 0.86);
   text-shadow: var(--text-shadow);
 }
@@ -622,7 +667,7 @@ button:disabled {
   display: grid;
   gap: 10px;
   max-width: 540px;
-  margin-top: clamp(20px, 4.6vh, 44px);
+  margin-top: clamp(20px, 4.6cqh, 44px);
   animation: rise 0.8s var(--ease) both;
 }
 
@@ -824,7 +869,7 @@ button:disabled {
 .loading {
   display: none;
   max-width: 540px;
-  margin-top: clamp(22px, 5vh, 46px);
+  margin-top: clamp(22px, 5cqh, 46px);
 }
 
 .menu.is-loading .loading {
@@ -881,7 +926,7 @@ button:disabled {
 .menu__foot {
   position: absolute;
   right: calc(var(--safe-r) + var(--gutter));
-  bottom: calc(var(--safe-b) + clamp(14px, 3vh, 32px));
+  bottom: calc(var(--safe-b) + clamp(14px, 3cqh, 32px));
   z-index: 1;
   pointer-events: none;
   transition: opacity 0.5s;
@@ -914,8 +959,8 @@ button:disabled {
 .screen--species {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: clamp(12px, 2.4vh, 26px);
-  padding-top: clamp(10px, 3vh, 34px);
+  gap: clamp(12px, 2.4cqh, 26px);
+  padding-top: clamp(10px, 3cqh, 34px);
 }
 
 .species__head {
@@ -959,7 +1004,7 @@ button:disabled {
 
 .species__title {
   margin: 6px 0 0;
-  font: 300 clamp(2rem, 4.2vw, 3.5rem) / 1 var(--font-display);
+  font: 300 clamp(2rem, 4.2cqw, 3.5rem) / 1 var(--font-display);
   color: var(--c-paper);
 }
 
@@ -1094,7 +1139,7 @@ button:disabled {
 
 .sp-card__fig {
   position: relative;
-  height: clamp(54px, 9vh, 80px);
+  height: clamp(54px, 9cqh, 80px);
   margin: 14px 0 20px;
 }
 
@@ -1198,7 +1243,7 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 24px;
-  padding-top: clamp(10px, 2vh, 18px);
+  padding-top: clamp(10px, 2cqh, 18px);
   border-top: 1px solid var(--c-line);
 }
 
@@ -1862,7 +1907,7 @@ button:disabled {
   position: absolute;
   top: calc(var(--safe-t) + 14px);
   left: 50%;
-  width: min(440px, 46vw);
+  width: min(440px, 46cqw);
   transform: translateX(-50%);
 }
 
@@ -2090,7 +2135,7 @@ button:disabled {
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  width: min(480px, 92vw);
+  width: min(480px, 92cqw);
   transform: translateX(-50%);
 }
 
@@ -2169,7 +2214,7 @@ button:disabled {
 /* Context prompt (lower centre) */
 .hud__prompt {
   position: absolute;
-  bottom: calc(var(--safe-b) + 17vh);
+  bottom: calc(var(--safe-b) + 17cqh);
   left: 50%;
   opacity: 0;
   transform: translate3d(-50%, 8px, 0);
@@ -2544,7 +2589,7 @@ button:disabled {
 }
 
 .hud--touch .compass {
-  width: min(360px, 38vw);
+  width: min(360px, 38cqw);
 }
 
 .hud--touch .hud__prompt {
@@ -2613,7 +2658,7 @@ button:disabled {
 
 .pause__title {
   margin: 14px 0 0;
-  font: 300 clamp(2.1rem, 4.2vw, 3.3rem) / 1.04 var(--font-display);
+  font: 300 clamp(2.1rem, 4.2cqw, 3.3rem) / 1.04 var(--font-display);
   color: var(--c-paper);
   text-wrap: balance;
 }
@@ -2626,7 +2671,7 @@ button:disabled {
 
 .pause__menu {
   display: grid;
-  margin-top: clamp(18px, 4vh, 34px);
+  margin-top: clamp(18px, 4cqh, 34px);
   border-top: 1px solid var(--c-line);
 }
 
@@ -2864,7 +2909,7 @@ button:disabled {
 }
 
 .death__fig {
-  width: min(240px, 60vw);
+  width: min(240px, 60cqw);
   height: 64px;
   margin: 26px auto 0;
   opacity: 0.32;
@@ -2884,7 +2929,7 @@ button:disabled {
 
 .death__cause {
   margin: 14px 0 0;
-  font: 300 clamp(2.3rem, 6vw, 4.6rem) / 1.02 var(--font-display);
+  font: 300 clamp(2.3rem, 6cqw, 4.6rem) / 1.02 var(--font-display);
   letter-spacing: -0.005em;
   color: var(--c-paper);
   text-wrap: balance;
@@ -2892,7 +2937,7 @@ button:disabled {
 
 .death__epitaph {
   margin: 14px 0 0;
-  font: italic 300 clamp(1rem, 1.6vw, 1.2rem) / 1.4 var(--font-display);
+  font: italic 300 clamp(1rem, 1.6cqw, 1.2rem) / 1.4 var(--font-display);
   color: var(--c-dim);
 }
 
@@ -2900,7 +2945,7 @@ button:disabled {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   max-width: 480px;
-  margin: clamp(22px, 5vh, 38px) auto 0;
+  margin: clamp(22px, 5cqh, 38px) auto 0;
   border-top: 1px solid var(--c-line);
   border-bottom: 1px solid var(--c-line);
 }
@@ -2937,7 +2982,7 @@ button:disabled {
   flex-wrap: wrap;
   justify-content: center;
   gap: 12px;
-  margin-top: clamp(22px, 5vh, 36px);
+  margin-top: clamp(22px, 5cqh, 36px);
 }
 
 /* --- Map ------------------------------------------------------------------------ */
@@ -2947,8 +2992,8 @@ button:disabled {
   --map-ink: #24231d;
   --map-size: min(
     760px,
-    calc(100dvh - 92px - var(--safe-t) - var(--safe-b)),
-    calc(100vw - 92px - 300px - var(--safe-l) - var(--safe-r))
+    calc(100cqh - 92px - var(--safe-t) - var(--safe-b)),
+    calc(100cqw - 92px - 300px - var(--safe-l) - var(--safe-r))
   );
   position: absolute;
   inset: 0;
@@ -3524,7 +3569,7 @@ button:disabled {
   z-index: 9;
 }
 
-@media (max-width: 520px), (max-height: 380px) {
+@container app (max-width: 520px) or (max-height: 380px) {
   .touch {
     --k: 0.84;
   }
@@ -3559,7 +3604,7 @@ button:disabled {
 
 /* Phone held upright: swing the outer ring up the right edge so the whole
    cluster stays on the right half, clear of the left thumb's stick. */
-@media (max-width: 520px) and (orientation: portrait) {
+@container app (max-width: 520px) and (orientation: portrait) {
   .touch-btn[data-slot="outer0"] {
     right: calc(var(--safe-r) + 172px * var(--k));
     bottom: calc(var(--safe-b) + 197px * var(--k));
@@ -3590,7 +3635,7 @@ button:disabled {
 /* Very short landscape (iPhone SE in Safari, the game inside an embedded
    viewer): a little smaller, and the outer ring swung down toward the
    horizontal so it stays clear of the top utility row. */
-@media (max-height: 330px) and (orientation: landscape) {
+@container app (max-height: 330px) and (orientation: landscape) {
   .touch {
     --k: 0.8;
   }
@@ -3646,16 +3691,18 @@ button:disabled {
   }
 }
 
-/* --- Rotate hint (phones held upright) --------------------------------------- */
+/* --- Turn note (phones held upright) ---------------------------------------- */
 
-/* Sits in the open upper-middle of the screen, clear of the menu bar, the
-   HUD's top row (map, pause) and the thumb controls, and lets taps through
-   everywhere but its close button, so it never blocks anything while up. */
-.rotate-hint {
-  position: fixed;
-  top: 30%;
-  left: 16px;
-  right: 16px;
+/* src/core/screen.js turns the game sideways on a phone held upright and, the
+   first time, shows this note. It's laid out in the app's frame, so it reads
+   right once the phone is turned; it sits in the open upper-middle of the
+   screen, clear of the menu bar, the HUD's top row and the thumb controls,
+   never takes a tap, and bows out by itself after a few seconds. */
+.turn-note {
+  position: absolute;
+  top: 28%;
+  left: calc(var(--safe-l) + 16px);
+  right: calc(var(--safe-r) + 16px);
   z-index: 100;
   pointer-events: none;
   display: none;
@@ -3663,7 +3710,7 @@ button:disabled {
   gap: 12px;
   width: fit-content;
   margin-inline: auto;
-  padding: 9px 8px 9px 14px;
+  padding: 10px 18px 10px 14px;
   border: 1px solid var(--c-line);
   border-radius: 999px;
   background: rgba(14, 13, 10, 0.82);
@@ -3671,14 +3718,17 @@ button:disabled {
   backdrop-filter: blur(10px);
   box-shadow: 0 12px 30px -12px rgba(0, 0, 0, 0.7);
   color: var(--c-paper);
-  font: 500 12.5px/1.25 var(--font-ui);
-  /* Advisory only: it bows out by itself after a few seconds. */
-  animation:
-    toast-in 0.6s var(--ease) 0.8s both,
-    hint-out 0.8s var(--ease) 9s forwards;
+  font: 500 12.5px/1.3 var(--font-ui);
 }
 
-@keyframes hint-out {
+.turn-note.is-on {
+  display: flex;
+  animation:
+    toast-in 0.6s var(--ease) 0.5s both,
+    turn-note-out 0.8s var(--ease) 6s forwards;
+}
+
+@keyframes turn-note-out {
   to {
     opacity: 0;
     visibility: hidden;
@@ -3686,12 +3736,22 @@ button:disabled {
   }
 }
 
-.rotate-hint__ico {
+.turn-note b {
+  font-weight: 600;
+}
+
+.turn-note__text span {
+  color: var(--c-dim);
+}
+
+/* The phone glyph turns counter-clockwise, the way the hand should: drawn in
+   the app's frame, it reads as an upright phone tipping onto its side. */
+.turn-note__ico {
   width: 20px;
   height: 20px;
   flex: none;
   color: var(--c-ochre);
-  animation: tilt 2.6s var(--ease) 1.4s infinite;
+  animation: tilt 2.6s var(--ease) 1.2s infinite;
 }
 
 @keyframes tilt {
@@ -3705,31 +3765,6 @@ button:disabled {
   }
   100% {
     transform: rotate(0);
-  }
-}
-
-.rotate-hint__close {
-  position: relative;
-  width: 30px;
-  height: 30px;
-  pointer-events: auto;
-}
-
-/* A thumb-sized (44 px) target around the small visible circle. */
-.rotate-hint__close::after {
-  content: "";
-  position: absolute;
-  inset: -8px;
-  border-radius: 50%;
-}
-
-.rotate-hint__close .ico {
-  font-size: 15px;
-}
-
-@media (orientation: portrait) and (max-width: 600px) and (pointer: coarse) {
-  .rotate-hint:not(.is-dismissed) {
-    display: flex;
   }
 }
 
@@ -3764,7 +3799,7 @@ button:disabled {
 /* --- Responsive ------------------------------------------------------------------ */
 
 /* Mid-width: the six cards no longer fit — scroll them. */
-@media (max-width: 1180px) {
+@container app (max-width: 1180px) {
   .species__list {
     grid-auto-columns: 216px;
     margin-inline: calc(-1 * var(--gutter));
@@ -3782,7 +3817,7 @@ button:disabled {
 }
 
 /* Phones (portrait) and small tablets. */
-@media (max-width: 700px) {
+@container app (max-width: 700px) {
   .brand__sub,
   .tool span {
     display: none;
@@ -3848,7 +3883,7 @@ button:disabled {
   }
 
   .species__list {
-    grid-auto-columns: min(80vw, 330px);
+    grid-auto-columns: min(80cqw, 330px);
     gap: 10px;
   }
 
@@ -3896,7 +3931,7 @@ button:disabled {
   }
 
   .map {
-    --map-size: min(calc(100vw - 72px - var(--safe-l) - var(--safe-r)), calc(100dvh - 330px));
+    --map-size: min(calc(100cqw - 72px - var(--safe-l) - var(--safe-r)), calc(100cqh - 330px));
   }
 
   .map__sheet {
@@ -3929,15 +3964,16 @@ button:disabled {
   }
 }
 
-/* Phones in portrait (advisory — the rotate hint asks for landscape): the top
+/* A narrow, upright app frame (phones normally turn the app sideways instead —
+   see src/core/screen.js — but ?rotate=0 or a slim embed land here): the top
    edge is shared with the touch utility buttons, so the HUD stacks in rows —
    identity, then a full-width compass, then vitals (left) beside the clock
    (right). Toasts drop into the open sky and the prompt clears the thumb arc. */
-@media (max-width: 600px) and (orientation: portrait) {
+@container app (max-width: 600px) and (orientation: portrait) {
   .compass,
   .hud--touch .compass {
     top: calc(var(--safe-t) + 72px);
-    width: min(360px, calc(100vw - 2 * var(--hud-gutter) - var(--safe-l) - var(--safe-r)));
+    width: min(360px, calc(100cqw - 2 * var(--hud-gutter) - var(--safe-l) - var(--safe-r)));
   }
 
   .hud--touch .hud__clock,
@@ -3954,7 +3990,7 @@ button:disabled {
   }
 
   .hud__toasts {
-    top: max(calc(var(--safe-t) + 300px), 40vh);
+    top: max(calc(var(--safe-t) + 300px), 40cqh);
   }
 
   .hud--touch .hud__prompt {
@@ -3963,7 +3999,7 @@ button:disabled {
 }
 
 /* Short landscape screens (phones on their side). */
-@media (max-height: 500px) {
+@container app (max-height: 500px) {
   .menu {
     padding-top: calc(var(--safe-t) + 10px);
     padding-bottom: calc(var(--safe-b) + 10px);
@@ -3974,7 +4010,7 @@ button:disabled {
   }
 
   .wordmark {
-    font-size: clamp(3rem, 19vh, 5.4rem);
+    font-size: clamp(3rem, 19cqh, 5.4rem);
   }
 
   .tagline {
@@ -4153,7 +4189,7 @@ button:disabled {
   }
 
   .map {
-    --map-size: min(calc(100dvh - 70px - var(--safe-t) - var(--safe-b)), calc(100vw - 72px - 260px));
+    --map-size: min(calc(100cqh - 70px - var(--safe-t) - var(--safe-b)), calc(100cqw - 72px - 260px));
   }
 
   .map__side {
@@ -4189,20 +4225,20 @@ button:disabled {
   }
 }
 
-@media (max-height: 500px) and (max-width: 700px) {
+@container app (max-height: 500px) and (max-width: 700px) {
   .map__sheet {
     grid-template-columns: var(--map-size) 200px;
   }
 }
 
 /* Phones on their side: wordmark on the left, the choices on the right. */
-@media (max-height: 500px) and (min-width: 600px) {
+@container app (max-height: 500px) and (min-width: 600px) {
   .screen--title {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 420px);
     grid-template-rows: auto auto auto;
     align-content: end;
-    column-gap: clamp(20px, 4vw, 48px);
+    column-gap: clamp(20px, 4cqw, 48px);
     max-width: none;
     padding-bottom: 0;
   }
@@ -4283,13 +4319,13 @@ button:disabled {
   /* The wordmark must fit its column, not just the height: on a notched
      phone the side insets eat ~100 px and SAURIA ran under the mode cards. */
   .screen--title {
-    grid-template-columns: minmax(0, 1fr) minmax(0, min(420px, 52vw));
+    grid-template-columns: minmax(0, 1fr) minmax(0, min(420px, 52cqw));
   }
 
   .wordmark {
     font-size: min(
-      clamp(3rem, 19vh, 5.4rem),
-      calc((100vw - var(--safe-l) - var(--safe-r) - 2 * var(--gutter) - min(420px, 52vw) - clamp(20px, 4vw, 48px)) / 4.1)
+      clamp(3rem, 19cqh, 5.4rem),
+      calc((100cqw - var(--safe-l) - var(--safe-r) - 2 * var(--gutter) - min(420px, 52cqw) - clamp(20px, 4cqw, 48px)) / 4.1)
     );
   }
 }
@@ -4344,6 +4380,6 @@ button:disabled {
 
 /* Very short screens: the pause card scrolls instead of pushing buttons off-screen. */
 .ovl--pause .pause {
-  max-height: calc(100dvh - 24px);
+  max-height: calc(100cqh - 24px);
   overflow-y: auto;
 }

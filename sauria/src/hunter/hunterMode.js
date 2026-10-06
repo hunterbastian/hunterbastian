@@ -8,6 +8,7 @@
 
 import * as THREE from "three";
 import { clamp } from "../core/math.js";
+import { tryLockLandscape } from "../core/screen.js";
 import { SPECIES } from "../creatures/species.js";
 import { Hunter, HunterController } from "./hunter.js";
 import { WeaponSystem, WEAPONS } from "./weapons.js";
@@ -78,6 +79,7 @@ export function createHunterMode({ world, renderer, camera, input, audio, menu, 
    */
   function begin({ weapons: loadout = ["rifle", "revolver"], equipment = {}, targets = [], phase = 0.5 } = {}) {
     audio?.start();
+    tryLockLandscape(); // the planner's start tap is a user gesture (Android fullscreen)
     hunterMenu.hide();
     hunterHud.hideSummary?.();
     hunterHud.hideDeath?.();

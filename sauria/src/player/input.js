@@ -6,7 +6,11 @@
 //                              "binoculars" | "extract" | "aim"
 //   axes   → moveAxis(), consumeLook(), consumeZoom()
 // On touch devices Input builds its own on-screen controls inside `uiRoot`
-// (floating joystick, drag-to-look, action buttons per mode).
+// (floating joystick, drag-to-look, action buttons per mode). Pointer positions
+// are read in the app's frame (core/screen.js toApp), which a phone held upright
+// turns sideways: "up" on the stick is the app's top, the phone's right edge.
+
+import { toApp, onAppResize, isRotated } from "../core/screen.js";
 
 /* --- Bindings ------------------------------------------------------------ */
 
@@ -165,7 +169,8 @@ const BUTTON_SETS = {
  * Functional baseline for the touch layer. Every selector is wrapped in
  * :where() (zero specificity), so any rule in style.css overrides it — the UI
  * owns the look; this only guarantees the controls are usable and placed
- * sensibly even before / without those rules.
+ * sensibly even before / without those rules. Like style.css it sizes against
+ * the app frame (@container app, safe areas from the remapped --sa-* vars).
  */
 const BASE_CSS = `
 :where(.touch){position:fixed;inset:0;z-index:5;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;color:var(--c-bone,#efe7d6);font-family:var(--font-ui,system-ui,sans-serif)}
@@ -185,35 +190,35 @@ const BASE_CSS = `
 :where(.touch-btn--hint){box-shadow:inset 0 0 0 2px var(--c-ochre,#d9a441),0 0 14px rgba(217,164,65,.55)}
 :where(.touch-btn--cooldown){opacity:.55}
 :where(.touch-btn--cooldown)::after{content:"";position:absolute;inset:0;border-radius:50%;pointer-events:none;background:conic-gradient(rgba(0,0,0,.45) calc(var(--cd,0)*360deg),transparent 0)}
-:where(.touch-btn[data-slot="primary"]){right:calc(22px + env(safe-area-inset-right));bottom:calc(22px + env(safe-area-inset-bottom));width:82px;height:82px}
+:where(.touch-btn[data-slot="primary"]){right:calc(22px + var(--sa-r,0px));bottom:calc(22px + var(--sa-b,0px));width:82px;height:82px}
 :where(.touch-btn[data-slot="primary"] .touch-btn__label){display:none}
-:where(.touch-btn[data-slot="arc0"]){right:calc(144px + env(safe-area-inset-right));bottom:calc(34px + env(safe-area-inset-bottom))}
-:where(.touch-btn[data-slot="arc1"]){right:calc(129px + env(safe-area-inset-right));bottom:calc(98px + env(safe-area-inset-bottom))}
-:where(.touch-btn[data-slot="arc2"]){right:calc(88px + env(safe-area-inset-right));bottom:calc(146px + env(safe-area-inset-bottom))}
-:where(.touch-btn[data-slot="arc3"]){right:calc(30px + env(safe-area-inset-right));bottom:calc(162px + env(safe-area-inset-bottom))}
+:where(.touch-btn[data-slot="arc0"]){right:calc(144px + var(--sa-r,0px));bottom:calc(34px + var(--sa-b,0px))}
+:where(.touch-btn[data-slot="arc1"]){right:calc(129px + var(--sa-r,0px));bottom:calc(98px + var(--sa-b,0px))}
+:where(.touch-btn[data-slot="arc2"]){right:calc(88px + var(--sa-r,0px));bottom:calc(146px + var(--sa-b,0px))}
+:where(.touch-btn[data-slot="arc3"]){right:calc(30px + var(--sa-r,0px));bottom:calc(162px + var(--sa-b,0px))}
 :where(.touch-btn[data-slot^="outer"]){width:48px;height:48px}
-:where(.touch-btn[data-slot="outer0"]){right:calc(214px + env(safe-area-inset-right));bottom:calc(108px + env(safe-area-inset-bottom))}
-:where(.touch-btn[data-slot="outer1"]){right:calc(170px + env(safe-area-inset-right));bottom:calc(178px + env(safe-area-inset-bottom))}
-:where(.touch-btn[data-slot="outer2"]){right:calc(106px + env(safe-area-inset-right));bottom:calc(226px + env(safe-area-inset-bottom))}
-:where(.touch-btn[data-slot^="top"]){width:44px;height:44px;top:calc(14px + env(safe-area-inset-top))}
+:where(.touch-btn[data-slot="outer0"]){right:calc(214px + var(--sa-r,0px));bottom:calc(108px + var(--sa-b,0px))}
+:where(.touch-btn[data-slot="outer1"]){right:calc(170px + var(--sa-r,0px));bottom:calc(178px + var(--sa-b,0px))}
+:where(.touch-btn[data-slot="outer2"]){right:calc(106px + var(--sa-r,0px));bottom:calc(226px + var(--sa-b,0px))}
+:where(.touch-btn[data-slot^="top"]){width:44px;height:44px;top:calc(14px + var(--sa-t,0px))}
 :where(.touch-btn[data-slot^="top"] .touch-btn__label){display:none}
-:where(.touch-btn[data-slot="top0"]){right:calc(14px + env(safe-area-inset-right))}
-:where(.touch-btn[data-slot="top1"]){right:calc(66px + env(safe-area-inset-right))}
-:where(.touch-btn[data-slot="top2"]){right:calc(118px + env(safe-area-inset-right))}
-:where(.touch-btn[data-slot="top3"]){right:calc(170px + env(safe-area-inset-right))}
-@media (max-width:520px){
+:where(.touch-btn[data-slot="top0"]){right:calc(14px + var(--sa-r,0px))}
+:where(.touch-btn[data-slot="top1"]){right:calc(66px + var(--sa-r,0px))}
+:where(.touch-btn[data-slot="top2"]){right:calc(118px + var(--sa-r,0px))}
+:where(.touch-btn[data-slot="top3"]){right:calc(170px + var(--sa-r,0px))}
+@container app (max-width:520px){
 :where(.touch-stick){width:116px;height:116px;margin:-58px 0 0 -58px}
 :where(.touch-stick__knob){width:50px;height:50px;margin:-25px 0 0 -25px}
 :where(.touch-btn){width:48px;height:48px}
-:where(.touch-btn[data-slot="primary"]){right:calc(16px + env(safe-area-inset-right));bottom:calc(20px + env(safe-area-inset-bottom));width:72px;height:72px}
-:where(.touch-btn[data-slot="arc0"]){right:calc(130px + env(safe-area-inset-right));bottom:calc(32px + env(safe-area-inset-bottom))}
-:where(.touch-btn[data-slot="arc1"]){right:calc(116px + env(safe-area-inset-right));bottom:calc(83px + env(safe-area-inset-bottom))}
-:where(.touch-btn[data-slot="arc2"]){right:calc(79px + env(safe-area-inset-right));bottom:calc(120px + env(safe-area-inset-bottom))}
-:where(.touch-btn[data-slot="arc3"]){right:calc(28px + env(safe-area-inset-right));bottom:calc(134px + env(safe-area-inset-bottom))}
+:where(.touch-btn[data-slot="primary"]){right:calc(16px + var(--sa-r,0px));bottom:calc(20px + var(--sa-b,0px));width:72px;height:72px}
+:where(.touch-btn[data-slot="arc0"]){right:calc(130px + var(--sa-r,0px));bottom:calc(32px + var(--sa-b,0px))}
+:where(.touch-btn[data-slot="arc1"]){right:calc(116px + var(--sa-r,0px));bottom:calc(83px + var(--sa-b,0px))}
+:where(.touch-btn[data-slot="arc2"]){right:calc(79px + var(--sa-r,0px));bottom:calc(120px + var(--sa-b,0px))}
+:where(.touch-btn[data-slot="arc3"]){right:calc(28px + var(--sa-r,0px));bottom:calc(134px + var(--sa-b,0px))}
 :where(.touch-btn[data-slot^="outer"]){width:42px;height:42px}
-:where(.touch-btn[data-slot="outer0"]){right:calc(144px + env(safe-area-inset-right));bottom:calc(148px + env(safe-area-inset-bottom))}
-:where(.touch-btn[data-slot="outer1"]){right:calc(84px + env(safe-area-inset-right));bottom:calc(186px + env(safe-area-inset-bottom))}
-:where(.touch-btn[data-slot="outer2"]){right:calc(26px + env(safe-area-inset-right));bottom:calc(206px + env(safe-area-inset-bottom))}
+:where(.touch-btn[data-slot="outer0"]){right:calc(144px + var(--sa-r,0px));bottom:calc(148px + var(--sa-b,0px))}
+:where(.touch-btn[data-slot="outer1"]){right:calc(84px + var(--sa-r,0px));bottom:calc(186px + var(--sa-b,0px))}
+:where(.touch-btn[data-slot="outer2"]){right:calc(26px + var(--sa-r,0px));bottom:calc(206px + var(--sa-b,0px))}
 :where(.touch-btn__label){bottom:7px;font-size:7.5px;letter-spacing:.02em}
 }
 `;
@@ -301,6 +306,7 @@ export class Input {
     // base is drawn (the origin, pulled in from the screen edges).
     this._stick = { id: -1, cx: 0, cy: 0, bx: 0, by: 0, x: 0, y: 0, radius: STICK_FALLBACK_RADIUS };
     this._look = { id: -1, x: 0, y: 0, t: 0, v: 0 };
+    this._pt = { x: 0, y: 0 }; // scratch: a pointer position in the app frame
     this._rootLeft = 0;
     this._rootTop = 0;
     this._rootW = 0;
@@ -537,6 +543,16 @@ export class Input {
     window.addEventListener("orientationchange", rotate, opts());
     screen.orientation?.addEventListener?.("change", rotate, opts());
     window.addEventListener("resize", () => this._stick.id === -1 && this._placeStickAtRest(), opts());
+    // The app frame turning sideways (or back) moves every control under the
+    // thumbs: drop the touches like a real rotation. A plain resize re-seats
+    // the idle stick.
+    let rotated = isRotated();
+    const offFrame = onAppResize(({ rotated: r }) => {
+      if (r !== rotated) this._resetTouch();
+      else if (this._stick.id === -1) this._placeStickAtRest();
+      rotated = r;
+    });
+    this._ac?.signal.addEventListener("abort", offFrame);
   }
 
   _gesture(e) {
@@ -629,10 +645,11 @@ export class Input {
     if (canLock) this.requestPointerLock();
     e.preventDefault(); // a drag-look must not start a text selection across the HUD
     const d = this._drag;
+    const pt = toApp(e.clientX, e.clientY, this._pt);
     d.active = true;
     d.button = e.button;
-    d.x = e.clientX;
-    d.y = e.clientY;
+    d.x = pt.x;
+    d.y = pt.y;
     d.moved = 0;
     d.acts = acts;
     if (acts && e.button === 2) this._pressMouse(MOUSE_RIGHT, "aim");
@@ -674,10 +691,11 @@ export class Input {
     }
     const d = this._drag;
     if (!d.active || this._isCompatMouse()) return;
-    const dx = e.clientX - d.x;
-    const dy = e.clientY - d.y;
-    d.x = e.clientX;
-    d.y = e.clientY;
+    const pt = toApp(e.clientX, e.clientY, this._pt);
+    const dx = pt.x - d.x;
+    const dy = pt.y - d.y;
+    d.x = pt.x;
+    d.y = pt.y;
     d.moved += Math.abs(dx) + Math.abs(dy);
     this._lookX += dx;
     this._lookY += dy;
@@ -747,9 +765,9 @@ export class Input {
     root.style.webkitUserSelect = "none";
     root.style.userSelect = "none";
     // Carries the safe-area insets for _safeInsets() (children are absolutely
-    // positioned, so the padding moves nothing).
-    root.style.padding =
-      "env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px)";
+    // positioned, so the padding moves nothing). --sa-* are the app frame's
+    // insets (style.css remaps env() while the app is turned sideways).
+    root.style.padding = "var(--sa-t, 0px) var(--sa-r, 0px) var(--sa-b, 0px) var(--sa-l, 0px)";
 
     const move = document.createElement("div");
     move.className = "touch-zone touch-zone--move";
@@ -883,9 +901,10 @@ export class Input {
   }
 
   /**
-   * Safe-area insets (notch, rounded corners, home indicator) in px. Read
-   * from the layer's own padding, which _buildTouch sets inline to env();
-   * padding doesn't move the absolutely positioned children.
+   * Safe-area insets (notch, rounded corners, home indicator) in px, in the
+   * app's frame. Read from the layer's own padding, which _buildTouch sets
+   * inline to the --sa-* vars (env() remapped by style.css while the app is
+   * turned sideways); padding doesn't move the absolutely positioned children.
    */
   _safeInsets() {
     const out = { t: 0, r: 0, b: 0, l: 0 };
@@ -934,12 +953,14 @@ export class Input {
     } catch {
       /* best-effort */
     }
-    // The layer can't move mid-drag, so measure it once per touch.
-    const rect = this.touchRoot.getBoundingClientRect();
-    this._rootLeft = rect.left;
-    this._rootTop = rect.top;
-    this._rootW = rect.width;
-    this._rootH = rect.height;
+    // The layer can't move mid-drag, so measure it once per touch. It fills
+    // the app frame (inset: 0), so its origin is the app's: positions come from
+    // toApp(), never getBoundingClientRect() (the rotated box in client space).
+    const root = this.touchRoot;
+    this._rootLeft = root.offsetLeft || 0;
+    this._rootTop = root.offsetTop || 0;
+    this._rootW = root.clientWidth;
+    this._rootH = root.clientHeight;
     this._sa = this._safeInsets();
     const s = this._stick;
     s.radius = this._stickRadius();
@@ -947,8 +968,9 @@ export class Input {
     // The stick's origin is exactly where the thumb lands, so touching down
     // never moves the creature by itself — even at the very edge of the
     // screen, where only the drawn base is pulled back on screen.
-    s.cx = e.clientX - rect.left;
-    s.cy = e.clientY - rect.top;
+    const pt = toApp(e.clientX, e.clientY, this._pt);
+    s.cx = pt.x - this._rootLeft;
+    s.cy = pt.y - this._rootTop;
     s.x = 0;
     s.y = 0;
     this._stickEl.classList.remove("touch-stick--idle");
@@ -960,8 +982,9 @@ export class Input {
   _stickMove(e) {
     const s = this._stick;
     if (e.pointerId !== s.id) return;
-    const px = e.clientX - this._rootLeft;
-    const py = e.clientY - this._rootTop;
+    const pt = toApp(e.clientX, e.clientY, this._pt);
+    const px = pt.x - this._rootLeft;
+    const py = pt.y - this._rootTop;
     let dx = px - s.cx;
     let dy = py - s.cy;
     let len = Math.hypot(dx, dy);
@@ -1027,9 +1050,10 @@ export class Input {
     } catch {
       /* best-effort */
     }
+    const pt = toApp(e.clientX, e.clientY, this._pt);
     this._look.id = e.pointerId;
-    this._look.x = e.clientX;
-    this._look.y = e.clientY;
+    this._look.x = pt.x;
+    this._look.y = pt.y;
     this._look.t = e.timeStamp;
     this._look.v = 0;
   }
@@ -1037,8 +1061,11 @@ export class Input {
   _lookMove(e) {
     const l = this._look;
     if (e.pointerId !== l.id || !this._enabled) return;
-    const dx = e.clientX - l.x;
-    const dy = e.clientY - l.y;
+    // In the app's frame: turned sideways, a thumb sliding along the phone's
+    // long edge is a horizontal drag.
+    const pt = toApp(e.clientX, e.clientY, this._pt);
+    const dx = pt.x - l.x;
+    const dy = pt.y - l.y;
     // Drag speed (px/s), lightly smoothed so one coalesced event can't jerk the gain.
     const speed = (Math.hypot(dx, dy) * 1000) / Math.max(1, e.timeStamp - l.t);
     l.v += (speed - l.v) * 0.5;
@@ -1046,8 +1073,8 @@ export class Input {
     const gain = TOUCH_LOOK_SCALE * (TOUCH_LOOK_PRECISION + (1 - TOUCH_LOOK_PRECISION) * u * u * (3 - 2 * u));
     this._lookX += dx * gain;
     this._lookY += dy * gain;
-    l.x = e.clientX;
-    l.y = e.clientY;
+    l.x = pt.x;
+    l.y = pt.y;
     l.t = e.timeStamp;
   }
 

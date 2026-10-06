@@ -1134,9 +1134,10 @@ export class Hud {
   }
 
   _measure() {
-    const r = this.root.getBoundingClientRect();
-    this._vw = Math.max(1, r.width || window.innerWidth || 1);
-    this._vh = Math.max(1, r.height || window.innerHeight || 1);
+    // Layout size, not getBoundingClientRect(): on a phone held upright the app
+    // frame is turned sideways and its client-space box has the sides swapped.
+    this._vw = Math.max(1, this.root.clientWidth || window.innerWidth || 1);
+    this._vh = Math.max(1, this.root.clientHeight || window.innerHeight || 1);
     const cw = this._compassWin.clientWidth;
     if (cw > 0 && cw !== this._compassW) {
       this._compassW = cw;

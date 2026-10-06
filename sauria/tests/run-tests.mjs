@@ -5,8 +5,9 @@
 // 2. Launches headless Chromium (Playwright) with SwiftShader WebGL.
 // 3. Runs tests/unit.html (browser-side unit tests, results on window.__unit).
 // 4. Runs smoke tests against the real game: survival in both render styles,
-//    movement, death → death screen, a phone-sized touch run, and a hunter
-//    expedition (planner → drop-off → hunting → shot).
+//    movement, death → death screen, a phone-sized touch run, an upright phone
+//    (the game turned sideways), and a hunter expedition (planner → drop-off →
+//    hunting → shot).
 // Screenshots land in tests/out/ (gitignored). Exits non-zero on any failure.
 //
 // Headless WebGL is software-rendered and very slow (a frame can take a
@@ -108,15 +109,22 @@ const SHOT_TIMEOUT = 120_000;
 /** Errors that come from the sandbox, not the game. */
 const IGNORED = [/fonts\.(googleapis|gstatic)\.com/];
 
-async function openPage(browser, url, { mobile = false } = {}) {
+async function openPage(browser, url, { mobile = false, upright = false } = {}) {
   const ctx = await browser.newContext(
-    mobile
-      ? { viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 }
-      : { viewport: { width: 960, height: 540 } },
+    upright
+      ? { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 3 }
+      : mobile
+        ? { viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 }
+        : { viewport: { width: 960, height: 540 } },
   );
   // Web fonts are cosmetic; stub them so runs are offline-safe and deterministic.
   await ctx.route(/fonts\.(googleapis|gstatic)\.com/, (route) => route.fulfill({ status: 200, contentType: "text/css", body: "" }));
   const page = await ctx.newPage();
+  if (upright) {
+    // An iPhone's portrait insets: the notch on top, the home indicator below.
+    const cdp = await ctx.newCDPSession(page);
+    await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 47, bottom: 34, left: 0, right: 0 } }).catch(() => {});
+  }
   const errors = [];
   page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
   page.on("console", (m) => {
@@ -377,6 +385,104 @@ const SUITES = [
     ],
   },
   {
+    name: "touch · upright phone",
+    query: "?species=stegosaurus&growth=0.4&t=0.45&quality=low&mute=1",
+    upright: true,
+    steps: [
+      {
+        name: "upright phone: the game turns sideways, drawing buffer stays landscape",
+        async run({ page, errors }) {
+          await waitState(page, "playing");
+          const f = await page.evaluate(() => {
+            const app = document.getElementById("app");
+            const r = app.getBoundingClientRect();
+            const c = __sauria.renderer.domElement;
+            const cs = getComputedStyle(app);
+            return {
+              rotated: document.documentElement.classList.contains("is-rotated"),
+              app: [app.clientWidth, app.clientHeight],
+              rect: [Math.round(r.width), Math.round(r.height)],
+              buf: [c.width, c.height],
+              aspect: __sauria.camera.aspect,
+              view: [innerWidth, innerHeight],
+              insets: ["--sa-t", "--sa-r", "--sa-b", "--sa-l"].map((k) => cs.getPropertyValue(k).trim()),
+            };
+          });
+          expect(f.rotated, "html.is-rotated should be set on a phone held upright");
+          expect(f.app[0] === f.view[1] && f.app[1] === f.view[0], `the app should be laid out landscape (${f.app} in a ${f.view} viewport)`);
+          expect(f.rect[0] === f.view[0] && f.rect[1] === f.view[1], `the turned app should cover the viewport exactly (${f.rect})`);
+          expect(f.buf[0] > f.buf[1] && f.aspect > 1.5, `the drawing buffer should be landscape-shaped (${f.buf}, aspect ${f.aspect.toFixed(2)})`);
+          await page.evaluate(() => __sauria.advance(3.5));
+          await frames(page, 2);
+          await shot(page, "upright-hud");
+          await expectClean(page, errors);
+          return `app ${f.app.join("×")} turned into ${f.view.join("×")}; buffer ${f.buf.join("×")}; insets t/r/b/l ${f.insets.join(" ")}`;
+        },
+      },
+      {
+        name: "upright phone: stick pushed toward the phone's right edge walks forward",
+        async run({ page, ctx, errors }) {
+          // App-frame point → client point: the inverse of #app's rotate(90deg).
+          const toClient = (x, y) =>
+            page.evaluate(([x, y]) => {
+              const r = document.getElementById("app").getBoundingClientRect();
+              return [r.right - y, r.top + x];
+            }, [x, y]);
+          const zone = await page.evaluate(() => {
+            const t = document.querySelector(".touch");
+            return { w: t.clientWidth, h: t.clientHeight };
+          });
+          const client = await ctx.newCDPSession(page);
+          const touch = (type, pts) => client.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
+          const ax = zone.w * 0.22;
+          const ay = zone.h * 0.65;
+          const start = await page.evaluate(() => ({ pos: __sauria.player.position.toArray(), yaw: __sauria.controller.camera.yaw }));
+          const [x0, y0] = await toClient(ax, ay);
+          await touch("touchStart", [{ x: x0, y: y0, id: 1 }]);
+          let last = [x0, y0];
+          for (let i = 1; i <= 6; i++) {
+            last = await toClient(ax, ay - i * 14); // toward the app's top
+            await touch("touchMove", [{ x: last[0], y: last[1], id: 1 }]);
+          }
+          expect(last[0] > x0 + 60 && Math.abs(last[1] - y0) < 1, `the thumb should travel toward the phone's right edge (${x0},${y0} → ${last})`);
+          const axis = await page.evaluate(() => ({ ...__sauria.input.moveAxis() }));
+          expect(axis.y > 0.6 && Math.abs(axis.x) < 0.25, `the stick should read forward, got ${JSON.stringify(axis)}`);
+          await page.evaluate(() => __sauria.advance(2.5));
+          await touch("touchEnd", []);
+          const end = await page.evaluate(() => __sauria.player.position.toArray());
+          const dx = end[0] - start.pos[0];
+          const dz = end[2] - start.pos[2];
+          const dist = Math.hypot(dx, dz);
+          // Camera forward on the ground is (sin yaw, cos yaw).
+          const along = (dx * Math.sin(start.yaw) + dz * Math.cos(start.yaw)) / (dist || 1);
+          expect(dist > 1, `stegosaurus moved only ${dist.toFixed(2)} m with the stick held forward`);
+          expect(along > 0.5, `the player should walk away from the camera (alignment ${along.toFixed(2)})`);
+          await expectClean(page, errors);
+          return `${dist.toFixed(1)} m, alignment with the camera ${along.toFixed(2)}; axis ${axis.x.toFixed(2)}, ${axis.y.toFixed(2)}`;
+        },
+      },
+      {
+        name: "upright phone: the pause button hits through the rotation",
+        async run({ page, ctx, errors }) {
+          const c = await page.evaluate(() => {
+            const r = document.querySelector('.touch-btn[data-action="pause"]')?.getBoundingClientRect();
+            return r ? [r.x + r.width / 2, r.y + r.height / 2] : null;
+          });
+          expect(c, "no pause touch button");
+          // Turned sideways, the top-right utility row sits along the phone's right edge, near its top.
+          expect(c[0] > 300 && c[1] > 600, `the pause button should be near the phone's bottom-right corner (app top-right), at ${c.map(Math.round)}`);
+          const client = await ctx.newCDPSession(page);
+          await client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: c[0], y: c[1], id: 2 }] });
+          await page.evaluate(() => __sauria.advance(0.1));
+          await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+          await page.evaluate(() => __sauria.advance(0.1));
+          expect((await page.evaluate(() => __sauria.state)) === "paused", "the pause button should pause the game");
+          await expectClean(page, errors);
+        },
+      },
+    ],
+  },
+  {
     name: "hunter",
     query: "?hunter=1&quality=low&mute=1&debug=1",
     steps: [
@@ -504,7 +610,7 @@ async function runSmoke(browser, base) {
     let session = null;
     let broken = null;
     try {
-      session = await openPage(browser, `${base}/index.html${suite.query}`, { mobile: !!suite.mobile });
+      session = await openPage(browser, `${base}/index.html${suite.query}`, { mobile: !!suite.mobile, upright: !!suite.upright });
     } catch (err) {
       broken = `couldn't open the page: ${err.message}`;
     }

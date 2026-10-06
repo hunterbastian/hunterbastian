@@ -30,18 +30,21 @@
   </script>
 </head>
 <body>
-  <canvas id="game" aria-label="Sauria — the island"></canvas>
-  <div id="ui"></div>
+  <!-- #app is the game's frame: everything the game draws lives inside it. On a
+       phone held upright src/core/screen.js lays it out at landscape size and
+       turns it 90° (iOS can't lock orientation), so CSS inside sizes against
+       this box (container units, @container app) rather than the viewport. -->
+  <div id="app">
+    <canvas id="game" aria-label="Sauria — the island"></canvas>
+    <div id="ui"></div>
 
-  <aside class="rotate-hint" id="rotate-hint" role="note">
-    <svg class="rotate-hint__ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <rect x="7.5" y="2.8" width="9" height="15.4" rx="1.8" /><path d="M11 15.4h2" /><path d="M3.5 13.5a8.6 8.6 0 0 0 7 7.7" /><path d="M8.6 20l1.9 1.2-1.1 1.9" />
-    </svg>
-    <span>Rotate for the best view</span>
-    <button type="button" class="icon-btn rotate-hint__close" aria-label="Dismiss">
-      <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11" /></svg>
-    </button>
-  </aside>
+    <aside class="turn-note" id="turn-note" role="status">
+      <svg class="turn-note__ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <g transform="rotate(-90 12 12)"><rect x="7.5" y="2.8" width="9" height="15.4" rx="1.8" /><path d="M11 15.4h2" /><path d="M3.5 13.5a8.6 8.6 0 0 0 7 7.7" /><path d="M8.6 20l1.9 1.2-1.1 1.9" /></g>
+      </svg>
+      <span class="turn-note__text"><b>Turn your phone sideways</b> <span>— Sauria plays in landscape</span></span>
+    </aside>
+  </div>
 
   <noscript>
     <div class="noscript">
@@ -53,21 +56,5 @@
   </noscript>
 
   <script type="module" src="src/main.js"></script>
-  <script>
-    // The rotate hint is advisory: one tap hides it for good on this device.
-    (function () {
-      var hint = document.getElementById("rotate-hint");
-      var KEY = "sauria.rotateHint";
-      try {
-        if (localStorage.getItem(KEY) === "dismissed") hint.classList.add("is-dismissed");
-      } catch (e) {}
-      hint.querySelector("button").addEventListener("click", function () {
-        hint.classList.add("is-dismissed");
-        try {
-          localStorage.setItem(KEY, "dismissed");
-        } catch (e) {}
-      });
-    })();
-  </script>
 </body>
 </html>
