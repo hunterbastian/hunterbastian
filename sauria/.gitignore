@@ -1,3 +1,4 @@
 # test / smoke output
 tests/out/
 *.png
+!apple-touch-icon.png

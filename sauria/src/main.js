@@ -536,9 +536,8 @@ function frame(now) {
   const player = world.player;
   if (game.state === "playing" || game.state === "dead" || game.state === "paused") {
     hud.update(dt, { player, controller: game.controller, world, camera });
-    if (game.map.open) {
-      game.map.update(dt, { player, cameraYaw: game.tpc.yaw, markers: game.controller.sniff?.markers });
-    }
+    // Every frame: the map records the trail while closed and redraws only when open.
+    game.map.update(dt, { player, cameraYaw: game.tpc.yaw, markers: game.controller.sniff?.markers });
   }
   audio?.update(dt, { listener: camera, player, world });
 
@@ -701,6 +700,9 @@ window.__sauria = {
   },
   get quality() {
     return qualityName;
+  },
+  get audio() {
+    return audio;
   },
   input,
   renderer,

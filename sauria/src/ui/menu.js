@@ -1439,12 +1439,19 @@ export class Menu {
   _open(el) {
     el.removeAttribute("inert");
     el.setAttribute("aria-hidden", "false");
-    // Next frame, so the opacity transition runs from the hidden state.
-    requestAnimationFrame(() => el.classList.add("is-open"));
+    // Next frame, so the opacity transition runs from the hidden state. Keep the
+    // handle: a _close() in the same frame must cancel it or the layer reopens.
+    cancelAnimationFrame(el._openRaf);
+    el._openRaf = requestAnimationFrame(() => {
+      el._openRaf = 0;
+      el.classList.add("is-open");
+    });
     el.classList.add("is-mounted");
   }
 
   _close(el) {
+    cancelAnimationFrame(el._openRaf);
+    el._openRaf = 0;
     el.classList.remove("is-open");
     el.setAttribute("inert", "");
     el.setAttribute("aria-hidden", "true");
