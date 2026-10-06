@@ -162,13 +162,13 @@ const BUTTON_SETS = {
 const BASE_CSS = `
 :where(.touch){position:fixed;inset:0;z-index:5;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;color:var(--c-bone,#efe7d6);font-family:var(--font-ui,system-ui,sans-serif)}
 :where(.touch *){touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent}
-:where(.touch-zone){position:absolute;top:0;bottom:0}
+:where(.touch-zone){position:absolute;top:0;bottom:0;pointer-events:auto}
 :where(.touch-zone--move){left:0;width:50%}
 :where(.touch-zone--look){right:0;width:50%}
 :where(.touch-stick){position:absolute;width:128px;height:128px;margin:-64px 0 0 -64px;border-radius:50%;pointer-events:none;background:radial-gradient(circle,rgba(20,24,18,.10) 55%,rgba(20,24,18,.28));box-shadow:inset 0 0 0 1.5px rgba(239,231,214,.35);transition:opacity .25s ease}
 :where(.touch-stick--idle){opacity:.45;transition:opacity .25s ease,left .3s ease,top .3s ease}
 :where(.touch-stick__knob){position:absolute;left:50%;top:50%;width:56px;height:56px;margin:-28px 0 0 -28px;border-radius:50%;background:rgba(239,231,214,.82);box-shadow:0 2px 10px rgba(0,0,0,.35)}
-:where(.touch-btn){position:absolute;display:grid;place-items:center;width:58px;height:58px;padding:0;border:0;border-radius:50%;color:inherit;font:inherit;background:rgba(18,22,17,.42);box-shadow:inset 0 0 0 1.5px rgba(239,231,214,.32),0 2px 8px rgba(0,0,0,.25);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);transition:transform .08s ease,background-color .15s ease}
+:where(.touch-btn){pointer-events:auto;position:absolute;display:grid;place-items:center;width:58px;height:58px;padding:0;border:0;border-radius:50%;color:inherit;font:inherit;background:rgba(18,22,17,.42);box-shadow:inset 0 0 0 1.5px rgba(239,231,214,.32),0 2px 8px rgba(0,0,0,.25);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);transition:transform .08s ease,background-color .15s ease}
 :where(.touch-btn svg){width:44%;height:44%;margin-top:-9px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
 :where(.touch-btn__label){position:absolute;left:0;right:0;bottom:8px;font-size:8px;line-height:1;letter-spacing:.03em;text-align:center;white-space:nowrap;opacity:.8;pointer-events:none}
 :where(.touch-btn[data-slot="primary"] svg),:where(.touch-btn[data-slot^="top"] svg){margin-top:0}

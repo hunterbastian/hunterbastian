@@ -3260,6 +3260,17 @@ button:disabled {
 .touch {
   --k: 1; /* layout scale for small screens */
   z-index: 5;
+  pointer-events: none; /* the layer itself is see-through to taps… */
+}
+
+/* …but #ui disables pointer events for everything inside it, so the thumb
+   zones and buttons must opt back in or every tap falls through to the canvas. */
+.touch-zone,
+.touch-btn {
+  pointer-events: auto;
+}
+
+.touch {
   font-family: var(--font-ui);
   color: var(--c-paper);
   transition: opacity 0.3s var(--ease);
