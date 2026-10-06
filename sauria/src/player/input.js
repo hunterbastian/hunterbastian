@@ -67,6 +67,12 @@ const MOUSE_RIGHT = 2;
 // Touch drags cover far fewer pixels than a mouse sweep for the same intent;
 // scale them so a thumb flick across half the screen turns ~150°.
 const TOUCH_LOOK_SCALE = 1.9;
+// …but a slow, deliberate drag (lining up a scoped shot, nudging the camera)
+// gets a finer gain: below TOUCH_LOOK_SLOW px/s the scale drops to this
+// fraction, blending back to the full scale by TOUCH_LOOK_FAST px/s.
+const TOUCH_LOOK_PRECISION = 0.55;
+const TOUCH_LOOK_SLOW = 60;
+const TOUCH_LOOK_FAST = 600;
 const STICK_DEAD_ZONE = 0.12;
 const STICK_FALLBACK_RADIUS = 60; // px, used when CSS hasn't sized the stick
 // Drags shorter than this (px) on the mouse fallback count as a click.
@@ -122,7 +128,7 @@ const ICONS = {
 /**
  * Button layouts per mode. `slot` names a position in the thumb-reach layout
  * (see BASE_CSS): "primary" big button bottom-right, "arc0..3" an inner ring
- * around it, "outer0..2" an outer ring, "top0..2" small utility buttons.
+ * around it, "outer0..2" an outer ring, "top0..3" small utility buttons.
  * `kind`: "hold" (isDown while touched), "tap" (edge only), "latch" (tap to
  * toggle a held state — sprint/aim, so two thumbs stay free for move + look).
  */
@@ -146,7 +152,9 @@ const BUTTON_SETS = {
     { action: "crouch", slot: "arc3", icon: "crouch", label: "Crouch", kind: "tap" },
     { action: "swap", slot: "outer0", icon: "swap", label: "Switch weapon", short: "Swap", kind: "tap" },
     { action: "binoculars", slot: "outer1", icon: "binoculars", label: "Binoculars", short: "Binocs", kind: "tap" },
-    { action: "call", slot: "outer2", icon: "lure", label: "Lure call", short: "Lure", kind: "tap" },
+    // Up in the utility row: on touch the HUD's ammo readout sits under that
+    // row, where the outer ring's third slot would land.
+    { action: "call", slot: "top3", icon: "lure", label: "Lure call", short: "Lure", kind: "tap" },
     { action: "extract", slot: "top2", icon: "extract", label: "Call extraction", kind: "tap" },
     { action: "map", slot: "top1", icon: "map", label: "Map", kind: "tap" },
     { action: "pause", slot: "top0", icon: "pause", label: "Pause", kind: "tap" },
@@ -192,6 +200,7 @@ const BASE_CSS = `
 :where(.touch-btn[data-slot="top0"]){right:calc(14px + env(safe-area-inset-right))}
 :where(.touch-btn[data-slot="top1"]){right:calc(66px + env(safe-area-inset-right))}
 :where(.touch-btn[data-slot="top2"]){right:calc(118px + env(safe-area-inset-right))}
+:where(.touch-btn[data-slot="top3"]){right:calc(170px + env(safe-area-inset-right))}
 @media (max-width:520px){
 :where(.touch-stick){width:116px;height:116px;margin:-58px 0 0 -58px}
 :where(.touch-stick__knob){width:50px;height:50px;margin:-25px 0 0 -25px}
@@ -288,10 +297,15 @@ export class Input {
     this._touchCount = Object.create(null); // action → pointers holding it
     this._btnPointers = new Map(); // pointerId → { action, el }
     this._latch = { sprint: false, aim: false };
-    this._stick = { id: -1, cx: 0, cy: 0, x: 0, y: 0, radius: STICK_FALLBACK_RADIUS };
-    this._look = { id: -1, x: 0, y: 0 };
+    // cx/cy: the stick's origin (input is measured from it); bx/by: where its
+    // base is drawn (the origin, pulled in from the screen edges).
+    this._stick = { id: -1, cx: 0, cy: 0, bx: 0, by: 0, x: 0, y: 0, radius: STICK_FALLBACK_RADIUS };
+    this._look = { id: -1, x: 0, y: 0, t: 0, v: 0 };
     this._rootLeft = 0;
     this._rootTop = 0;
+    this._rootW = 0;
+    this._rootH = 0;
+    this._sa = { t: 0, r: 0, b: 0, l: 0 };
     this._buttons = new Map(); // action → { el, active, hint, cd }
     this.touchRoot = null;
 
@@ -316,6 +330,9 @@ export class Input {
     this._edges.clear();
     if (!on) this.exitPointerLock();
     if (this.touchRoot) this.touchRoot.style.display = on ? "" : "none";
+    // Measured while hidden (resizes / rotations under a menu) the resting
+    // stick would be placed from fallback sizes; place it now it's visible.
+    if (on) this._placeStickAtRest();
   }
 
   /**
@@ -507,9 +524,12 @@ export class Input {
     document.addEventListener("pointerlockchange", () => this._onLockChange(), opts());
     document.addEventListener("pointerlockerror", () => (this._lockFailed = true), opts());
 
-    // iOS Safari pinch-zoom gestures (non-standard events) — block them while playing.
+    // iOS Safari pinch-zoom gestures (non-standard events; Safari ignores
+    // user-scalable=no). Block them on touch devices in menus too: a zoomed
+    // page leaves the fixed full-screen UI half off screen with no way back
+    // mid-game. Scrolling lists still scroll — that's not a gesture event.
     for (const type of ["gesturestart", "gesturechange", "gestureend"]) {
-      document.addEventListener(type, (e) => this._enabled && e.preventDefault(), opts({ passive: false }));
+      document.addEventListener(type, (e) => (this._enabled || this.isTouch) && e.preventDefault(), opts({ passive: false }));
     }
     // A rotated phone fires pointercancel inconsistently; reset the touch state.
     // Plain resizes (toolbars sliding) only move the idle stick back into view.
@@ -726,6 +746,10 @@ export class Input {
     root.style.touchAction = "none";
     root.style.webkitUserSelect = "none";
     root.style.userSelect = "none";
+    // Carries the safe-area insets for _safeInsets() (children are absolutely
+    // positioned, so the padding moves nothing).
+    root.style.padding =
+      "env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px)";
 
     const move = document.createElement("div");
     move.className = "touch-zone touch-zone--move";
@@ -858,14 +882,48 @@ export class Input {
     return w > 20 ? w / 2 : STICK_FALLBACK_RADIUS;
   }
 
+  /**
+   * Safe-area insets (notch, rounded corners, home indicator) in px. Read
+   * from the layer's own padding, which _buildTouch sets inline to env();
+   * padding doesn't move the absolutely positioned children.
+   */
+  _safeInsets() {
+    const out = { t: 0, r: 0, b: 0, l: 0 };
+    if (!this.touchRoot || typeof getComputedStyle !== "function") return out;
+    const cs = getComputedStyle(this.touchRoot);
+    out.t = parseFloat(cs.paddingTop) || 0;
+    out.r = parseFloat(cs.paddingRight) || 0;
+    out.b = parseFloat(cs.paddingBottom) || 0;
+    out.l = parseFloat(cs.paddingLeft) || 0;
+    return out;
+  }
+
   _placeStickAtRest() {
-    if (!this._stickEl || !this.touchRoot) return;
+    if (!this._stickEl || !this.touchRoot || !this.touchRoot.offsetWidth) return; // hidden: placed when shown
     const r = this._stickRadius();
     const h = this.touchRoot.clientHeight || window.innerHeight || 600;
+    const sa = this._safeInsets();
     // Resting spot hints where the thumb goes; it jumps to the thumb on touch.
-    this._stickEl.style.left = `${Math.round(r + 34)}px`;
-    this._stickEl.style.top = `${Math.round(h - r - 40)}px`;
+    // Clear of the notch / rounded corner in landscape and the home bar.
+    this._stickEl.style.left = `${Math.round(r + Math.max(34, sa.l + 14))}px`;
+    this._stickEl.style.top = `${Math.round(h - r - Math.max(40, sa.b + 22))}px`;
     this._knobEl.style.transform = "";
+  }
+
+  /** Draw the base at the stick origin, kept inside the safe area. */
+  _drawStickBase() {
+    const s = this._stick;
+    const sa = this._sa;
+    // Fully on screen, and no more than 40 % into the notch / home-bar insets.
+    const r = s.radius;
+    const minX = Math.max(r, sa.l + r * 0.6);
+    const maxX = this._rootW - Math.max(r, sa.r + r * 0.6);
+    const minY = Math.max(r, sa.t + r * 0.6);
+    const maxY = this._rootH - Math.max(r, sa.b + r * 0.6);
+    s.bx = maxX > minX ? Math.max(minX, Math.min(maxX, s.cx)) : s.cx;
+    s.by = maxY > minY ? Math.max(minY, Math.min(maxY, s.cy)) : s.cy;
+    this._stickEl.style.left = `${s.bx.toFixed(1)}px`;
+    this._stickEl.style.top = `${s.by.toFixed(1)}px`;
   }
 
   _stickDown(e) {
@@ -880,18 +938,22 @@ export class Input {
     const rect = this.touchRoot.getBoundingClientRect();
     this._rootLeft = rect.left;
     this._rootTop = rect.top;
+    this._rootW = rect.width;
+    this._rootH = rect.height;
+    this._sa = this._safeInsets();
     const s = this._stick;
     s.radius = this._stickRadius();
     s.id = e.pointerId;
-    // Keep the whole base on screen even for a thumb at the very edge.
-    s.cx = Math.max(s.radius, Math.min(rect.width - s.radius, e.clientX - rect.left));
-    s.cy = Math.max(s.radius, Math.min(rect.height - s.radius, e.clientY - rect.top));
+    // The stick's origin is exactly where the thumb lands, so touching down
+    // never moves the creature by itself — even at the very edge of the
+    // screen, where only the drawn base is pulled back on screen.
+    s.cx = e.clientX - rect.left;
+    s.cy = e.clientY - rect.top;
     s.x = 0;
     s.y = 0;
     this._stickEl.classList.remove("touch-stick--idle");
     this._stickEl.classList.add("touch-stick--active");
-    this._stickEl.style.left = `${s.cx}px`;
-    this._stickEl.style.top = `${s.cy}px`;
+    this._drawStickBase();
     this._stickMove(e);
   }
 
@@ -904,17 +966,25 @@ export class Input {
     let dy = py - s.cy;
     let len = Math.hypot(dx, dy);
     if (len > s.radius) {
-      // Floating stick: drag the base along so reversing is instant.
+      // Floating stick: drag the origin along so reversing is instant.
       const over = len - s.radius;
       s.cx += (dx / len) * over;
       s.cy += (dy / len) * over;
-      this._stickEl.style.left = `${s.cx}px`;
-      this._stickEl.style.top = `${s.cy}px`;
+      this._drawStickBase();
       dx = px - s.cx;
       dy = py - s.cy;
       len = s.radius;
     }
-    this._knobEl.style.transform = `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px)`;
+    // The knob shows the deflection from the drawn base (they differ only
+    // when the base was pulled in from a screen edge).
+    let kx = px - s.bx;
+    let ky = py - s.by;
+    const kl = Math.hypot(kx, ky);
+    if (kl > s.radius) {
+      kx *= s.radius / kl;
+      ky *= s.radius / kl;
+    }
+    this._knobEl.style.transform = `translate(${kx.toFixed(1)}px, ${ky.toFixed(1)}px)`;
     const mag = len / s.radius;
     if (mag < STICK_DEAD_ZONE) {
       s.x = 0;
@@ -960,15 +1030,25 @@ export class Input {
     this._look.id = e.pointerId;
     this._look.x = e.clientX;
     this._look.y = e.clientY;
+    this._look.t = e.timeStamp;
+    this._look.v = 0;
   }
 
   _lookMove(e) {
     const l = this._look;
     if (e.pointerId !== l.id || !this._enabled) return;
-    this._lookX += (e.clientX - l.x) * TOUCH_LOOK_SCALE;
-    this._lookY += (e.clientY - l.y) * TOUCH_LOOK_SCALE;
+    const dx = e.clientX - l.x;
+    const dy = e.clientY - l.y;
+    // Drag speed (px/s), lightly smoothed so one coalesced event can't jerk the gain.
+    const speed = (Math.hypot(dx, dy) * 1000) / Math.max(1, e.timeStamp - l.t);
+    l.v += (speed - l.v) * 0.5;
+    const u = Math.max(0, Math.min(1, (l.v - TOUCH_LOOK_SLOW) / (TOUCH_LOOK_FAST - TOUCH_LOOK_SLOW)));
+    const gain = TOUCH_LOOK_SCALE * (TOUCH_LOOK_PRECISION + (1 - TOUCH_LOOK_PRECISION) * u * u * (3 - 2 * u));
+    this._lookX += dx * gain;
+    this._lookY += dy * gain;
     l.x = e.clientX;
     l.y = e.clientY;
+    l.t = e.timeStamp;
   }
 
   _lookUp(e) {

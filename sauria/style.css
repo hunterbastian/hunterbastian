@@ -3501,6 +3501,10 @@ button:disabled {
   right: calc(var(--safe-r) + 116px);
 }
 
+.touch-btn[data-slot="top3"] {
+  right: calc(var(--safe-r) + 168px);
+}
+
 /* Hunter: "bite" is the trigger — keep it the largest, in gunmetal rather than blood. */
 .touch[data-mode="hunter"] .touch-btn[data-slot="primary"] {
   background: rgba(30, 30, 26, 0.55);
@@ -3511,6 +3515,13 @@ button:disabled {
 
 .touch[data-mode="hunter"] .touch-btn[data-action="extract"] {
   color: var(--c-ochre);
+}
+
+/* Hunter: the scope and binocular masks (the hunter HUD, z 8) black out the
+   screen edges — keep the stick and the trigger visible on top of them. The
+   HUD is pointer-events: none, so this changes only what's drawn over what. */
+.touch[data-mode="hunter"] {
+  z-index: 9;
 }
 
 @media (max-width: 520px), (max-height: 380px) {
@@ -3529,6 +3540,103 @@ button:disabled {
     height: 52px;
     margin: -26px 0 0 -26px;
   }
+
+  /* Scaled-down labels must still fit inside their (smaller) circles. */
+  .touch-btn__label {
+    letter-spacing: 0.06em;
+  }
+
+  .touch-btn[data-action="interact"] .touch-btn__label {
+    letter-spacing: 0.01em;
+  }
+}
+
+/* Thumb targets never drop below 44 px, however far --k scales the rings. */
+.touch-btn[data-slot^="outer"] {
+  width: max(44px, calc(48px * var(--k)));
+  height: max(44px, calc(48px * var(--k)));
+}
+
+/* Phone held upright: swing the outer ring up the right edge so the whole
+   cluster stays on the right half, clear of the left thumb's stick. */
+@media (max-width: 520px) and (orientation: portrait) {
+  .touch-btn[data-slot="outer0"] {
+    right: calc(var(--safe-r) + 172px * var(--k));
+    bottom: calc(var(--safe-b) + 197px * var(--k));
+  }
+
+  .touch-btn[data-slot="outer1"] {
+    right: calc(var(--safe-r) + 96px * var(--k));
+    bottom: calc(var(--safe-b) + 236px * var(--k));
+  }
+
+  .touch-btn[data-slot="outer2"] {
+    right: calc(var(--safe-r) + 11px * var(--k));
+    bottom: calc(var(--safe-b) + 240px * var(--k));
+  }
+
+  /* The narrow top row has no room for a fourth button (the hunter's lure);
+     upright there's space for it at the top of the thumb cluster instead. */
+  .touch-btn[data-slot="top3"] {
+    top: auto;
+    right: calc(var(--safe-r) + 11px * var(--k));
+    bottom: calc(var(--safe-b) + 240px * var(--k));
+    width: max(44px, calc(48px * var(--k)));
+    height: max(44px, calc(48px * var(--k)));
+    background: rgba(14, 13, 10, 0.38);
+  }
+}
+
+/* Very short landscape (iPhone SE in Safari, the game inside an embedded
+   viewer): a little smaller, and the outer ring swung down toward the
+   horizontal so it stays clear of the top utility row. */
+@media (max-height: 330px) and (orientation: landscape) {
+  .touch {
+    --k: 0.8;
+  }
+
+  .touch-btn[data-slot="outer0"] {
+    right: calc(var(--safe-r) + 242px * var(--k));
+    bottom: calc(var(--safe-b) + 62px * var(--k));
+  }
+
+  .touch-btn[data-slot="outer1"] {
+    right: calc(var(--safe-r) + 220px * var(--k));
+    bottom: calc(var(--safe-b) + 138px * var(--k));
+  }
+
+  .touch-btn[data-slot="outer2"] {
+    right: calc(var(--safe-r) + 170px * var(--k));
+    bottom: calc(var(--safe-b) + 199px * var(--k));
+  }
+
+  .touch-btn[data-slot^="top"] {
+    top: calc(var(--safe-t) + 8px);
+  }
+}
+
+/* Hunter drop-off: nothing to shoot or walk with in the helicopter — keep
+   only the utility row, and caption the extraction button, which skips the
+   flight in. */
+#ui:has(.hh[data-mode="riding"]) .touch[data-mode="hunter"] .touch-stick,
+#ui:has(.hh[data-mode="riding"]) .touch[data-mode="hunter"] .touch-btn:not([data-action="extract"], [data-action="map"], [data-action="pause"]) {
+  visibility: hidden;
+}
+
+#ui:has(.hh[data-mode="riding"]) .touch[data-mode="hunter"] .touch-btn[data-action="extract"] .touch-btn__label {
+  display: block;
+  top: calc(100% + 6px);
+  bottom: auto;
+  font-size: 0;
+  opacity: 1;
+}
+
+#ui:has(.hh[data-mode="riding"]) .touch[data-mode="hunter"] .touch-btn[data-action="extract"] .touch-btn__label::after {
+  content: "Skip";
+  font-size: 8.5px;
+  letter-spacing: 0.14em;
+  color: var(--c-ochre);
+  text-shadow: var(--text-shadow);
 }
 
 /* Never show touch controls to a pure mouse-and-keyboard setup. */
@@ -3540,12 +3648,16 @@ button:disabled {
 
 /* --- Rotate hint (phones held upright) --------------------------------------- */
 
+/* Sits in the open upper-middle of the screen, clear of the menu bar, the
+   HUD's top row (map, pause) and the thumb controls, and lets taps through
+   everywhere but its close button, so it never blocks anything while up. */
 .rotate-hint {
   position: fixed;
-  top: calc(var(--safe-t) + 12px);
+  top: 30%;
   left: 16px;
   right: 16px;
   z-index: 100;
+  pointer-events: none;
   display: none;
   align-items: center;
   gap: 12px;
@@ -3597,8 +3709,18 @@ button:disabled {
 }
 
 .rotate-hint__close {
+  position: relative;
   width: 30px;
   height: 30px;
+  pointer-events: auto;
+}
+
+/* A thumb-sized (44 px) target around the small visible circle. */
+.rotate-hint__close::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
+  border-radius: 50%;
 }
 
 .rotate-hint__close .ico {
@@ -3998,6 +4120,12 @@ button:disabled {
     display: none;
   }
 
+  /* Phones on their side: the names say enough, and dropping the blurbs
+     brings the Pixel size slider up into view without scrolling. */
+  .style-opt__desc {
+    display: none;
+  }
+
   .pause__title {
     font-size: 30px;
   }
@@ -4151,6 +4279,19 @@ button:disabled {
   .stat__val {
     font-size: 8.5px;
   }
+
+  /* The wordmark must fit its column, not just the height: on a notched
+     phone the side insets eat ~100 px and SAURIA ran under the mode cards. */
+  .screen--title {
+    grid-template-columns: minmax(0, 1fr) minmax(0, min(420px, 52vw));
+  }
+
+  .wordmark {
+    font-size: min(
+      clamp(3rem, 19vh, 5.4rem),
+      calc((100vw - var(--safe-l) - var(--safe-r) - 2 * var(--gutter) - min(420px, 52vw) - clamp(20px, 4vw, 48px)) / 4.1)
+    );
+  }
 }
 
 @media (pointer: coarse) {
@@ -4164,6 +4305,22 @@ button:disabled {
 
   .icon-btn:hover {
     transform: none;
+  }
+
+  /* Thumb-sized hit areas (≥ 44 px) around the compact pill and close
+     buttons, without changing how they look. */
+  .tool,
+  .back {
+    position: relative;
+  }
+
+  .tool::after,
+  .back::after,
+  .map__close::after {
+    content: "";
+    position: absolute;
+    inset: -6px;
+    border-radius: inherit;
   }
 }
 
@@ -4183,4 +4340,10 @@ button:disabled {
   .hud__fx--low.is-beating::after {
     opacity: 0.5;
   }
+}
+
+/* Very short screens: the pause card scrolls instead of pushing buttons off-screen. */
+.ovl--pause .pause {
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
 }
