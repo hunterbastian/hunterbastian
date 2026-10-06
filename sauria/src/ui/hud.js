@@ -184,6 +184,7 @@ export class Hud {
     this._pause = { open: false, onResume: null, onQuit: null, onSettings: null };
     this._death = { open: false, onRespawn: null, onMenu: null };
     this._helpOpen = false;
+    this._helpMode = "survival"; // which field notes the help panel shows ([hunter] pause swaps them)
     this._vw = 1;
     this._vh = 1;
     this._compassW = 360;
@@ -208,6 +209,7 @@ export class Hud {
   show() {
     if (this.visible) return;
     this.visible = true;
+    this._setHelpMode(false);
     this.el.classList.add("is-open");
     this.el.setAttribute("aria-hidden", "false");
     this._measure();
@@ -305,6 +307,8 @@ export class Hud {
     const def = this._player?.species?.name === s.speciesName || !s.speciesName ? this._player?.species : null;
     const kills = Math.max(0, Number(s.kills) || 0);
     this._death = { open: true, onRespawn, onMenu };
+    // Clear pending toasts: a late hint or kill toast would sit on the field record.
+    for (const t of this._toasts.slice()) this._dropToast(t);
     this._deathEl.querySelector(".death__inner").innerHTML = `
       <p class="eyebrow death__eyebrow">${brandMark("death__mark")}Field record · end of a life</p>
       ${def ? `<div class="death__fig">${speciesSilhouette(def, { human: false })}</div>` : ""}
@@ -338,11 +342,15 @@ export class Hud {
    * @param {() => void} onResume
    * @param {() => void} onQuit back to the title screen
    * @param {() => void} [onSettings] shows a Settings item when given (main → menu.showSettings())
+   * @param {{ hunter?: boolean, notes?: string, quitNote?: string }} [opts] [hunter] the overlay is
+   *   shared with Hunter mode: its own field-notes line, quit caveat and help sheet
    */
-  showPause(onResume = null, onQuit = null, onSettings = null) {
+  showPause(onResume = null, onQuit = null, onSettings = null, { hunter = false, notes = null, quitNote = null } = {}) {
     this._pause = { open: true, onResume, onQuit, onSettings };
     this._pauseEl.querySelector("[data-act='settings']").hidden = typeof onSettings !== "function";
-    this._pauseNotes.textContent = this._fieldNotes();
+    this._pauseNotes.textContent = notes ?? (hunter ? "" : this._fieldNotes());
+    this._quitNote.textContent = quitNote ?? (hunter ? "This hunt's trophies are lost" : "Progress is saved");
+    this._setHelpMode(hunter);
     this._openOverlay(this._pauseEl);
     this._focusLater(this._pauseEl.querySelector("[data-act='resume']"));
   }
@@ -358,8 +366,10 @@ export class Hud {
   /**
    * Show / hide the field-notes help panel (controls + survival tips).
    * @param {boolean} [force] open (true) or close (false); toggles when omitted
+   * @param {{ hunter?: boolean }} [opts] [hunter] show the hunting notes instead of survival's
    */
-  toggleHelp(force) {
+  toggleHelp(force, { hunter } = {}) {
+    if (typeof hunter === "boolean") this._setHelpMode(hunter);
     const open = typeof force === "boolean" ? force : !this._helpOpen;
     if (open === this._helpOpen) return;
     this._helpOpen = open;
@@ -507,7 +517,7 @@ export class Hud {
             <button type="button" class="pause__item pause__item--primary" data-act="resume"><span>Resume</span>${this.isTouch ? "" : '<kbd class="kbd">Esc</kbd>'}</button>
             <button type="button" class="pause__item" data-act="settings"><span>Settings</span></button>
             <button type="button" class="pause__item" data-act="help"><span>Field notes &amp; controls</span>${this.isTouch ? "" : '<kbd class="kbd">H</kbd>'}</button>
-            <button type="button" class="pause__item pause__item--quiet" data-act="quit"><span>Quit to title</span><small>Progress is saved</small></button>
+            <button type="button" class="pause__item pause__item--quiet" data-act="quit"><span>Quit to title</span><small class="pause__quit-note">Progress is saved</small></button>
           </nav>
         </div>
       </div>
@@ -517,7 +527,7 @@ export class Hud {
             <div><p class="eyebrow">Field notes</p><h2 class="help__title" id="hud-help-title">How to stay alive</h2></div>
             <button type="button" class="icon-btn" data-act="close-help" aria-label="Close field notes">${icon("close")}</button>
           </header>
-          <div class="help__body">
+          <div class="help__body" data-help="survival">
             <ol class="tips">
               <li><b>Drink fresh water.</b> Lakes and rivers only — the sea is salt and makes it worse.</li>
               <li><b>Growth needs both.</b> Keep food and water above a quarter or you stop growing.</li>
@@ -526,6 +536,16 @@ export class Hud {
               <li><b>Rest to heal.</b> Lying down mends wounds and slows bleeding — but you are exposed.</li>
             </ol>
             ${controlsSheetHTML({ isTouch: this.isTouch, hunter: false })}
+          </div>
+          <div class="help__body" data-help="hunter" hidden>
+            <ol class="tips">
+              <li><b>Mind the wind.</b> Your scent drifts downwind — stalk with the wind in your face.</li>
+              <li><b>Move slowly.</b> Crouching is quiet; sprinting carries a long way.</li>
+              <li><b>Shots carry too.</b> Herbivores bolt from gunfire, carnivores come to look.</li>
+              <li><b>Aim for the head.</b> Headshots and target species score the most.</li>
+              <li><b>Get out alive.</b> Call the chopper and stand under it — dying loses this hunt's trophies.</li>
+            </ol>
+            ${controlsSheetHTML({ isTouch: this.isTouch, hunter: true })}
           </div>
         </aside>
       </div>
@@ -537,7 +557,9 @@ export class Hud {
     this._layer = layer;
     this._pauseEl = layer.querySelector(".ovl--pause");
     this._pauseNotes = layer.querySelector(".pause__notes");
+    this._quitNote = layer.querySelector(".pause__quit-note");
     this._helpEl = layer.querySelector(".ovl--help");
+    this._helpBodies = [...layer.querySelectorAll("[data-help]")];
     this._deathEl = layer.querySelector(".ovl--death");
     for (const o of [this._pauseEl, this._helpEl, this._deathEl]) this._closeOverlay(o);
 
@@ -1015,7 +1037,8 @@ export class Hud {
   _onKey(e) {
     if (e.defaultPrevented) return;
     // A menu dialog (settings over the pause screen) owns the keyboard while open.
-    if (this.root.querySelector(".layer.is-open")) return;
+    // (Open = not inert: `is-open` only lands a frame after the layer opens.)
+    if (this.root.querySelector(".layer:not([inert])")) return;
     const swallow = () => {
       e.preventDefault();
       e.stopImmediatePropagation();
@@ -1042,6 +1065,15 @@ export class Hud {
 
   /* --- Overlay plumbing --- */
 
+  /** Survival or [hunter] field notes in the help panel. */
+  _setHelpMode(hunter) {
+    const mode = hunter ? "hunter" : "survival";
+    if (this._helpMode === mode) return;
+    this._helpMode = mode;
+    for (const b of this._helpBodies) b.hidden = b.dataset.help !== mode;
+    this._helpEl.querySelector(".help__title").textContent = hunter ? "How to hunt" : "How to stay alive";
+  }
+
   _resume() {
     const fn = this._pause.onResume;
     this.hidePause();
@@ -1055,10 +1087,18 @@ export class Hud {
   _openOverlay(el) {
     el.removeAttribute("inert");
     el.setAttribute("aria-hidden", "false");
-    requestAnimationFrame(() => el.classList.add("is-open"));
+    // Next frame so the transition runs; a close before then must cancel it,
+    // or the overlay re-opens (inert, unclosable) after it was dismissed.
+    cancelAnimationFrame(el._openRaf);
+    el._openRaf = requestAnimationFrame(() => {
+      el._openRaf = 0;
+      el.classList.add("is-open");
+    });
   }
 
   _closeOverlay(el) {
+    cancelAnimationFrame(el._openRaf);
+    el._openRaf = 0;
     el.classList.remove("is-open");
     el.setAttribute("inert", "");
     el.setAttribute("aria-hidden", "true");

@@ -4269,3 +4269,37 @@
     animation: none !important;
   }
 }
+
+/* --- Small touch screens (polish pass) ------------------------------------ */
+
+/* Short landscape phones: the ammo block would run into the Crouch/Sprint arc,
+   so it moves to the empty bottom-centre between the stick and the buttons. */
+@media (max-height: 380px) {
+  .hh--touch .hh-ammo {
+    top: auto;
+    bottom: calc(var(--h-safe-b, 0px) + 10px);
+    right: auto;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+}
+
+/* Portrait phones: drop the compass below the extract/map/pause row. */
+@media (max-width: 520px) and (orientation: portrait) {
+  .hh--touch .hh-compass {
+    top: calc(var(--h-safe-t, 0px) + 66px);
+  }
+}
+
+/* Planner tabs: a 44px touch target without changing their look. */
+@media (pointer: coarse) {
+  .hm-tab {
+    position: relative;
+  }
+
+  .hm-tab::after {
+    content: "";
+    position: absolute;
+    inset: -6px 0;
+  }
+}

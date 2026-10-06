@@ -798,6 +798,12 @@ let uid = 0;
 
 /* --- Menu ------------------------------------------------------------------------------- */
 
+/**
+ * A settings / controls layer is open from the moment _open() runs: `is-open`
+ * lands a frame later (for the transition), so it can't be the source of truth.
+ */
+const layerOpen = (layer) => !layer.hasAttribute("inert");
+
 export class Menu {
   /**
    * @param {HTMLElement} root UI root (#ui); the menu appends its own layers
@@ -846,6 +852,11 @@ export class Menu {
     return this._visible;
   }
 
+  /** True while the settings panel is open (from the title or over the pause menu). */
+  get settingsOpen() {
+    return layerOpen(this.settingsLayer);
+  }
+
   /**
    * Current player settings: { style, quality, muted, sensitivity }.
    * Assigning normalises the value and refreshes the panel.
@@ -881,7 +892,7 @@ export class Menu {
     this._close(this.el);
     this.el.classList.remove("is-loading-only");
     this._closeLayer(this.controlsLayer, false);
-    if (this.settingsLayer.classList.contains("is-open")) this.hideSettings();
+    if (layerOpen(this.settingsLayer)) this.hideSettings();
   }
 
   /**
@@ -936,7 +947,7 @@ export class Menu {
 
   /** Close the settings panel and return focus to whatever opened it. */
   hideSettings() {
-    if (!this.settingsLayer.classList.contains("is-open")) return;
+    if (!layerOpen(this.settingsLayer)) return;
     this._closeLayer(this.settingsLayer);
     this.onSettingsClose();
   }
@@ -1270,8 +1281,8 @@ export class Menu {
   }
 
   _onKey(e) {
-    const settingsOpen = this.settingsLayer.classList.contains("is-open");
-    const controlsOpen = this.controlsLayer.classList.contains("is-open");
+    const settingsOpen = layerOpen(this.settingsLayer);
+    const controlsOpen = layerOpen(this.controlsLayer);
     if (settingsOpen || controlsOpen) {
       const layer = settingsOpen ? this.settingsLayer : this.controlsLayer;
       if (e.key === "Escape") {
@@ -1493,7 +1504,7 @@ export class Menu {
   }
 
   _openLayer(layer) {
-    if (layer.classList.contains("is-open")) return;
+    if (layerOpen(layer)) return;
     const active = document.activeElement;
     this._returnFocus = active && active !== document.body ? active : null;
     this._open(layer);
@@ -1501,7 +1512,7 @@ export class Menu {
   }
 
   _closeLayer(layer, restore = true) {
-    if (!layer.classList.contains("is-open")) return;
+    if (!layerOpen(layer)) return;
     this._close(layer);
     if (restore && this._returnFocus?.isConnected) this._returnFocus.focus({ preventScroll: true });
     this._returnFocus = null;

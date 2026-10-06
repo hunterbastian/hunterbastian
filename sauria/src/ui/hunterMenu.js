@@ -260,7 +260,7 @@ export class HunterMenu {
           </div>
 
           <section class="hm-sec hm-sec--arms" aria-labelledby="hm-h-arms">
-            <header class="hm-sec__head"><span class="hm-sec__no">01</span><h2 id="hm-h-arms">Arms</h2><p>Choose two — keys 1 and 2 in the field</p><span class="hm-sec__count" data-count="arms">0 / 2</span></header>
+            <header class="hm-sec__head"><span class="hm-sec__no">01</span><h2 id="hm-h-arms">Arms</h2><p>${this.isTouch ? "Choose two — swap between them in the field" : "Choose two — keys 1 and 2 in the field"}</p><span class="hm-sec__count" data-count="arms">0 / 2</span></header>
             <div class="hm-arms" data-group="arms"></div>
           </section>
 

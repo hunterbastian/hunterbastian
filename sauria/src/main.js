@@ -129,7 +129,9 @@ function resize() {
     // pixels). On high-density screens a fractional scale is invisible, and
     // snapping there would jump straight from "normal" to "chunky".
     const exact = Math.max(1, deviceH / rows, deviceH / nativeRows);
-    const k = dpr >= 2 ? exact : Math.max(1, Math.round(exact), Math.ceil(deviceH / nativeRows - 1e-3));
+    // "Chunky" rounds up so it stays a step coarser than "In between" on short windows.
+    const snapped = amount > 0.67 ? Math.ceil(exact - 1e-3) : Math.round(exact);
+    const k = dpr >= 2 ? exact : Math.max(1, snapped, Math.ceil(deviceH / nativeRows - 1e-3));
     renderer.setPixelRatio(1);
     renderer.setSize(Math.max(1, Math.round((w * dpr) / k)), Math.max(1, Math.round((h * dpr) / k)), false);
     canvas.style.imageRendering = k > 1 ? "pixelated" : "";
@@ -335,9 +337,11 @@ function pauseGame() {
 
 function resumeGame() {
   if (game.state !== "paused") return;
+  // Leave "paused" first: closing settings calls onSettingsClose, which would
+  // otherwise re-open the pause overlay over the running game.
+  game.state = "playing";
   hud.hidePause();
   menu.hideSettings?.();
-  game.state = "playing";
   input.enabled = true;
   input.requestPointerLock();
 }
@@ -358,6 +362,7 @@ function showMenu() {
   world.mode = "survival";
   hud.hideDeath();
   hud.hidePause();
+  hud.toggleHelp(false); // hide() only closes it while the HUD is visible (not after a hunt)
   hud.hide();
   game.map?.close();
   input.enabled = false;
@@ -414,7 +419,9 @@ menu.onSettingsChange = (next) => {
       if (game.state === "menu" || game.state === "loading") {
         location.reload(); // terrain resolution / density / shadows are baked at load
       } else {
-        hud.toast("Quality changes apply the next time Sauria loads", "info");
+        const text = "Quality changes apply the next time Sauria loads";
+        if (game.hunter && game.hunterMode?.toast) game.hunterMode.toast(text, "info");
+        else hud.toast(text, "info");
       }
     }
   }
@@ -514,12 +521,23 @@ function frame(now) {
     fpsFrames = 0;
   }
 
-  const world = game.world;
-  if (!world) {
+  if (!game.world) {
     input.endFrame();
     return;
   }
 
+  step(dt);
+
+  if (game.hunter?.render) game.hunter.render(renderer, scene, camera);
+  else renderer.render(scene, camera);
+
+  if (DEBUG) updateDebug();
+  input.endFrame();
+}
+
+/** One simulation step of the state machine (everything but drawing). */
+function step(dt) {
+  const world = game.world;
   switch (game.state) {
     case "menu":
     case "hunter-menu": {
@@ -541,6 +559,9 @@ function frame(now) {
       game.controller.update(dt);
       const p = world.player;
       world.update(dt, p ? p.position : attractFocus);
+      // The "death" listener only fires while playing; catch a death that
+      // landed while paused (or before the listener existed) here.
+      if (game.state === "playing" && p && p.alive === false) onPlayerDeath();
       game.survived += dt;
       game.saveTimer += dt;
       if (game.saveTimer > 10) {
@@ -551,7 +572,7 @@ function frame(now) {
     }
     case "paused": {
       // Frozen world; the HUD's pause overlay handles its own buttons/keys.
-      if (input.pressed("pause") && !menu.visible) resumeGame();
+      if (input.pressed("pause") && !menu.visible && !menu.settingsOpen) resumeGame();
       break;
     }
     case "dead": {
@@ -577,12 +598,6 @@ function frame(now) {
     game.map.update(dt, { player, cameraYaw: game.tpc.yaw, markers: game.controller.sniff?.markers });
   }
   audio?.update(dt, { listener: camera, player, world });
-
-  if (game.hunter?.render) game.hunter.render(renderer, scene, camera);
-  else renderer.render(scene, camera);
-
-  if (DEBUG) updateDebug();
-  input.endFrame();
 }
 
 /* ----------------------------------------------------------------------- */
@@ -750,6 +765,16 @@ window.__sauria = {
   startGame: (speciesId, opts) => startSurvival(speciesId, opts),
   startHunter: () => startHunterMode(),
   setPhase: (p) => game.world?.sky.setPhase(p),
+  /** Fast-forward the state machine `seconds` of game time without drawing (tests). */
+  advance: (seconds = 1, dt = 0.05) => {
+    if (!game.world) return 0;
+    const n = Math.max(1, Math.round(seconds / dt));
+    for (let i = 0; i < n; i++) {
+      step(dt);
+      input.endFrame();
+    }
+    return n;
+  },
   pause: () => pauseGame(),
   resume: () => resumeGame(),
   menu: () => showMenu(),

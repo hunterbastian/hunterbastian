@@ -93,6 +93,7 @@ export function createHunterMode({ world, renderer, camera, input, audio, menu, 
     if (!weapons) weapons = new WeaponSystem({ world, camera, loadout });
     else weapons.setLoadout(loadout);
     weapons.owner = hunter;
+    if (weapons.fx) weapons.fx.visible = true;
 
     if (!controller) controller = new HunterController({ world, input, camera, weapons, audio });
     controller.setSensitivity?.(settings().sensitivity);
@@ -130,6 +131,7 @@ export function createHunterMode({ world, renderer, camera, input, audio, menu, 
     reported = true;
     input.enabled = false;
     map?.close?.();
+    hud.toggleHelp(false); // field notes opened from pause stay up after resuming
     if (summary?.result === "died") {
       hunterHud.showDeath(summary, () => leave());
     } else if (summary?.result === "extracted") {
@@ -175,10 +177,14 @@ export function createHunterMode({ world, renderer, camera, input, audio, menu, 
       offDeath();
       offDeath = null;
     }
-    if (session) {
-      if (session.active) session.end("quit");
-      session.dispose();
-      session = null;
+    // Detach first: ending an active session fires onEnd → report → leave(),
+    // which would re-enter here and dispose the session out from under us.
+    const s = session;
+    session = null;
+    if (s) {
+      s.onEnd = null;
+      if (s.active) s.end("quit");
+      s.dispose();
     }
     if (controller) controller.possess(null);
     if (hunter) {
@@ -187,6 +193,12 @@ export function createHunterMode({ world, renderer, camera, input, audio, menu, 
       hunter = null;
     }
     world.helicopter = null;
+    // The survival HUD is hidden during a hunt, so its hide() won't close these.
+    hud.hidePause();
+    hud.toggleHelp(false);
+    // The weapon effects (tracers, stuck bolts, the muzzle point light on
+    // high) live in the world scene: hide them so survival doesn't pay for them.
+    if (weapons?.fx) weapons.fx.visible = false;
     paused = false;
     deathT = -1;
   }
@@ -198,7 +210,19 @@ export function createHunterMode({ world, renderer, camera, input, audio, menu, 
     paused = true;
     input.enabled = false;
     map?.close?.();
-    hud.showPause(resume, quit, () => menu.showSettings());
+    hud.showPause(resume, quit, () => menu.showSettings(), { hunter: true, notes: pauseNotes() });
+  }
+
+  /** One line for the shared pause overlay: time out, bag, clock. */
+  function pauseNotes() {
+    const bits = [];
+    const min = Math.floor((session?.elapsed || 0) / 60);
+    bits.push(min < 1 ? "Just landed" : `${min} min in the field`);
+    const n = session?.trophies?.length || 0;
+    bits.push(n ? `${n} ${n === 1 ? "trophy" : "trophies"} bagged` : "No trophies yet");
+    const clock = world.sky?.clockString?.();
+    if (clock) bits.push(clock);
+    return bits.join("  ·  ");
   }
 
   function resume() {
@@ -224,7 +248,7 @@ export function createHunterMode({ world, renderer, camera, input, audio, menu, 
   function update(dt) {
     if (!session) return;
     if (paused) {
-      if (input.pressed("pause") && !menu.visible) resume();
+      if (input.pressed("pause") && !menu.visible && !menu.settingsOpen) resume();
       return;
     }
     if (!reported && input.pressed("pause")) {
@@ -235,6 +259,7 @@ export function createHunterMode({ world, renderer, camera, input, audio, menu, 
       }
     }
     if (!reported && map && input.pressed("map")) map.toggle();
+    if (!reported && input.pressed("help")) hud.toggleHelp(undefined, { hunter: true });
 
     const riding = session.state === "dropoff";
     if (riding) {
@@ -265,7 +290,8 @@ export function createHunterMode({ world, renderer, camera, input, audio, menu, 
     }
 
     hunterHud.update(dt, { hunter, controller, weapons, hunt: session, world, camera });
-    if (map?.open) map.update(dt, { player: hunter, cameraYaw: controller?.yaw ?? 0, markers: null });
+    // Every frame, like survival: the map records the trail while closed.
+    if (map && hunter) map.update(dt, { player: hunter, cameraYaw: controller?.yaw ?? 0, markers: null });
   }
 
   /** World, then the first-person gun on top (same target, so pixel style matches). */
@@ -285,6 +311,8 @@ export function createHunterMode({ world, renderer, camera, input, audio, menu, 
     resume,
     quit,
     setSensitivity: (v) => controller?.setSensitivity?.(v),
+    /** Toast on the hunter HUD (the survival HUD is hidden during a hunt). */
+    toast: (text, kind = "info") => hunterHud.toast(text, kind),
     get session() {
       return session;
     },

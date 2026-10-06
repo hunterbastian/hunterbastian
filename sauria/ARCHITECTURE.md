@@ -789,3 +789,19 @@ export class HunterMenu {
   // readout, target species picker, time-of-day choice, trophy room view
 }
 ```
+
+---
+
+## Additions after integration
+
+- `Hud.showPause(onResume, onQuit, onSettings, { hunter, notes, quitNote } = {})` and
+  `Hud.toggleHelp(force, { hunter } = {})` — the pause overlay and field notes are
+  shared with Hunter mode, which passes its own notes and help sheet.
+- `Menu.settingsOpen` — true from the moment the settings panel opens.
+- `Menu.settings.pixelSize` (0 fine … 1 chunky, default 0.5) — the pixel render style
+  blends the render resolution between full and chunky; `?pixel=0..1` overrides it.
+- `src/hunter/hunterMode.js` — `createHunterMode(deps)` returns
+  `{ open, begin, update, render, pause, resume, quit, setSensitivity, toast, session, hunter, weapons }`;
+  main.js forwards `update`/`render` while its state is `"hunter"`.
+- Test hook: `window.__sauria.advance(seconds, dt = 0.05)` runs the state machine
+  without drawing. `node tests/run-tests.mjs` runs unit + smoke tests headlessly.
