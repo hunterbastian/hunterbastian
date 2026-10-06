@@ -3253,6 +3253,15 @@ button:disabled {
   z-index: 5;
   font-family: var(--font-ui);
   color: var(--c-paper);
+  transition: opacity 0.3s var(--ease);
+}
+
+/* Belt and braces: main disables Input under menus (which hides this layer),
+   but should any overlay open while it is live, the thumb controls must not
+   show through or catch taps meant for it. */
+#ui:has(.menu.is-open, .layer.is-open, .ovl--pause.is-open, .ovl--death.is-open, .map.is-open) .touch {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .touch-stick {
@@ -3778,29 +3787,36 @@ button:disabled {
   }
 }
 
-/* Phones in portrait: the HUD is cramped — stack the clock under the identity block. */
+/* Phones in portrait (advisory — the rotate hint asks for landscape): the top
+   edge is shared with the touch utility buttons, so the HUD stacks in rows —
+   identity, then a full-width compass, then vitals (left) beside the clock
+   (right). Toasts drop into the open sky and the prompt clears the thumb arc. */
 @media (max-width: 600px) and (orientation: portrait) {
+  .compass,
+  .hud--touch .compass {
+    top: calc(var(--safe-t) + 72px);
+    width: min(360px, calc(100vw - 2 * var(--hud-gutter) - var(--safe-l) - var(--safe-r)));
+  }
+
   .hud--touch .hud__clock,
   .hud__clock {
-    top: calc(var(--safe-t) + var(--hud-gutter) + 54px);
-    right: auto;
-    left: calc(var(--safe-l) + var(--hud-gutter));
+    top: calc(var(--safe-t) + 122px);
+    right: calc(var(--safe-r) + var(--hud-gutter));
+    left: auto;
   }
 
   .hud--touch .hud__status,
   .hud__status {
-    top: calc(var(--safe-t) + var(--hud-gutter) + 88px);
+    top: calc(var(--safe-t) + 122px);
     bottom: auto;
   }
 
-  .compass,
-  .hud--touch .compass {
-    top: calc(var(--safe-t) + 66px);
-    width: min(300px, 64vw);
+  .hud__toasts {
+    top: max(calc(var(--safe-t) + 300px), 40vh);
   }
 
-  .hud__toasts {
-    top: calc(var(--safe-t) + 112px);
+  .hud--touch .hud__prompt {
+    bottom: calc(var(--safe-b) + 292px);
   }
 }
 
