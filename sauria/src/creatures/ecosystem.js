@@ -74,6 +74,7 @@ export class Ecosystem {
     this._groupSerial = 0;
     this._carcassSerial = 0;
     this._brainErrors = 0;
+    this._spawnErrors = 0;
   }
 
   /* --- Spawning ---------------------------------------------------------- */
@@ -296,13 +297,13 @@ export class Ecosystem {
     this.populated = true;
     let npcs = this._npcCount();
     for (let tries = 0; tries < 6 && npcs < this.npcCap; tries++) {
-      const n = this._spawnAt(f, 55, 115, this.npcCap - npcs, "herbivore");
+      const n = this._safeSpawnAt(f, 55, 115, this.npcCap - npcs, "herbivore");
       npcs += n;
       if (n > 0) break;
     }
     let guard = 0;
     while (npcs < this.npcCap && guard++ < this.npcCap * 4) {
-      npcs += this._spawnAt(f, POPULATE_MIN_R, GAME.npcSpawnMax, this.npcCap - npcs, null);
+      npcs += this._safeSpawnAt(f, POPULATE_MIN_R, GAME.npcSpawnMax, this.npcCap - npcs, null);
     }
   }
 
@@ -413,7 +414,7 @@ export class Ecosystem {
     // Top up the population in the ring around the focus.
     let npcs = this._npcCount();
     for (let spawned = 0; npcs < this.npcCap && spawned < MAX_SPAWNS_PER_TICK; spawned++) {
-      const n = this._spawnAt(f, GAME.npcSpawnMin, GAME.npcSpawnMax, this.npcCap - npcs, null);
+      const n = this._safeSpawnAt(f, GAME.npcSpawnMin, GAME.npcSpawnMax, this.npcCap - npcs, null);
       if (n <= 0) break;
       npcs += n;
     }
@@ -441,6 +442,18 @@ export class Ecosystem {
     if (c.lastAttacker === p && c.age - c.lastDamageTime < 30) return true;
     if (p.lastAttacker === c && p.age - p.lastDamageTime < 30) return true;
     return false;
+  }
+
+  // Automatic spawns run inside the frame loop: a species whose model fails to
+  // build must not take the whole game down, so log (a few times) and move on.
+  // Explicit spawn() calls (the player) still throw to their caller.
+  _safeSpawnAt(f, minR, maxR, room, diet) {
+    try {
+      return this._spawnAt(f, minR, maxR, room, diet);
+    } catch (err) {
+      if (this._spawnErrors++ < 3) console.error("[ecosystem] automatic spawn failed", err);
+      return 0;
+    }
   }
 
   // Spawn one animal or one group on dry land in the ring [minR, maxR] around f.

@@ -455,6 +455,7 @@ button:disabled {
   stroke: var(--c-bone);
   stroke-opacity: 0.075;
   stroke-width: 1;
+  stroke-linecap: round;
   animation: survey 18s var(--ease) infinite alternate;
 }
 
@@ -2498,6 +2499,16 @@ button:disabled {
   display: none;
 }
 
+/* Declutter (set by the HUD when markers crowd): label above the pin, or none. */
+.mk--above .mk__label {
+  top: auto;
+  bottom: 20px;
+}
+
+.mk--nolabel .mk__label {
+  display: none;
+}
+
 /* Touch layout: the joystick owns the lower left, buttons the lower right and
    top right — so vitals move up under the identity block, the clock steps left. */
 .hud--touch .hud__status {
@@ -2744,9 +2755,11 @@ button:disabled {
   counter-reset: tip;
 }
 
+/* Hanging indent rather than a grid: the bold lead and the sentence after it
+   must flow as one paragraph. */
 .tips li {
-  display: grid;
-  grid-template-columns: 30px minmax(0, 1fr);
+  position: relative;
+  padding-left: 30px;
   font-size: 13.5px;
   line-height: 1.5;
   color: var(--c-dim);
@@ -2754,6 +2767,9 @@ button:disabled {
 }
 
 .tips li::before {
+  position: absolute;
+  top: 0;
+  left: 0;
   content: counter(tip, upper-roman);
   font: italic 300 15px/1.4 var(--font-display);
   color: var(--c-ochre);

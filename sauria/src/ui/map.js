@@ -187,11 +187,11 @@ export class MapView {
             <h2 class="map__title">The Island</h2>
           </header>
           <dl class="map__readout">
-            <div><dt>Position</dt><dd data-r="pos">—</dd></div>
+            <div class="map__readout-wide"><dt>Position</dt><dd data-r="pos">—</dd></div>
             <div><dt>Grid</dt><dd data-r="grid">—</dd></div>
             <div><dt>Heading</dt><dd data-r="hdg">—</dd></div>
             <div><dt>Elevation</dt><dd data-r="elev">—</dd></div>
-            <div class="map__readout-wide"><dt>Terrain</dt><dd data-r="biome">—</dd></div>
+            <div><dt>Terrain</dt><dd data-r="biome">—</dd></div>
           </dl>
           <ul class="map__legend">
             <li><span class="lg lg--you"></span>You &amp; your view</li>

@@ -439,7 +439,12 @@ class Synth {
     return out;
   }
 
-  /** Tileable fBm of value noise starting at `f0` cells per tile, ≈ [-1, 1]. */
+  /**
+   * Tileable fBm of value noise starting at `f0` cells per tile, ≈ [-1, 1].
+   * Octave frequencies stay integers (tileable) but are deliberately not
+   * multiples of each other: with plain doubling every lattice line of an
+   * octave coincides with the next one's and the sum shows a faint grid.
+   */
   fbm(f0, octaves, gain = 0.5) {
     const S = this.S;
     const out = new Float32Array(S * S);
@@ -450,13 +455,43 @@ class Synth {
       this.octave(f, out, amp);
       norm += amp;
       amp *= gain;
-      f *= 2;
+      f = Math.round(f * 1.93) + 1;
     }
     // Interpolated value noise rarely leaves ±0.6; stretch it toward ±1.
     const k = 1.7 / norm;
     for (let i = 0; i < out.length; i++) {
       const v = out[i] * k;
       out[i] = v > 1 ? 1 : v < -1 ? -1 : v;
+    }
+    return out;
+  }
+
+  /**
+   * Domain-warp a field: resample `src` at (u + amp·wx, v + amp·wy) with
+   * bilinear filtering and wrap-around (stays tileable). Turns lattice-shaped
+   * blobs into the flowing, irregular forms of weathered stone.
+   */
+  warp(src, wx, wy, amp) {
+    const S = this.S;
+    const m = this.mask;
+    const out = new Float32Array(S * S);
+    for (let v = 0; v < S; v++) {
+      for (let u = 0; u < S; u++) {
+        const i = v * S + u;
+        const x = u + wx[i] * amp + S;
+        const y = v + wy[i] * amp + S;
+        const x0 = x | 0;
+        const y0 = y | 0;
+        const tx = x - x0;
+        const ty = y - y0;
+        const r0 = (y0 & m) * S;
+        const r1 = ((y0 + 1) & m) * S;
+        const c0 = x0 & m;
+        const c1 = (x0 + 1) & m;
+        const a = src[r0 + c0] + (src[r0 + c1] - src[r0 + c0]) * tx;
+        const b = src[r1 + c0] + (src[r1 + c1] - src[r1 + c0]) * tx;
+        out[i] = a + (b - a) * ty;
+      }
     }
     return out;
   }
@@ -767,19 +802,20 @@ function synthDirt(T) {
     else mixInto(c, mid, light, (t - 0.5) * 2);
     const f = 1 + 0.12 * fine[i];
     let h = 0.35 + 0.16 * broad[i] + 0.05 * fine[i];
-    // Stones in a quarter of the cells, half sunk in the soil.
+    // Small stones in one cell in eight, half sunk in the soil; the outline
+    // is roughened by fine noise so they read as gravel, not coins.
     const pid = peb.id[i];
-    if (pid < 0.25) {
-      const r = 0.1 + 0.26 * (pid / 0.25);
-      const e = peb.f1[i] / r;
+    if (pid < 0.125) {
+      const r = 0.08 + 0.18 * (pid / 0.125);
+      const e = (peb.f1[i] / r) * (1 + 0.3 * fine[i]);
       if (e < 1) {
         const dome = Math.sqrt(1 - e * e);
-        const a = smoothstep(1, 0.75, e) * 0.85;
-        const g = 0.27 + 0.1 * ((pid * 7.31) % 1) + 0.05 * dome;
+        const a = smoothstep(1, 0.7, e) * 0.75;
+        const g = (0.24 + 0.1 * ((pid * 57.31) % 1) + 0.04 * dome) * (1 + 0.2 * fine[i]);
         c[0] += (g + 0.02 - c[0]) * a;
         c[1] += (g - c[1]) * a;
         c[2] += (g - 0.03 - c[2]) * a;
-        h = Math.max(h, 0.42 + 0.22 * dome);
+        h = Math.max(h, 0.4 + 0.14 * dome);
       }
     }
     col[i * 3] = c[0] * f;
@@ -839,13 +875,23 @@ function synthDirt(T) {
 function synthRock(T) {
   const S = T.S;
   const { col, hgt, rough } = T;
-  const broad = T.fbm(2, 4, 0.5);
-  const detail = T.fbm(4, 6, 0.58);
+  // Everything broad is domain-warped so no tone ever lines up with the tile.
+  const wx = T.fbm(3, 2, 0.5);
+  const wy = T.fbm(3, 2, 0.5);
+  const broad = T.warp(T.fbm(2, 4, 0.5), wx, wy, S * 0.07);
+  const detail = T.warp(T.fbm(5, 6, 0.55), wx, wy, S * 0.05);
   const grain = T.fbm(64, 2, 0.5);
-  const crackA = T.fbm(3, 4, 0.42);
+  const crackA = T.warp(T.fbm(3, 4, 0.42), wy, wx, S * 0.04);
   const crackB = T.fbm(5, 3, 0.42);
   const warp = T.fbm(2, 3, 0.5);
-  const lichenN = T.fbm(5, 4, 0.55);
+  const lichenN = T.fbm(5, 3, 0.55);
+  // Jointing: the rock face splits into irregular plates (~1.3 m), each a
+  // slightly different shade and height, so faces read as hard stone.
+  const blocks = T.worley(5, 0.85);
+  const gap = new Float32Array(S * S);
+  for (let i = 0; i < gap.length; i++) gap[i] = blocks.f2[i] - blocks.f1[i];
+  const joint = T.warp(gap, wx, wy, S * 0.035);
+  const plate = T.warp(blocks.id, wx, wy, S * 0.035);
   const grey = [0.36, 0.345, 0.325];
   const warm = [0.43, 0.385, 0.325];
   const dark = [0.25, 0.235, 0.215];
@@ -865,20 +911,26 @@ function synthRock(T) {
       const bed = Math.sin(TAU * ((v * 7) / S + warp[i] * 0.35));
       const parting = smoothstep(0.9, 0.99, bed) * (0.5 + 0.5 * broad[i]);
       const relief = detail[i];
+      const jt = 1 - smoothstep(0.0, 0.07, joint[i]);
+      const pl = plate[i] - 0.5;
       mixInto(c, grey, warm, clamp(0.5 + 0.6 * broad[i], 0, 1));
-      mixInto(c, c, dark, smoothstep(0.1, -0.8, relief) * 0.5);
-      const g = 1 + 0.08 * grain[i] + 0.1 * relief;
+      mixInto(c, c, dark, smoothstep(0.1, -0.8, relief) * 0.32);
+      const g = 1 + 0.07 * grain[i] + 0.08 * relief + 0.16 * pl;
       c[0] *= g;
       c[1] *= g;
       c[2] *= g;
-      const lm = smoothstep(0.28, 0.55, lichenN[i]) * (1 - cr) * smoothstep(-0.2, 0.35, relief);
-      mixInto(c, c, broad[i] > 0.3 ? ochre : lichen, lm * 0.5);
-      mixInto(c, c, moss, cr * smoothstep(-0.2, 0.3, lichenN[i]) * 0.4);
-      mixInto(c, c, dark, Math.max(cr * 0.6, parting * 0.35));
+      const lm = smoothstep(0.28, 0.55, lichenN[i]) * (1 - cr) * (1 - jt) * smoothstep(-0.2, 0.35, relief);
+      mixInto(c, c, broad[i] > 0.3 ? ochre : lichen, lm * 0.45);
+      mixInto(c, c, moss, Math.max(cr, jt * 0.6) * smoothstep(-0.2, 0.3, lichenN[i]) * 0.35);
+      mixInto(c, c, dark, Math.max(cr * 0.6, jt * 0.42, parting * 0.3));
       col[i * 3] = c[0];
       col[i * 3 + 1] = c[1];
       col[i * 3 + 2] = c[2];
-      hgt[i] = clamp(0.5 + 0.3 * relief + 0.1 * broad[i] + 0.03 * grain[i] - 0.28 * cr - 0.08 * parting, 0, 1);
+      hgt[i] = clamp(
+        0.5 + 0.24 * relief + 0.1 * broad[i] + 0.1 * pl + 0.03 * grain[i] - 0.26 * cr - 0.16 * jt - 0.07 * parting,
+        0,
+        1
+      );
       rough[i] = 0.8 + 0.1 * lm - 0.05 * cr;
     }
   }
@@ -893,6 +945,7 @@ function synthSand(T) {
   const { col, hgt, rough } = T;
   const broad = T.fbm(2, 4, 0.5);
   const warp = T.fbm(2, 3, 0.5);
+  const warp2 = T.fbm(3, 3, 0.5);
   const grainA = T.octave(Math.min(S / 2, 256));
   const grainB = T.octave(Math.min(S / 4, 128));
   const light = [0.82, 0.75, 0.59];
@@ -901,29 +954,34 @@ function synthSand(T) {
   for (let v = 0; v < S; v++) {
     for (let u = 0; u < S; u++) {
       const i = v * S + u;
-      // Ripples: integer wave vector keeps them tileable; the warp bends them.
-      const ph = TAU * ((15 * u + 6 * v) / S) + warp[i] * 5;
-      const s = 0.5 + 0.5 * Math.sin(ph);
-      const rip = Math.pow(s, 1.6);
+      // Wind ripples: two crossing trains (integer wave vectors keep them
+      // tileable), strongly warped and only in patches — regular, straight
+      // ripples read as stripes converging on the horizon.
+      const ph = TAU * ((13 * u + 5 * v) / S) + warp[i] * 7;
+      const ph2 = TAU * ((4 * u - 11 * v) / S) + warp2[i] * 6;
+      const s1 = 0.5 + 0.5 * Math.sin(ph);
+      const s2 = 0.5 + 0.5 * Math.sin(ph2);
+      const patch = smoothstep(-0.25, 0.45, warp2[i] + 0.4 * broad[i]);
+      const rip = (s1 * s1 * patch + s2 * s2 * (1 - patch) * 0.6) * (0.5 + 0.5 * smoothstep(-0.6, 0.6, warp[i]));
       const gr = grainA[i] * 0.6 + grainB[i] * 0.4;
-      mixInto(c, mid, light, clamp(0.5 + 0.5 * broad[i] + 0.15 * rip, 0, 1));
-      const f = 1 + 0.09 * gr - 0.05 * (1 - rip);
+      mixInto(c, mid, light, clamp(0.5 + 0.5 * broad[i] + 0.06 * rip, 0, 1));
+      const f = 1 + 0.08 * gr - 0.025 * (1 - rip);
       col[i * 3] = c[0] * f;
       col[i * 3 + 1] = c[1] * f;
       col[i * 3 + 2] = c[2] * f;
-      hgt[i] = 0.42 + 0.2 * rip * (0.6 + 0.4 * broad[i]) + 0.05 * gr;
+      hgt[i] = 0.42 + 0.11 * rip + 0.06 * broad[i] + 0.05 * gr;
       rough[i] = 0.9;
     }
   }
-  // Specks: dark mineral grains and pale shell fragments.
-  for (let n = 0; n < 900; n++) {
+  // Specks: dark mineral grains and the odd small, sun-bleached shell chip.
+  for (let n = 0; n < 420; n++) {
     const x = rng() * S;
     const y = rng() * S;
-    const shell = rng() < 0.35;
+    const shell = rng() < 0.22;
     const a = rng() * TAU;
-    const len = (shell ? 0.006 + 0.01 * rng() : 0.002 + 0.003 * rng()) * S;
-    const w = Math.max(0.8, len * (shell ? 0.8 : 1));
-    const k = shell ? 0.9 : 0.4 + 0.15 * rng();
+    const len = (shell ? 0.004 + 0.005 * rng() : 0.002 + 0.003 * rng()) * S;
+    const w = Math.max(0.8, len * (shell ? 0.7 : 1));
+    const k = shell ? 0.76 + 0.08 * rng() : 0.4 + 0.15 * rng();
     T.stroke(x, y, x + Math.cos(a) * len, y + Math.sin(a) * len, w,
       k, k * (shell ? 0.97 : 0.93), k * (shell ? 0.9 : 0.85), k, k * 0.96, k * 0.88, 0.55, 0.58, 0.9, 0.3);
   }
@@ -981,19 +1039,83 @@ const SYNTH = [synthGrass, synthDryGrass, synthDirt, synthRock, synthSand, synth
 function getSurfaceTextures(size) {
   const cached = surfaceCache.get(size);
   if (cached) return cached;
-  const t0 = now();
+  const job = createSurfaceJob(size);
+  for (let l = 0; l < LAYERS; l++) job.step();
+  return job.finish();
+}
+
+/**
+ * Incremental synthesis of one texture set: `step()` builds the next layer,
+ * `finish()` uploads and caches. Lets the high-resolution set be spread over
+ * idle slices instead of one long blocking task.
+ */
+function createSurfaceJob(size) {
   const N = size * size;
   const albedoData = new Uint8Array(N * 4 * LAYERS);
   const normalData = new Uint8Array(N * 4 * LAYERS);
   const avg = [];
   const T = new Synth(size, 0x5a017a);
-  for (let l = 0; l < LAYERS; l++) {
-    T.clear();
-    T.rng = makeRng(hash("sauria-surface", l));
-    SYNTH[l](T);
-    const a = T.pack(albedoData, normalData, l, LAYER_BUMP[l]);
-    avg.push(new THREE.Vector3(a[0], a[1], a[2]));
+  let layer = 0;
+  let ms = 0;
+  return {
+    get done() {
+      return layer >= LAYERS;
+    },
+    step() {
+      if (layer >= LAYERS) return;
+      const t0 = now();
+      T.clear();
+      T.rng = makeRng(hash("sauria-surface", layer));
+      SYNTH[layer](T);
+      const a = T.pack(albedoData, normalData, layer, LAYER_BUMP[layer]);
+      avg.push(new THREE.Vector3(a[0], a[1], a[2]));
+      layer++;
+      ms += now() - t0;
+    },
+    finish() {
+      return uploadSurface(size, albedoData, normalData, avg, ms);
+    },
+  };
+}
+
+const pendingSurface = new Map(); // size → [callback]
+const idle =
+  typeof requestIdleCallback === "function"
+    ? (fn) => requestIdleCallback(fn, { timeout: 150 })
+    : (fn) => setTimeout(fn, 16);
+
+/**
+ * Build the `size` texture set in the background (one layer per idle slice)
+ * and hand it to `onReady` once uploaded. Concurrent requests share one job.
+ */
+function upgradeSurfaceTextures(size, onReady) {
+  const cached = surfaceCache.get(size);
+  if (cached) {
+    onReady(cached);
+    return;
   }
+  const waiting = pendingSurface.get(size);
+  if (waiting) {
+    waiting.push(onReady);
+    return;
+  }
+  const callbacks = [onReady];
+  pendingSurface.set(size, callbacks);
+  const job = createSurfaceJob(size);
+  const tick = () => {
+    job.step();
+    if (!job.done) {
+      idle(tick);
+      return;
+    }
+    const entry = job.finish();
+    pendingSurface.delete(size);
+    for (const cb of callbacks) cb(entry);
+  };
+  idle(tick);
+}
+
+function uploadSurface(size, albedoData, normalData, avg, ms) {
   const make = (data, colorSpace) => {
     const tex = new THREE.DataArrayTexture(data, size, size, LAYERS);
     tex.format = THREE.RGBAFormat;
@@ -1012,7 +1134,7 @@ function getSurfaceTextures(size) {
     albedo: make(albedoData, THREE.SRGBColorSpace),
     normal: make(normalData, THREE.NoColorSpace),
     avg,
-    ms: now() - t0,
+    ms,
   };
   surfaceCache.set(size, entry);
   return entry;
@@ -1097,19 +1219,23 @@ for (int i = 0; i < 6; i++) {
   vec2 uv = vTerPos.xz * sc;
   vec2 gx = terDx.xz * sc;
   vec2 gy = terDy.xz * sc;
-  vec2 uvF = (TER_ROT * vTerPos.xz) * (sc * TER_FAR) + 0.37;
-  vec4 far = textureGrad(terAlbedo, vec3(uvF, layer), (TER_ROT * gx) * (TER_FAR * TER_FAR_BLUR), (TER_ROT * gy) * (TER_FAR * TER_FAR_BLUR));
+  float farK = sc * TER_FAR;
+  float farG = farK * TER_FAR_BLUR;
+  vec4 far;
   vec4 alb;
   if (i == 3) {
-    // Rock is tri-planar so cliffs never smear; normals use a UDN blend per axis.
+    // Rock is tri-planar so cliffs never smear; normals use a UDN blend per
+    // axis, and the far-scale mottling is projected the same way.
     vec3 bl = pow(abs(terN), vec3(4.0));
     bl /= (bl.x + bl.y + bl.z);
     alb = vec4(0.0);
+    far = vec4(0.0);
     vec3 nW = vec3(0.0);
     float rg = 0.0;
     if (bl.y > 0.02) {
       vec4 a = textureGrad(terAlbedo, vec3(uv, layer), gx, gy);
       vec4 n = textureGrad(terNormal, vec3(uv, layer), gx, gy);
+      far += textureGrad(terAlbedo, vec3(TER_ROT * vTerPos.xz * farK + 0.37, layer), TER_ROT * terDx.xz * farG, TER_ROT * terDy.xz * farG) * bl.y;
       vec2 t = n.xy * 2.0 - 1.0;
       alb += a * bl.y;
       nW += vec3(t.x + terN.x, terN.y, t.y + terN.z) * bl.y;
@@ -1119,6 +1245,7 @@ for (int i = 0; i < 6; i++) {
       vec2 uvX = vTerPos.zy * sc;
       vec4 a = textureGrad(terAlbedo, vec3(uvX, layer), terDx.zy * sc, terDy.zy * sc);
       vec4 n = textureGrad(terNormal, vec3(uvX, layer), terDx.zy * sc, terDy.zy * sc);
+      far += textureGrad(terAlbedo, vec3(TER_ROT * vTerPos.zy * farK + 0.61, layer), TER_ROT * terDx.zy * farG, TER_ROT * terDy.zy * farG) * bl.x;
       vec2 t = n.xy * 2.0 - 1.0;
       alb += a * bl.x;
       nW += vec3(terN.x, t.y + terN.y, t.x + terN.z) * bl.x;
@@ -1128,6 +1255,7 @@ for (int i = 0; i < 6; i++) {
       vec2 uvZ = vTerPos.xy * sc;
       vec4 a = textureGrad(terAlbedo, vec3(uvZ, layer), terDx.xy * sc, terDy.xy * sc);
       vec4 n = textureGrad(terNormal, vec3(uvZ, layer), terDx.xy * sc, terDy.xy * sc);
+      far += textureGrad(terAlbedo, vec3(TER_ROT * vTerPos.xy * farK + 0.13, layer), TER_ROT * terDx.xy * farG, TER_ROT * terDy.xy * farG) * bl.z;
       vec2 t = n.xy * 2.0 - 1.0;
       alb += a * bl.z;
       nW += vec3(t.x + terN.x, t.y + terN.y, terN.z) * bl.z;
@@ -1135,12 +1263,14 @@ for (int i = 0; i < 6; i++) {
     }
     float bs = bl.x * step(0.02, bl.x) + bl.y * step(0.02, bl.y) + bl.z * step(0.02, bl.z);
     alb /= bs;
+    far /= bs;
     terRg[i] = rg / bs;
     terRockN = normalize(nW);
     // Sedimentary strata on steep faces: grey, buff and the odd rust band.
     alb.rgb *= mix(vec3(1.0), terStrata, (1.0 - bl.y) * 0.9);
-    alb.rgb *= mix(vec3(1.0), far.rgb / terAvg[i], 0.6 * bl.y + 0.25);
+    alb.rgb *= mix(vec3(1.0), far.rgb / terAvg[i], 0.6);
   } else {
+    far = textureGrad(terAlbedo, vec3(TER_ROT * vTerPos.xz * farK + 0.37, layer), TER_ROT * gx * (TER_FAR * TER_FAR_BLUR), TER_ROT * gy * (TER_FAR * TER_FAR_BLUR));
     alb = textureGrad(terAlbedo, vec3(uv, layer), gx, gy);
     vec4 n = textureGrad(terNormal, vec3(uv, layer), gx, gy);
     terNm[i] = n.xy * 2.0 - 1.0;
@@ -1223,7 +1353,7 @@ function createTerrainMaterial(textures, seaLevel) {
         "reflectedLight.indirectDiffuse *= terAO;\nreflectedLight.indirectSpecular *= mix(1.0, terAO, 0.7);"
       );
   };
-  mat.customProgramCacheKey = () => "sauria-terrain-v2";
+  mat.customProgramCacheKey = () => "sauria-terrain-v3";
   return mat;
 }
 
@@ -1310,12 +1440,32 @@ export class Terrain {
     this._collectShore();
     timings.shore = now() - t;
     t = now();
-    const textures = getSurfaceTextures(this.resolution >= 400 ? 512 : 256);
+    // High quality wants 512² detail textures, which take a few hundred ms to
+    // synthesise. Unless they are cached already, start on the 256² set (4×
+    // cheaper) and build the full set in idle slices, swapping it in when done.
+    const surfaceSize = this.resolution >= 400 ? 512 : 256;
+    const textures = surfaceCache.get(surfaceSize) || getSurfaceTextures(256);
     timings.textures = now() - t;
     t = now();
     this.mesh = this._buildMesh(textures);
     this.heightTexture = this._buildHeightTexture();
     timings.mesh = now() - t;
+
+    this._disposed = false;
+    /**
+     * Resolves once the full-resolution surface textures are in place (at
+     * once when they were cached). Optional — the mesh is usable right away.
+     * @type {Promise<void>}
+     */
+    this.ready =
+      textures.albedo.image.width >= surfaceSize
+        ? Promise.resolve()
+        : new Promise((resolve) => {
+            upgradeSurfaceTextures(surfaceSize, (hi) => {
+              if (!this._disposed) this._setSurface(hi);
+              resolve();
+            });
+          });
 
     this.stats.timings = timings;
     this.stats.genMs = now() - t0;
@@ -1656,9 +1806,18 @@ export class Terrain {
 
   /** Free GPU resources (the shared detail textures stay cached for reuse). */
   dispose() {
+    this._disposed = true;
     this.mesh.geometry.dispose();
     this.mesh.material.dispose();
     this.heightTexture.dispose();
+  }
+
+  /** Point the material at another detail texture set (progressive upgrade). */
+  _setSurface(textures) {
+    const u = this.mesh.material.userData.uniforms;
+    u.terAlbedo.value = textures.albedo;
+    u.terNormal.value = textures.normal;
+    u.terAvg.value = textures.avg;
   }
 
   /* --- Generation: layout ------------------------------------------------ */
@@ -2038,10 +2197,13 @@ export class Terrain {
           const mesa = smoothstep(0.1, 0.38, mesaN);
           const hb = h + (22 + 12 * pn) * hm;
           const step = 13;
-          const tq = (hb + pn * 12) / step;
+          // A little mid-frequency wander in the step level keeps escarpment
+          // rims from running in straight, machined lines.
+          const wander = pn * 12 + 3.5 * g.nDetail(x * 0.017 - 41.7, z * 0.017 + 8.3);
+          const tq = (hb + wander) / step;
           const fl = Math.floor(tq);
-          const sharp = lerp(0.42, 0.13, mesa);
-          const terr = (fl + smoothstep(0.5 - sharp, 0.5 + sharp, tq - fl)) * step - pn * 12;
+          const sharp = lerp(0.42, 0.17, mesa);
+          const terr = (fl + smoothstep(0.5 - sharp, 0.5 + sharp, tq - fl)) * step - wander;
           h = lerp(hb, terr, hm * (0.3 + 0.62 * mesa));
         }
         if (dd < w * 1.8) {

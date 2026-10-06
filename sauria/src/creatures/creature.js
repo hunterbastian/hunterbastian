@@ -181,6 +181,9 @@ export class Creature {
       biteRange: sp.biteRange ?? 0.6,
       biteCooldown: sp.biteCooldown ?? 1,
       armor: clamp(sp.armor ?? 0, 0, 0.9),
+      // Spiky armour bites back: share of a biter's raw damage reflected to it.
+      // Heavily plated species (Gastonia) get a default unless the def sets one.
+      thorns: clamp(sp.thorns ?? ((sp.armor ?? 0) >= 0.5 ? 0.15 : 0), 0, 1),
       growthSec: Math.max(1, (sp.growthMinutes ?? 25) * 60),
       quadruped,
       callDur: clamp(sp.call?.duration ?? 1.2, 0.5, 2.5),
@@ -878,8 +881,8 @@ export class Creature {
         victim.bleeding = Math.min(cap, victim.bleeding + bleed);
       }
       this._knockback(victim, kind);
-      // Optional species "thorns" (spiky armour): biting it hurts.
-      const thorns = victim.species?.thorns ?? 0;
+      // Spiky armour ("thorns"): biting it hurts the biter.
+      const thorns = victim._t ? victim._t.thorns : victim.species?.thorns ?? 0;
       if (kind === "bite" && thorns > 0 && this.alive) this.takeDamage(raw * thorns, victim, "tail");
     }
     this._noiseSpike = Math.max(this._noiseSpike, 0.8);

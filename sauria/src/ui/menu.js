@@ -633,35 +633,85 @@ function paintVista(canvas, pixel) {
 }
 
 /**
- * Topographic contour rings for the loading veil (pure SVG, seeded): the
- * island is "being surveyed" while it generates.
+ * Topographic contours for the loading veil (pure SVG, seeded): the island is
+ * "being surveyed" while it generates. Traced with marching squares from one
+ * height field, so — like a real survey — no two contour lines ever cross.
  */
 function contourSVG(seed) {
   const rng = makeRng(seed);
-  const peaks = [
-    [300 + rng() * 120, 260 + rng() * 80, 12],
-    [700 + rng() * 140, 360 + rng() * 80, 9],
-    [520 + rng() * 80, 120 + rng() * 60, 6],
-  ];
-  let paths = "";
-  for (const [cx, cy, rings] of peaks) {
-    const harm = [0, 1, 2, 3].map(() => [rng() * Math.PI * 2, 0.04 + rng() * 0.09]);
-    for (let r = 1; r <= rings; r++) {
-      const base = r * 30;
-      const pts = [];
-      for (let i = 0; i < 40; i++) {
-        const a = (i / 40) * Math.PI * 2;
-        let k = 1;
-        harm.forEach(([ph, amp], j) => {
-          k += amp * Math.sin(a * (j + 2) + ph + r * 0.18);
-        });
-        pts.push([cx + Math.cos(a) * base * k * 1.25, cy + Math.sin(a) * base * k]);
+  const W = 1000;
+  const H = 600;
+  const STEP = 12;
+  const nx = Math.ceil(W / STEP) + 1;
+  const ny = Math.ceil(H / STEP) + 1;
+  // A massif of a few soft, elongated peaks over a gently rolling ground.
+  const peaks = [];
+  for (let i = 0; i < 5; i++) {
+    const rot = rng() * Math.PI;
+    peaks.push({ x: 180 + rng() * 680, y: 90 + rng() * 420, r: 80 + rng() * 150, amp: 0.45 + rng() * 0.6, c: Math.cos(rot), s: Math.sin(rot) });
+  }
+  const ph = [rng() * 6.28, rng() * 6.28, rng() * 6.28];
+  const f = new Float32Array(nx * ny);
+  let max = 0;
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const x = i * STEP;
+      const y = j * STEP;
+      let h = 0.05 * Math.sin(x * 0.011 + ph[0]) * Math.cos(y * 0.013 + ph[1]) + 0.035 * Math.sin((x + y) * 0.019 + ph[2]);
+      for (const p of peaks) {
+        const dx = x - p.x;
+        const dy = y - p.y;
+        const u = (dx * p.c + dy * p.s) / (p.r * 1.6);
+        const v = (dy * p.c - dx * p.s) / p.r;
+        h += p.amp * Math.exp(-(u * u + v * v));
       }
-      const idx = r % 5 === 0 ? " class=\"idx\"" : "";
-      paths += smoothClosed(pts).replace("<path ", `<path${idx} `);
+      f[j * nx + i] = h;
+      max = Math.max(max, h);
     }
   }
-  return `<svg class="contours" viewBox="0 0 1000 600" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">${paths}</svg>`;
+  const at = (a, b, L) => (L - a) / (b - a || 1e-6);
+  let paths = "";
+  let level = 0;
+  for (let L = 0.06; L < max; L += 0.07, level++) {
+    let d = "";
+    const seg = (p, q) => {
+      d += `M${p[0].toFixed(1)} ${p[1].toFixed(1)}L${q[0].toFixed(1)} ${q[1].toFixed(1)}`;
+    };
+    for (let j = 0; j < ny - 1; j++) {
+      for (let i = 0; i < nx - 1; i++) {
+        const a = f[j * nx + i]; // top-left
+        const b = f[j * nx + i + 1]; // top-right
+        const c = f[(j + 1) * nx + i + 1]; // bottom-right
+        const e = f[(j + 1) * nx + i]; // bottom-left
+        const A = a >= L;
+        const B = b >= L;
+        const C = c >= L;
+        const E = e >= L;
+        if (A === B && B === C && C === E) continue;
+        const x0 = i * STEP;
+        const y0 = j * STEP;
+        const top = A !== B ? [x0 + at(a, b, L) * STEP, y0] : null;
+        const right = B !== C ? [x0 + STEP, y0 + at(b, c, L) * STEP] : null;
+        const bottom = E !== C ? [x0 + at(e, c, L) * STEP, y0 + STEP] : null;
+        const left = A !== E ? [x0, y0 + at(a, e, L) * STEP] : null;
+        if (top && right && bottom && left) {
+          // Saddle: the centre decides which corners the high ground joins.
+          if (A === (a + b + c + e) / 4 >= L) {
+            seg(top, right);
+            seg(left, bottom);
+          } else {
+            seg(top, left);
+            seg(right, bottom);
+          }
+        } else {
+          const pts = [top, right, bottom, left].filter(Boolean);
+          seg(pts[0], pts[1]);
+        }
+      }
+    }
+    if (d) paths += `<path${level % 5 === 4 ? ' class="idx"' : ""} d="${d}"/>`;
+  }
+  return `<svg class="contours" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">${paths}</svg>`;
 }
 
 /* --- Species stats -------------------------------------------------------------------- */
@@ -765,6 +815,9 @@ export class Menu {
 
     this._build();
     this._bind();
+    // A screen must be active even before show(): setLoading() may reveal the
+    // menu first, and the progress bar lives on the title screen.
+    this._setScreen("title", false);
   }
 
   /* --- Public API --- */

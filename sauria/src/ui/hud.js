@@ -50,6 +50,8 @@ const EPITAPH = {
 const _v = new THREE.Vector3();
 const _cam = new THREE.Vector3();
 const _dir = new THREE.Vector3();
+// Screen boxes of markers placed this frame: x, half-width, top, bottom.
+const _boxes = new Float32Array(MARKER_POOL_MAX * 4);
 
 /* --- Helpers -------------------------------------------------------------- */
 
@@ -58,6 +60,15 @@ const bearingOf = (yaw) => {
   const deg = ((Math.PI - yaw) * 180) / Math.PI;
   return ((deg % 360) + 360) % 360;
 };
+/** Does the box (centre x, half-width, top, bottom) overlap any of the first n placed markers? */
+function overlapsPlaced(n, x, hw, top, bottom) {
+  for (let k = 0; k < n; k++) {
+    const o = k * 4;
+    if (Math.abs(x - _boxes[o]) < hw + _boxes[o + 1] && top < _boxes[o + 3] && bottom > _boxes[o + 2]) return true;
+  }
+  return false;
+}
+
 const cardinalOf = (deg) => CARDINALS[Math.round(deg / 45) % 8];
 const relDeg = (a, b) => ((((b - a) % 360) + 540) % 360) - 180;
 
@@ -835,9 +846,19 @@ export class Hud {
           sy = H / 2 - dy * t;
           ang = Math.atan2(-dy, dx);
         }
+        // Declutter (herds and kills cluster): slide a pin sideways off another
+        // pin, then set its label below, above or — last resort — drop it.
+        for (let tries = 0; tries < 4 && overlapsPlaced(used - 1, sx, 16, sy - 16, sy + 16); tries++) sx += 34;
+        let lab = 0;
+        if (overlapsPlaced(used - 1, sx, 46, sy + 17, sy + 48)) lab = overlapsPlaced(used - 1, sx, 46, sy - 48, sy - 17) ? 2 : 1;
+        const o = (used - 1) * 4;
+        _boxes[o] = sx;
+        _boxes[o + 1] = lab === 2 ? 16 : 46;
+        _boxes[o + 2] = lab === 1 ? sy - 48 : sy - 16;
+        _boxes[o + 3] = lab === 0 ? sy + 48 : sy + 16;
         const d = p?.position ? Math.hypot(m.x - p.position.x, m.z - p.position.z) : cam.position.distanceTo(_v.set(m.x, m.y || 0, m.z));
         const alpha = this._sniffAlpha * (1 - smoothstep(110, 160, d) * 0.45);
-        this._placeMarker(mk, m, kind, sx, sy, edge, ang, d, alpha);
+        this._placeMarker(mk, m, kind, sx, sy, edge, ang, d, alpha, lab);
       }
     }
     for (let i = used; i < this._markersShown; i++) {
@@ -873,12 +894,13 @@ export class Hud {
       y: 0,
       a: -1,
       ang: null,
+      lab: 0,
     };
     this._markers[i] = mk;
     return mk;
   }
 
-  _placeMarker(mk, m, kind, sx, sy, edge, ang, d, alpha) {
+  _placeMarker(mk, m, kind, sx, sy, edge, ang, d, alpha, lab) {
     if (!mk.on) {
       mk.on = true;
       mk.el.classList.add("is-on");
@@ -898,6 +920,11 @@ export class Hud {
     if (edge !== mk.edge) {
       mk.edge = edge;
       mk.el.classList.toggle("mk--edge", edge);
+    }
+    if (lab !== mk.lab) {
+      mk.lab = lab;
+      mk.el.classList.toggle("mk--above", lab === 1);
+      mk.el.classList.toggle("mk--nolabel", lab === 2);
     }
     const label = m.label || MARKER_NAME[kind];
     if (label !== mk.label) {
