@@ -25,7 +25,7 @@
 // flat spatial hashes for the gameplay queries in the contract.
 
 import * as THREE from "three";
-import { makeRng, rand, hash } from "../core/rng.js";
+import { makeRng, rand, hash, weightedPick } from "../core/rng.js";
 import { TAU, clamp, lerp, smoothstep, damp } from "../core/math.js";
 import { createNoise2D, fbm2D } from "../core/noise.js";
 
@@ -821,7 +821,7 @@ function buildAtlas(size, seed) {
   });
   drawFrond(ctx, rng, px(REG.fern), {
     pinnae: 24, len: 0.42, angle: 1.05, angleTip: 0.7, lobes: true, lobeSize: 8.5, lobeWidth: 0.5, widest: 0.3,
-    palette: ramp(6, 92, 78, 36, 48, 16, 36), rachis: "#3f4420", arch: 0.025,
+    palette: ramp(6, 92, 78, 34, 46, 19, 40), rachis: "#3f4420", arch: 0.025,
   });
   drawFrond(ctx, rng, px(REG.cycad), {
     pinnae: 44, len: 0.4, angle: 0.95, angleTip: 0.6, lobes: false, width: 0.022, widest: 0.2, taper: 0.6,
@@ -1211,17 +1211,6 @@ class GeoBuilder {
   tri(a, b, c) {
     this.idx.push(a, b, c);
   }
-  /** Append another builder's geometry (merging two meshes into one draw). */
-  merge(o) {
-    const off = this.n;
-    this.pos.push(...o.pos);
-    this.nor.push(...o.nor);
-    this.uv.push(...o.uv);
-    this.col.push(...o.col);
-    this.wnd.push(...o.wnd);
-    for (const i of o.idx) this.idx.push(i + off);
-    this.n += o.n;
-  }
   build() {
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.Float32BufferAttribute(this.pos, 3));
@@ -1314,7 +1303,19 @@ function addCap(b, first, count, centre, normal, colour, bend, uvc) {
     const a = (j / (count - 1)) * TAU;
     ring.push(b.vert(x, y, z, normal.x, normal.y, normal.z, uvc[0] + Math.cos(a) * 0.01, uvc[1] + Math.sin(a) * 0.01, colour, bend(x, y, z), 0, 0));
   }
-  for (let j = 0; j < count - 1; j++) b.tri(c, ring[j], ring[j + 1]);
+  // Wind the fan so its front face looks along `normal` (bark flips back faces).
+  const ax = b.pos[ring[0] * 3] - centre.x;
+  const ay = b.pos[ring[0] * 3 + 1] - centre.y;
+  const az = b.pos[ring[0] * 3 + 2] - centre.z;
+  const k1 = Math.max(1, (count / 4) | 0);
+  const bx = b.pos[ring[k1] * 3] - centre.x;
+  const by = b.pos[ring[k1] * 3 + 1] - centre.y;
+  const bz = b.pos[ring[k1] * 3 + 2] - centre.z;
+  const flip = (ay * bz - az * by) * normal.x + (az * bx - ax * bz) * normal.y + (ax * by - ay * bx) * normal.z < 0;
+  for (let j = 0; j < count - 1; j++) {
+    if (flip) b.tri(c, ring[j + 1], ring[j]);
+    else b.tri(c, ring[j], ring[j + 1]);
+  }
 }
 
 const _fn = new V3();
@@ -1729,14 +1730,16 @@ function buildLog(rng) {
   const tube = addTube(b, pts, radii, 10, REG.barkA, { color: moss, rough: 0.06, rng, v0: rng() });
   const endGrain = [1.9, 1.6, 1.2];
   addCap(b, tube.start, tube.ring, pts[0].clone().add(new V3(-0.05, 0, 0)), new V3(-1, 0, 0), endGrain, ZERO, [REG.barkB.x + 0.06, 0.25]);
-  addCap(b, tube.start + (n - 1) * tube.ring, tube.ring, pts[n - 1].clone().add(new V3(0.05, 0, 0)), new V3(1, 0, 0), endGrain, ZERO, [REG.barkB.x + 0.06, 0.75]);
+  const tip = pts[n - 1].clone().add(new V3(0.05, 0, 0));
+  addCap(b, tube.start + (n - 1) * tube.ring, tube.ring, tip, new V3(1, 0, 0), endGrain, ZERO, [REG.barkB.x + 0.06, 0.75]);
   for (let i = 0; i < 3; i++) {
     const t = rand(rng, 0.2, 0.85);
     const a = rand(rng, -1.2, 1.2);
     const base = new V3(lerp(-L / 2, L / 2, t), 0, 0);
     const r = lerp(0.44, 0.3, t);
     const d = new V3(rand(rng, -0.3, 0.3), Math.cos(a), Math.sin(a)).normalize();
-    addTube(b, [base.clone().addScaledVector(d, r * 0.7), base.clone().addScaledVector(d, r + rand(rng, 0.3, 0.7))], [0.09, 0.03], 5, REG.barkA, { color: moss });
+    const stub = [base.clone().addScaledVector(d, r * 0.7), base.clone().addScaledVector(d, r + rand(rng, 0.3, 0.7))];
+    addTube(b, stub, [0.09, 0.03], 5, REG.barkA, { color: moss });
   }
   return b.build();
 }
@@ -2365,7 +2368,7 @@ const TREE_SCALE = { araucaria: [0.62, 1.18], podocarp: [0.6, 1.2], ginkgo: [0.6
 const ROCK_P = { rock: 0.38, highland: 0.22, beach: 0.05, plains: 0.034, forest: 0.045, swamp: 0.022 };
 const ROCK_MOSS = { forest: 0.9, swamp: 0.95, plains: 0.45, highland: 0.3, rock: 0.15, beach: 0.05 };
 const LOG_P = { forest: 0.17, swamp: 0.2, plains: 0.025, highland: 0.02 };
-const PLANT_SCALE = { fern: [0.8, 1.25], cycad: [0.8, 1.2], horsetail: [0.8, 1.2], shrub: [0.75, 1.25] };
+const PLANT_SCALE = { fern: [0.95, 1.45], cycad: [0.8, 1.2], horsetail: [0.8, 1.2], shrub: [0.75, 1.25] };
 
 function treeWeights(biome, mix, moist, shore) {
   if (shore) return { snag: 0.3, treefern: 0.4, ginkgo: 0.3 };
@@ -2408,17 +2411,6 @@ function plantWeights(biome, shore, clearing, lowland) {
   }
   if (shore) w.horsetail += 0.28;
   return w;
-}
-
-function pickKey(rng, w) {
-  let total = 0;
-  for (const k in w) total += w[k];
-  let r = rng() * total;
-  for (const k in w) {
-    r -= w[k];
-    if (r <= 0) return k;
-  }
-  return Object.keys(w)[0];
 }
 
 const nowMs = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
@@ -2490,10 +2482,10 @@ export class Vegetation {
     this._lod = {
       treeNear: low ? 95 : 135,
       treeBand: low ? 18 : 24,
-      treeFar: low ? 420 : 640,
+      treeFar: low ? 400 : 600,
       rockNear: low ? 60 : 90,
       rockBand: 14,
-      rockFar: low ? 380 : 560,
+      rockFar: low ? 300 : 450,
       plantFar: low ? 125 : 190,
       plantBand: 28,
       logFar: low ? 200 : 280,
@@ -2830,7 +2822,7 @@ export class Vegetation {
     for (const kind of PLANT_KINDS) geo.plant[kind] = PLANT_BUILDERS[kind](makeRng(hash(this.seed, "plant-geo", kind)));
     geo.log = buildLog(makeRng(hash(this.seed, "log-geo")));
     geo.rockNear = buildRockGeometry(this._low ? 2 : 3, this.seed);
-    geo.rockFar = buildRockGeometry(this._low ? 1 : 2, this.seed);
+    geo.rockFar = buildRockGeometry(1, this.seed);
     this._geo = geo;
     let verts = 0;
     for (const kind of TREE_KINDS) verts += geo.near[kind].attributes.position.count;
@@ -2946,7 +2938,7 @@ export class Vegetation {
         if (roll >= p * d) continue;
         const mix = nz(x * 0.018 + 5.1, z * 0.018 + 9.4);
         const moist = hasMoist ? clamp(T.moistureAt(x, z), 0, 1) : 0.5;
-        const kind = pickKey(rng, treeWeights(biome, mix, moist, shore));
+        const kind = weightedPick(rng, treeWeights(biome, mix, moist, shore));
         let s = rand(rng, TREE_SCALE[kind][0], TREE_SCALE[kind][1]);
         if (kind !== "treefern" && kind !== "snag" && (biome === "forest" || biome === "plains") && rng() < 0.1) {
           s *= rand(rng, 0.32, 0.5); // sapling
@@ -2994,7 +2986,7 @@ export class Vegetation {
         let total = 0;
         for (const k in w) total += w[k];
         if (roll >= total * d) continue;
-        const kind = pickKey(rng, w);
+        const kind = weightedPick(rng, w);
         this._tryPlant(kind, x, z, rng, biome);
         if ((kind === "fern" || kind === "horsetail") && rng() < 0.4) {
           const extra = 1 + (rng() < 0.4 ? 1 : 0);
@@ -3046,8 +3038,8 @@ export class Vegetation {
     _scl.set(sx, sy, sz);
     _m4.compose(_pos, _q, _scl);
     rocks.mat.push(..._m4.elements);
-    let v = rand(rng, 0.82, 1.12);
-    if (biome === "beach") v *= 1.15;
+    let v = rand(rng, 0.95, 1.25);
+    if (biome === "beach") v *= 1.12;
     else if (biome === "forest" || biome === "swamp") v *= 0.9;
     const warm = rand(rng, -0.04, 0.06);
     rocks.col.push(v * (1 + warm), v, v * (1 - warm * 1.5));
