@@ -864,6 +864,7 @@ uniform float uMinPx;
 varying vec2 vUv;
 varying float vAlpha;
 varying vec3 vColor;
+varying float vNear;
 #include <fog_pars_vertex>
 void main() {
   vUv = position.xy + 0.5;
@@ -871,6 +872,9 @@ void main() {
   // Never smaller than uMinPx on screen, so far lights still read as points.
   float minSize = uMinPx * 2.0 * -mvPosition.z / (uViewportH * projectionMatrix[1][1]);
   float size = max(iSizeAlpha.x, minSize);
+  // 0 when the camera is inside / right against the billboard (a puff filling the
+  // whole view reads as a smudge on the lens), 1 once it is a few sizes away.
+  vNear = smoothstep(0.35, 1.2, -mvPosition.z / (size + 0.5));
   mvPosition.xy += position.xy * size;
   gl_Position = projectionMatrix * mvPosition;
   vAlpha = iSizeAlpha.y * clamp(iSizeAlpha.x / max(size, 1e-4), 0.35, 1.0);
@@ -925,6 +929,7 @@ uniform vec3 uLight;
 varying vec2 vUv;
 varying float vAlpha;
 varying vec3 vColor;
+varying float vNear;
 #include <fog_pars_fragment>
 void main() {
   vec2 p = vUv * 2.0 - 1.0;
@@ -932,7 +937,7 @@ void main() {
   if (r2 > 1.0) discard;
   // Lumpy, soft puff: radial falloff broken up by a couple of cheap waves.
   float lump = 0.82 + 0.18 * sin(p.x * 5.1 + p.y * 3.3 + vAlpha * 40.0) * sin(p.y * 4.7 - p.x * 2.1);
-  float a = (1.0 - r2) * (1.0 - r2) * lump * vAlpha;
+  float a = (1.0 - r2) * (1.0 - r2) * lump * vAlpha * vNear;
   gl_FragColor = vec4(vColor * uLight, a);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -1767,8 +1772,9 @@ class RotorWash {
    * @param {number} z
    * @param {THREE.Color} color base puff colour (linear)
    * @param {boolean} water spray behaves lighter and higher
+   * @param {number} [density] opacity scale for the surface (grass throws up less than sand)
    */
-  update(dt, amount, x, groundY, z, color, water) {
+  update(dt, amount, x, groundY, z, color, water, density = 1) {
     const rng = this.rng;
     if (amount > 0.01 && dt > 0) {
       this.carry += amount * this.capacity * 0.5 * dt; // the pool turns over about every 2 s at full wash
@@ -1791,7 +1797,7 @@ class RotorWash {
         this.life[i] = water ? rand(rng, 0.9, 1.7) : rand(rng, 1.3, 2.5);
         this.s0[i] = water ? rand(rng, 0.4, 0.8) : rand(rng, 0.6, 1.2);
         this.s1[i] = water ? rand(rng, 1.6, 2.8) : rand(rng, 2.6, 4.8);
-        this.a0[i] = (water ? rand(rng, 0.35, 0.55) : rand(rng, 0.22, 0.42)) * (0.5 + 0.5 * amount);
+        this.a0[i] = (water ? rand(rng, 0.35, 0.55) : rand(rng, 0.22, 0.42)) * (0.5 + 0.5 * amount) * density;
         const jitter = rand(rng, 0.9, 1.1);
         this.cr[i] = color.r * jitter;
         this.cg[i] = color.g * jitter;
@@ -1852,6 +1858,9 @@ const WASH_COLORS = {
   highland: new THREE.Color("#a59b86"),
   rock: new THREE.Color("#9c968b"),
 };
+// How much loose material each surface gives up: sand and dry scree billow,
+// turf mostly flattens and throws grit and clippings.
+const WASH_DENSITY = { water: 1, beach: 1, rock: 0.8, highland: 0.75, plains: 0.55, forest: 0.5, swamp: 0.45 };
 
 function isLowQuality(q) {
   if (!q) return false;
@@ -1937,7 +1946,7 @@ export class Helicopter {
 
     // Lights live directly in the scene and are never removed/hidden while the
     // helicopter exists: toggling a light's presence recompiles every material.
-    this.spot = new THREE.SpotLight(0xfff0d8, 0, 160, 0.38, 0.6, 2);
+    this.spot = new THREE.SpotLight(0xfff0d8, 0, 160, 0.38, 0.85, 2);
     this.spot.castShadow = false;
     this.spot.name = "helicopterSpot";
     scene.add(this.spot, this.spot.target);
@@ -1974,6 +1983,7 @@ export class Helicopter {
     const entryDist = Math.max(coast.dist + 230, 650);
     this._planRun(point, coast, entryDist, Math.min(260, entryDist * 0.42));
     this.phase = "inbound";
+    this.eta = this._estimateEta();
   }
 
   /**
@@ -2398,11 +2408,17 @@ export class Helicopter {
     if (!tg || (this.phase !== "inbound" && this.phase !== "approach")) return 0;
     const p = this._pos;
     const next = this._route[this._routeIndex] ?? tg;
-    const rem = this._routeRemaining(Math.hypot(next.x - p.x, next.z - p.z));
+    const dn = Math.hypot(next.x - p.x, next.z - p.z);
+    const rem = this._routeRemaining(dn);
     const brakeDist = (CRUISE_SPEED * CRUISE_SPEED) / (2 * BRAKE);
     const travel = rem > brakeDist ? rem / CRUISE_SPEED + CRUISE_SPEED / (2 * BRAKE) : Math.sqrt((2 * rem) / BRAKE);
+    // Time lost getting up to cruise from the speed we already have toward the next
+    // waypoint (a re-tasked chopper may be hovering, or pointing the other way).
+    const v = this.velocity;
+    const v0 = dn > 1 ? clamp((v.x * (next.x - p.x) + v.z * (next.z - p.z)) / dn, 0, CRUISE_SPEED) : CRUISE_SPEED;
+    const spinUp = rem > brakeDist ? ((CRUISE_SPEED - v0) ** 2) / (2 * LONG_ACCEL * 0.85 * CRUISE_SPEED) : 0;
     const drop = Math.max(0, this.altitude - tg.hover);
-    return travel + Math.max(0, drop - rem * 0.2) / DESCENT_RATE + 1.2;
+    return travel + spinUp + Math.max(0, drop - rem * 0.2) / DESCENT_RATE + 1.2;
   }
 
   /* --- Internals: attitude & effects ---------------------------------------- */
@@ -2493,7 +2509,7 @@ export class Helicopter {
       if (sky.hemiLight) u.uEnvGround.value.copy(sky.hemiLight.groundColor).multiplyScalar(0.6 * (sky.hemiLight.intensity ?? 1));
     }
     // A little fill by day (the cabin is in the roof's shadow), warm cabin light at night.
-    u.uCabinLight.value = 0.07 + night * 0.4;
+    u.uCabinLight.value = 0.07 + night * 0.26;
     const lightLevel = lerp(0.12, 1, daylight);
     _col.setRGB(lightLevel, lightLevel * 0.98, lightLevel * 0.95);
     mu.uLight.value.copy(_col);
@@ -2537,17 +2553,21 @@ export class Helicopter {
     this.spot.position.copy(_v2);
     this.spot.target.position.copy(_v2).addScaledVector(_v3, 20);
     this.spot.target.updateMatrixWorld();
-    this.spot.intensity = night * 2600;
-    // Volumetric cone, trimmed where the beam meets the ground.
-    m.cone.visible = night > 0.02;
-    if (m.cone.visible) {
-      let hit = 140;
+    // Where the beam meets the ground: trims the volumetric cone and sets the
+    // intensity, so the pool stays bright but unclipped (soft penumbra) whether
+    // it is 8 m away in the hover or 120 m away on the run-in.
+    let hit = 140;
+    if (night > 0.02) {
       for (let s = 3; s <= 140; s += 3) {
         if (_v2.y + _v3.y * s <= this._ground(_v2.x + _v3.x * s, _v2.z + _v3.z * s)) {
           hit = s;
           break;
         }
       }
+    }
+    this.spot.intensity = night * clamp(2.2 * hit * hit, 120, 3200);
+    m.cone.visible = night > 0.02;
+    if (m.cone.visible) {
       m.cone.scale.setScalar(hit);
       m.cone.material.uniforms.uOpacity.value = night * 0.22;
     }
@@ -2567,14 +2587,16 @@ export class Helicopter {
     const agl = p.y - g0;
     const amount = this.rotorSpeed * (1 - smoothstep(4, 22, agl));
     const water = this.terrain ? this.terrain.heightAt(p.x, p.z) < this._sea - 0.15 : true;
-    let base = WASH_COLORS.plains;
-    if (water) base = WASH_COLORS.water;
-    else if (amount > 0.01 && this.terrain?.biomeAt) base = WASH_COLORS[this.terrain.biomeAt(p.x, p.z)] || WASH_COLORS.plains;
-    this._washColor.copy(base);
+    let surface = water ? "water" : "plains";
+    if (!water && amount > 0.01 && this.terrain?.biomeAt) {
+      const b = this.terrain.biomeAt(p.x, p.z);
+      if (WASH_COLORS[b]) surface = b;
+    }
+    this._washColor.copy(WASH_COLORS[surface]);
     const wl = this._wash.material.uniforms.uLight.value;
     const spotBoost = night * 0.25;
     wl.setRGB(lightLevel + spotBoost, lightLevel * 0.98 + spotBoost * 0.92, lightLevel * 0.95 + spotBoost * 0.8);
-    this._wash.update(dt, amount, p.x, g0, p.z, this._washColor, water);
+    this._wash.update(dt, amount, p.x, g0, p.z, this._washColor, water, WASH_DENSITY[surface]);
 
     const ringOn = water && amount > 0.02;
     this._ring.visible = ringOn;

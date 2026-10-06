@@ -207,25 +207,27 @@ function buildTextures(lowDetail) {
   const n = tileNoise(9137);
   const n2 = tileNoise(4421);
 
-  // Walnut: warped growth rings along the stock, dark latewood, long open pores.
+  // Walnut: fine growth lines running along the stock, bent by a broad flowing
+  // figure, with soft dark latewood and long open pores. Kept low in contrast:
+  // oiled walnut reads as warm and deep, not striped.
   const wood = textureSet(lowDetail ? 256 : 512, (u, v, s) => {
-    const w1 = tfbm(n, u, v, 2, 4, 4);
-    const w2 = n(u * 6, v * 24, 6, 24);
-    const g = v * 9 + w1 * 1.4 + w2 * 0.12;
+    const w1 = tfbm(n, u, v, 1, 2, 4);
+    const w2 = n(u * 4, v * 32, 4, 32);
+    const g = v * 26 + w1 * 3.4 + w2 * 0.18;
     const ring = g - Math.floor(g);
-    const late = smoothstep(0.5, 0.92, ring) * (1 - smoothstep(0.93, 1, ring));
-    const fig = tfbm(n2, u, v, 3, 3, 3) * 0.5 + 0.5;
-    const pore = smoothstep(0.32, 0.8, n2(u * 4 + 11, v * 150, 4, 150) * 0.5 + n(u * 9, v * 260, 9, 260) * 0.5);
-    const t = clamp(late * 0.7 + (1 - fig) * 0.38, 0, 1);
-    const dark = 1 - pore * 0.28;
-    s.r = lerp(0.5, 0.2, t) * dark;
-    s.g = lerp(0.31, 0.11, t) * dark;
-    s.b = lerp(0.18, 0.06, t) * dark;
-    s.rough = 0.34 + pore * 0.32 + late * 0.06;
+    const late = smoothstep(0.55, 0.93, ring) * (1 - smoothstep(0.94, 1, ring));
+    const fig = tfbm(n2, u, v, 2, 3, 4) * 0.5 + 0.5;
+    const pore = smoothstep(0.38, 0.85, n2(u * 4 + 11, v * 150, 4, 150) * 0.5 + n(u * 9, v * 260, 9, 260) * 0.5);
+    const t = clamp(late * 0.4 + (1 - fig) * 0.55, 0, 1);
+    const dark = 1 - pore * 0.2;
+    s.r = lerp(0.42, 0.17, t) * dark;
+    s.g = lerp(0.255, 0.095, t) * dark;
+    s.b = lerp(0.14, 0.05, t) * dark;
+    s.rough = 0.36 + pore * 0.26 + late * 0.05;
     s.metal = 0;
     s.wear = tfbm(n, u + 0.31, v, 5, 5, 3) * 0.5 + 0.5;
-    s.height = -pore * 0.9 + late * 0.25;
-  }, 1.4);
+    s.height = -pore * 0.7 + late * 0.15;
+  }, 1.0);
 
   // Generic machined steel: fine brushing along the part, soft mottling.
   // Neutral grey so a material colour gives bluing, parkerising, brass...
@@ -240,28 +242,29 @@ function buildTextures(lowDetail) {
     s.height = streak * 0.35;
   }, 0.8);
 
-  // Colour case-hardening: mottled straw, plum and peacock blue, with fine
-  // scroll engraving cut into it (normal map only).
+  // Colour case-hardening: soft mottling of straw, bronze, plum and slate over
+  // grey steel (subdued — old case colours fade toward grey), with faint scroll
+  // engraving cut into it (normal map only).
   const caseSet = textureSet(S, (u, v, s) => {
     const a = tfbm(n, u, v, 3, 3, 5) * 0.5 + 0.5;
     const b = tfbm(n2, u, v, 5, 5, 4) * 0.5 + 0.5;
     const t = clamp(a * 0.85 + b * 0.35 - 0.1, 0, 1);
-    // palette walk: straw → bronze → plum → blue → grey
-    const P = [[0.62, 0.5, 0.3], [0.48, 0.33, 0.2], [0.36, 0.22, 0.34], [0.2, 0.28, 0.46], [0.42, 0.44, 0.47]];
+    // palette walk: straw → bronze → plum → slate → grey
+    const P = [[0.6, 0.53, 0.4], [0.5, 0.42, 0.34], [0.43, 0.38, 0.42], [0.36, 0.4, 0.47], [0.5, 0.5, 0.51]];
     const f = t * (P.length - 1);
     const i = Math.min(P.length - 2, Math.floor(f));
     const k = smoothstep(0, 1, f - i);
     s.r = lerp(P[i][0], P[i + 1][0], k);
     s.g = lerp(P[i][1], P[i + 1][1], k);
     s.b = lerp(P[i][2], P[i + 1][2], k);
-    const e = tfbm(n2, u, v, 6, 6, 3);
-    const mask = smoothstep(0.05, 0.3, tfbm(n, u + 0.5, v, 2, 2, 2) * 0.5 + 0.5);
-    const line = (1 - smoothstep(0.0, 0.09, Math.abs(Math.sin(e * 22)))) * mask;
-    s.rough = 0.45 + line * 0.3;
+    const e = tfbm(n2, u, v, 4, 4, 3);
+    const mask = smoothstep(0.2, 0.45, tfbm(n, u + 0.5, v, 2, 2, 2) * 0.5 + 0.5);
+    const line = (1 - smoothstep(0.0, 0.12, Math.abs(Math.sin(e * 14)))) * mask;
+    s.rough = 0.42 + line * 0.15;
     s.metal = 1;
-    s.wear = tfbm(n, u, v, 6, 6, 3) * 0.5 + 0.5;
-    s.height = -line;
-  }, 1.6);
+    s.wear = tfbm(n, u, v, 4, 4, 3) * 0.5 + 0.5;
+    s.height = -line * 0.5;
+  }, 1.0);
 
   // Coatings (cerakote, polymer, rubber): fine stipple, matte.
   const coat = textureSet(S, (u, v, s) => {
@@ -275,20 +278,21 @@ function buildTextures(lowDetail) {
     s.height = f * 0.7;
   }, 1.2);
 
-  // Pebbled leather with creases (gloves).
+  // Fine pebbled leather with a few soft creases (gloves). The grain is small
+  // and shallow so it reads as leather at arm's length and doesn't shimmer.
   const leather = textureSet(S, (u, v, s) => {
-    const d = worley(u, v, 40, 77);
-    const crease = 1 - smoothstep(0.0, 0.06, Math.abs(n(u * 7, v * 11, 7, 11)));
+    const d = worley(u, v, 64, 77);
+    const crease = 1 - smoothstep(0.0, 0.04, Math.abs(n(u * 6, v * 9, 6, 9)));
     const m = tfbm(n2, u, v, 3, 3, 3) * 0.5 + 0.5;
-    const shade = (0.9 + m * 0.18) * (1 - crease * 0.25) * (0.94 + d * 0.08);
-    s.r = 0.36 * shade;
-    s.g = 0.245 * shade;
-    s.b = 0.155 * shade;
-    s.rough = 0.58 + crease * 0.18 - d * 0.05;
+    const shade = (0.9 + m * 0.16) * (1 - crease * 0.16) * (0.96 + d * 0.05);
+    s.r = 0.4 * shade;
+    s.g = 0.285 * shade;
+    s.b = 0.185 * shade;
+    s.rough = 0.62 + crease * 0.12 - d * 0.04;
     s.metal = 0;
     s.wear = tfbm(n, u, v, 5, 5, 3) * 0.5 + 0.5;
-    s.height = smoothstep(0.0, 0.75, d) * 0.6 - crease * 0.8;
-  }, 1.5);
+    s.height = smoothstep(0.0, 0.8, d) * 0.4 - crease * 0.45;
+  }, 0.9);
 
   // Cotton duck canvas: plain weave with slubbed threads (sleeves, straps, string).
   const canvas = textureSet(S, (u, v, s) => {
@@ -412,11 +416,11 @@ function library(lowDetail = false) {
   if (LIB) return LIB;
   const T = buildTextures(lowDetail);
   const L = { textures: T };
-  L.walnut = pbr(T.wood, { metal: 0, normalScale: 0.35, uvScale: 0.24, wearColor: 0x6e4a2e, wearRough: 0.62, wearMetal: 0, wear: 0.8, grime: 0.7 });
-  L.walnutChecker = pbr(T.wood, { metal: 0, normal: T.checker, normalScale: 0.9, uvScale: 0.24, rough: 1.25, wearColor: 0x6e4a2e, wearRough: 0.7, wearMetal: 0, wear: 0.6 });
-  L.ash = pbr(T.wood, { color: 0xd8b48a, metal: 0, normalScale: 0.35, uvScale: 0.3, wearColor: 0x9a7650, wearRough: 0.6, wearMetal: 0, wear: 0.8 });
+  L.walnut = pbr(T.wood, { metal: 0, normalScale: 0.3, uvScale: 0.24, wearColor: 0x6a4a30, wearRough: 0.62, wearMetal: 0, wear: 0.5, grime: 0.7 });
+  L.walnutChecker = pbr(T.wood, { color: 0xc8c0b8, metal: 0, normal: T.checker, normalScale: 0.7, uvScale: 0.24, rough: 1.25, wearColor: 0x6a4a30, wearRough: 0.7, wearMetal: 0, wear: 0.4 });
+  L.ash = pbr(T.wood, { color: 0xe8d2b4, metal: 0, normalScale: 0.3, uvScale: 0.3, wearColor: 0x8a6a48, wearRough: 0.6, wearMetal: 0, wear: 0.5 });
   L.blued = pbr(T.metal, { color: 0x4d5566, rough: 0.6, metal: 0.92, normalScale: 0.12, uvScale: 0.16, wearColor: 0xa4a7ad, wearRough: 0.26, wearMetal: 1, wear: 1 });
-  L.caseColor = pbr(T.caseSet, { rough: 0.62, metal: 0.95, normalScale: 0.55, uvScale: 0.09, wearColor: 0xb4b2ae, wearRough: 0.24, wearMetal: 1, wear: 0.9 });
+  L.caseColor = pbr(T.caseSet, { rough: 0.62, metal: 0.95, normalScale: 0.3, uvScale: 0.12, wearColor: 0xb4b2ae, wearRough: 0.24, wearMetal: 1, wear: 0.9 });
   L.parkerized = pbr(T.metal, { color: 0x3c3f3d, rough: 1.4, metal: 0.55, normalScale: 0.2, uvScale: 0.14, wearColor: 0x8d9093, wearRough: 0.35, wearMetal: 1, wear: 0.9 });
   L.anodized = pbr(T.metal, { color: 0x1f2124, rough: 0.85, metal: 0.6, normalScale: 0.1, uvScale: 0.12, wearColor: 0x7b7f86, wearRough: 0.35, wearMetal: 1, wear: 0.7 });
   L.steel = pbr(T.metal, { color: 0xb2b5ba, rough: 0.48, metal: 1, normalScale: 0.12, uvScale: 0.1, wearColor: 0xcfd1d4, wearRough: 0.2, wearMetal: 1, wear: 0.4, grime: 0.8 });
@@ -431,8 +435,8 @@ function library(lowDetail = false) {
   L.shell = pbr(T.coat, { color: 0x8e2016, rough: 0.5, metal: 0, normalScale: 0.15, wear: 0.3, wearColor: 0xa83a2c, wearRough: 0.4, wearMetal: 0 });
   L.carbon = pbr(T.canvas, { color: 0x3a3b3e, map: null, rough: 0.5, metal: 0.25, normalScale: 0.3, uvScale: 0.03, wear: 0, grime: 0.3 });
   L.string = pbr(T.canvas, { color: 0x4a4636, map: null, rough: 0.95, metal: 0, normalScale: 0.6, uvScale: 0.02, wear: 0, grime: 0 });
-  L.glove = pbr(T.leather, { rough: 1, metal: 0, normalScale: 0.6, uv: "box", uvScale: 0.11, wearColor: 0x8c6c4e, wearRough: 0.78, wearMetal: 0, wear: 1.15, grime: 0.8 });
-  L.gloveDark = pbr(T.leather, { color: 0x6a6460, rough: 1.1, metal: 0, normalScale: 0.5, uv: "box", uvScale: 0.08, wearColor: 0x7e6a58, wearRough: 0.8, wearMetal: 0, wear: 0.9, grime: 0.8 });
+  L.glove = pbr(T.leather, { rough: 1, metal: 0, normalScale: 0.35, uv: "box", uvScale: 0.11, wearColor: 0x8c6c4e, wearRough: 0.78, wearMetal: 0, wear: 1.15, grime: 0.8 });
+  L.gloveDark = pbr(T.leather, { color: 0xa39a90, rough: 1.1, metal: 0, normalScale: 0.3, uv: "box", uvScale: 0.08, wearColor: 0x7e6a58, wearRough: 0.8, wearMetal: 0, wear: 0.9, grime: 0.8 });
   L.strap = pbr(T.canvas, { color: 0x3c3c3a, map: null, rough: 1, metal: 0, normalScale: 0.8, uv: "box", uvScale: 0.04, wear: 0, grime: 0.6 });
   L.sleeve = pbr(T.canvas, { rough: 1, metal: 0, normalScale: 0.7, uv: "box", uvScale: 0.13, wear: 0.4, wearColor: 0x6e6c52, wearRough: 0.95, wearMetal: 0, grime: 1 });
   // Scope glass: dark coated optics with a strong fresnel reflection of the
@@ -2173,7 +2177,7 @@ function buildSniper(L, S) {
   rig.gun.add(rig.muzzle);
   rig.sights = { rear: sc.ocular, front: sc.objective, eye: 0.08 };
   rig.scoped = true;
-  rig.hip = { pos: [0.108, -0.148, -0.21], rot: [0.04, 0.04, -0.035] };
+  rig.hip = { pos: [0.112, -0.156, -0.245], rot: [0.04, 0.04, -0.035] };
   rig.flashSize = 0.3;
   rig.kick = { back: 0.1, rot: 0.42, yaw: 0.06 };
   rig.casing = "sniper";
