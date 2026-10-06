@@ -436,7 +436,7 @@ function library(lowDetail = false) {
   L.carbon = pbr(T.canvas, { color: 0x3a3b3e, map: null, rough: 0.5, metal: 0.25, normalScale: 0.3, uvScale: 0.03, wear: 0, grime: 0.3 });
   L.string = pbr(T.canvas, { color: 0x4a4636, map: null, rough: 0.95, metal: 0, normalScale: 0.6, uvScale: 0.02, wear: 0, grime: 0 });
   L.glove = pbr(T.leather, { rough: 1, metal: 0, normalScale: 0.35, uv: "box", uvScale: 0.11, wearColor: 0x8c6c4e, wearRough: 0.78, wearMetal: 0, wear: 1.15, grime: 0.8 });
-  L.gloveDark = pbr(T.leather, { color: 0xa39a90, rough: 1.1, metal: 0, normalScale: 0.3, uv: "box", uvScale: 0.08, wearColor: 0x7e6a58, wearRough: 0.8, wearMetal: 0, wear: 0.9, grime: 0.8 });
+  L.gloveDark = pbr(T.leather, { color: 0xd2c9c0, rough: 1.1, metal: 0, normalScale: 0.3, uv: "box", uvScale: 0.08, wearColor: 0x7e6a58, wearRough: 0.8, wearMetal: 0, wear: 0.9, grime: 0.8 });
   L.strap = pbr(T.canvas, { color: 0x3c3c3a, map: null, rough: 1, metal: 0, normalScale: 0.8, uv: "box", uvScale: 0.04, wear: 0, grime: 0.6 });
   L.sleeve = pbr(T.canvas, { rough: 1, metal: 0, normalScale: 0.7, uv: "box", uvScale: 0.13, wear: 0.4, wearColor: 0x6e6c52, wearRough: 0.95, wearMetal: 0, grime: 1 });
   // Scope glass: dark coated optics with a strong fresnel reflection of the
@@ -1413,6 +1413,19 @@ function setBase(base, holder, pos, rot, order = "XYZ") {
   holder.quaternion.copy(base.quat);
 }
 
+/**
+ * Holder orientation for a hand whose fingers point along `fingers` with the palm
+ * turned toward `palm` (both in the holder's parent space). Works for either hand:
+ * the left hand's mirror lives inside the holder. Construction time only.
+ */
+function handQuat(fingers, palm) {
+  const z = new THREE.Vector3(...fingers).normalize().negate();
+  const y = new THREE.Vector3(...palm).normalize().negate();
+  y.addScaledVector(z, -y.dot(z)).normalize();
+  const x = new THREE.Vector3().crossVectors(y, z);
+  return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
+}
+
 /** Right hand around a pistol grip (palm on the right side, thumb over the left). */
 const GRIP_POSE = {
   curl: [[0.55, 0.85, 0.55], [1.45, 1.35, 0.9], [1.5, 1.35, 0.95], [1.5, 1.3, 0.95]],
@@ -1694,7 +1707,9 @@ function buildShotgun(L, S) {
 
   rig.muzzle.position.set(bx, yb, -0.746);
   rig.gun.add(rig.muzzle);
-  rig.sights = { rear: [0, 0.0578, -0.06], front: [0, 0.0597, -0.737], eye: 0.16 };
+  // Shotguns are pointed, not aimed: the eye sits above the rib and the bead
+  // lands on the centre, so the virtual rear point is raised above the breech.
+  rig.sights = { rear: [0, 0.0712, -0.06], front: [0, 0.0597, -0.737], eye: 0.25 };
   rig.hip = { pos: [0.112, -0.108, -0.2], rot: [0.035, 0.045, -0.03] };
   rig.flashSize = 0.2;
   rig.kick = { back: 0.075, rot: 0.3, yaw: 0.05 };
@@ -1707,9 +1722,13 @@ function buildShotgun(L, S) {
   const left = mountHand(buildHand(L, FOREND_POSE, S / 14), true);
   rig.left = left;
   // The left hand rides on the forend, so it follows the barrels when they drop.
-  setBase(rig.leftBase, left, [-0.072, -0.022 - 0.009, -0.255 + 0.104], [0.12, -0.95, Math.PI], "YXZ");
+  setBase(rig.leftBase, left, [-0.068, -0.04, -0.255 + 0.104], [0.12, -0.95, Math.PI], "YXZ");
   hinge.add(left);
 
+  // Loading pose for the right hand: fingers pointing left and a little forward
+  // over the open breech, forearm trailing down to the right.
+  const loadDir = new THREE.Vector3(-0.75, 0.2, -0.6).normalize();
+  const loadQuat = handQuat([-0.75, 0.2, -0.6], [0, -1, -0.3]);
   const state = { ejected: false, barrel: 0 };
   const shellsArr = shellsIn.children;
   rig.animate = (st, o) => {
@@ -1722,30 +1741,37 @@ function buildShotgun(L, S) {
       o.rx += track(t, [[0, 0], [0.12, 0.12], [0.25, 0.3], [0.45, 0.18], [0.8, 0.22], [0.87, -0.06], [1, 0]]);
       o.rz += track(t, [[0, 0], [0.15, 0.25], [0.8, 0.28], [0.9, 0], [1, 0]]);
       o.px += track(t, [[0, 0], [0.15, -0.05], [0.82, -0.055], [1, 0]]);
-      o.py += track(t, [[0, 0], [0.15, 0.04], [0.82, 0.045], [1, 0]]);
-      o.pz += track(t, [[0, 0], [0.15, 0.04], [0.82, 0.04], [1, 0]]);
+      o.py += track(t, [[0, 0], [0.15, 0.012], [0.82, 0.015], [1, 0]]);
+      o.pz += track(t, [[0, 0], [0.15, -0.035], [0.82, -0.035], [1, 0]]);
       if (t > 0.2 && !state.ejected) {
         state.ejected = true;
         st.ejectCount = 2;
       }
       const loadedIn = t > 0.66;
       for (const s of shellsArr) s.visible = !state.ejected || loadedIn;
-      // Right hand leaves the grip, fetches two shells and drops them in.
+      // Right hand leaves the grip, fetches two shells from the belt (out of
+      // view), brings them up and drops them into the chambers.
       const away = windowed(t, 0.24, 0.38, 0.72, 0.86);
-      const fetch = windowed(t, 0.3, 0.42, 0.44, 0.52);
-      shellsHand.visible = t > 0.44 && t < 0.66;
+      const fetch = windowed(t, 0.3, 0.42, 0.46, 0.56);
       // Breech position (moves with the barrels).
       _a.set(0, yb - 0.009, -0.058 + 0.104 + 0.004).applyAxisAngle(X_AXIS, hinge.rotation.x).add(hinge.position);
-      shellsHand.position.set(_a.x, _a.y + 0.012 + (1 - smoothstep(0.52, 0.64, t)) * 0.03, _a.z + 0.02 + (1 - smoothstep(0.52, 0.64, t)) * 0.05);
-      shellsHand.rotation.x = hinge.rotation.x + (1 - smoothstep(0.52, 0.64, t)) * 0.5;
-      _b.set(_a.x + 0.035, _a.y + 0.045, _a.z + 0.12);
+      // Wrist low and to the right of the breech, fingertips over the chambers.
+      _b.copy(_a).addScaledVector(loadDir, -0.125);
       const hand = rig.right;
       hand.position.lerpVectors(rig.rightBase.pos, _b, away);
       hand.position.y -= fetch * 0.16;
       hand.position.x += fetch * 0.05;
-      _e.set(0.2, 0.25, -HALF_PI * 0.4, "XYZ");
-      _q.setFromEuler(_e);
-      hand.quaternion.slerpQuaternions(rig.rightBase.quat, _q, away);
+      hand.quaternion.slerpQuaternions(rig.rightBase.quat, loadQuat, away);
+      // Shells ride in the fingertips until they are over the breech, then slide in.
+      const carried = t > 0.42 && t < 0.66;
+      shellsHand.visible = carried;
+      if (carried) {
+        _c.set(0, -0.022, -0.125).applyQuaternion(hand.quaternion).add(hand.position);
+        const seat = smoothstep(0.54, 0.64, t);
+        _d.set(_a.x, _a.y + (1 - seat) * 0.02, _a.z + (1 - seat) * 0.03);
+        shellsHand.position.lerpVectors(_c, _d, smoothstep(0.46, 0.56, t));
+        shellsHand.rotation.x = hinge.rotation.x + (1 - seat) * 0.5;
+      }
     } else {
       hinge.rotation.x = 0;
       state.ejected = false;
@@ -1851,7 +1877,7 @@ function buildCrossbow(L, S) {
 
   rig.muzzle.position.set(0, yBolt, zRiser - 0.03);
   rig.gun.add(rig.muzzle);
-  rig.sights = { rear: [0, 0.0765, -0.016], front: [0, 0.0765, zRiser - 0.012], eye: 0.11 };
+  rig.sights = { rear: [0, 0.0765, -0.016], front: [0, 0.0765, zRiser - 0.012], eye: 0.16 };
   rig.hip = { pos: [0.105, -0.112, -0.2], rot: [0.03, 0.05, -0.04] };
   rig.flashSize = 0;
   rig.kick = { back: 0.025, rot: 0.08, yaw: 0.01 };
@@ -1862,8 +1888,16 @@ function buildCrossbow(L, S) {
   rig.gun.add(right);
   const left = mountHand(buildHand(L, FOREND_POSE, S / 14), true);
   rig.left = left;
-  setBase(rig.leftBase, left, [-0.07, -0.028, -0.23], [0.12, -0.95, Math.PI], "YXZ");
+  setBase(rig.leftBase, left, [-0.066, -0.037, -0.23], [0.12, -0.95, Math.PI], "YXZ");
   rig.gun.add(left);
+
+  // Reload poses for the left hand: palm down, fingers hooked over the string;
+  // then holding the next bolt by its rear third while it slides home.
+  const hookDir = new THREE.Vector3(0.45, 0.42, -0.79).normalize();
+  const hookQuat = handQuat([0.45, 0.42, -0.79], [0.05, -1, -0.4]);
+  const placeDir = new THREE.Vector3(0.35, 0.38, -0.86).normalize();
+  const placeQuat = handQuat([0.35, 0.38, -0.86], [0.1, -1, -0.3]);
+  const reach = 0.11; // wrist → hooked fingertips
 
   const state = { drawn: 1 };
   rig.animate = (st, o) => {
@@ -1873,10 +1907,11 @@ function buildCrossbow(L, S) {
     let boltVis = st.mag > 0;
     let boltSlide = 0;
     if (t >= 0) {
-      o.rx += track(t, [[0, 0], [0.15, -0.32], [0.6, -0.3], [0.75, -0.12], [1, 0]]);
-      o.rz += track(t, [[0, 0], [0.15, 0.2], [0.7, 0.22], [1, 0]]);
-      o.py += track(t, [[0, 0], [0.15, 0.03], [0.7, 0.03], [1, 0]]);
-      o.pz += track(t, [[0, 0], [0.15, 0.05], [0.7, 0.05], [1, 0]]);
+      // Bow tipped down and lowered so the deck faces the eye.
+      o.rx += track(t, [[0, 0], [0.15, -0.26], [0.6, -0.24], [0.75, -0.1], [1, 0]]);
+      o.rz += track(t, [[0, 0], [0.15, 0.18], [0.7, 0.2], [1, 0]]);
+      o.py += track(t, [[0, 0], [0.15, -0.035], [0.7, -0.035], [1, 0]]);
+      o.pz += track(t, [[0, 0], [0.15, -0.02], [0.7, -0.02], [1, 0]]);
       // Left hand hooks the string and draws it back to the latch.
       const draw = smoothstep(0.22, 0.52, t);
       drawn = Math.max(drawn, draw);
@@ -1884,15 +1919,14 @@ function buildCrossbow(L, S) {
       const toBolt = windowed(t, 0.58, 0.66, 0.8, 0.9);
       boltVis = boltVis || t > 0.62;
       boltSlide = (1 - smoothstep(0.66, 0.8, t)) * 0.09;
-      _a.set(-0.02, yBolt + 0.03, lerp(-0.47, zLatch + 0.03, draw));
-      _b.set(-0.035, yBolt + 0.03, zLatch - 0.1 + boltSlide * 0.5);
+      _a.set(-hookDir.x * reach, yBolt + 0.03 - hookDir.y * reach, lerp(-0.47, zLatch, draw) - hookDir.z * reach);
+      _b.set(-placeDir.x * 0.1, yBolt + 0.026 - placeDir.y * 0.1, zLatch - 0.14 + boltSlide - placeDir.z * 0.1);
       const hand = rig.left;
       hand.position.copy(rig.leftBase.pos);
       hand.position.lerp(_a, toString);
       hand.position.lerp(_b, toBolt);
-      _e.set(-0.3, -1.4, Math.PI * 0.95, "YXZ");
-      _q.setFromEuler(_e);
-      hand.quaternion.slerpQuaternions(rig.leftBase.quat, _q, Math.max(toString, toBolt));
+      hand.quaternion.slerpQuaternions(rig.leftBase.quat, hookQuat, toString);
+      if (toBolt > 0) hand.quaternion.slerp(placeQuat, toBolt);
     } else {
       rig.left.position.copy(rig.leftBase.pos);
       rig.left.quaternion.copy(rig.leftBase.quat);
@@ -2025,24 +2059,32 @@ function buildRifle(L, S) {
   rig.gun.add(right);
   const left = mountHand(buildHand(L, FOREND_POSE, S / 14), true);
   rig.left = left;
-  setBase(rig.leftBase, left, [-0.072, -0.03, -0.25], [0.1, -0.95, Math.PI], "YXZ");
+  setBase(rig.leftBase, left, [-0.068, -0.041, -0.25], [0.1, -0.95, Math.PI], "YXZ");
   rig.gun.add(left);
 
-  boltAnimation(rig, bolt, { lift: 1.05, travel: 0.088, knob: [0.044, -0.028, 0.104] }, (st, o) => {
-    // Reload: bolt open, five rounds thumbed in from the top, bolt closed.
+  // Loading pose for the right hand (the left keeps the rifle steady on the
+  // forend): fingers over the open port from the right, forearm trailing down.
+  const loadDir = new THREE.Vector3(-0.45, 0.15, -0.88).normalize();
+  const load = {
+    quat: handQuat([-0.45, 0.15, -0.88], [-0.5, -1, -0.2]),
+    pos: new THREE.Vector3(0.012, yb + 0.012, 0.03).addScaledVector(loadDir, -0.13),
+    w: 0,
+  };
+
+  boltAnimation(rig, bolt, { lift: 1.05, travel: 0.088, knob: [0.044, -0.028, 0.104], load }, (st, o) => {
+    // Reload: bolt open, five rounds thumbed in from the top, bolt closed. The
+    // rifle is canted left so the open action faces the eye.
     const t = st.reload;
-    o.rx += track(t, [[0, 0], [0.12, 0.05], [0.25, 0.14], [0.75, 0.14], [0.9, 0.04], [1, 0]]);
-    o.rz += track(t, [[0, 0], [0.15, 0.35], [0.8, 0.35], [1, 0]]);
-    o.px += track(t, [[0, 0], [0.15, -0.045], [0.8, -0.045], [1, 0]]);
-    o.py += track(t, [[0, 0], [0.15, 0.035], [0.8, 0.035], [1, 0]]);
+    o.rx += track(t, [[0, 0], [0.12, 0.04], [0.25, 0.1], [0.75, 0.1], [0.9, 0.03], [1, 0]]);
+    o.rz += track(t, [[0, 0], [0.15, 0.42], [0.8, 0.42], [1, 0]]);
+    o.px += track(t, [[0, 0], [0.15, -0.03], [0.8, -0.03], [1, 0]]);
+    o.py += track(t, [[0, 0], [0.15, 0.01], [0.8, 0.01], [1, 0]]);
+    o.pz += track(t, [[0, 0], [0.15, -0.02], [0.8, -0.02], [1, 0]]);
     const boltT = track(t, [[0, 0], [0.06, 0], [0.16, 0.5], [0.24, 1], [0.78, 1], [0.86, 0.5], [0.94, 0]]);
-    const push = t > 0.3 && t < 0.72 ? Math.max(0, Math.sin(((t - 0.3) / 0.42) * Math.PI * 5)) : 0;
-    const there = windowed(t, 0.26, 0.34, 0.68, 0.76);
-    _a.set(-0.012, yb + 0.03 - push * 0.012, 0.03);
-    rig.left.position.copy(rig.leftBase.pos).lerp(_a, there);
-    _e.set(0.6, -1.2, Math.PI * 0.75, "YXZ");
-    _q.setFromEuler(_e);
-    rig.left.quaternion.slerpQuaternions(rig.leftBase.quat, _q, there);
+    // Five presses, one per round.
+    const push = t > 0.32 && t < 0.7 ? Math.max(0, Math.sin(((t - 0.32) / 0.38) * Math.PI * 5)) : 0;
+    load.w = windowed(t, 0.24, 0.32, 0.7, 0.78);
+    load.pos.set(0.012, yb + 0.012 - push * 0.009, 0.03).addScaledVector(loadDir, -0.13 + push * 0.006);
     return boltT;
   });
   return rig;
@@ -2085,7 +2127,8 @@ function boltAnimation(rig, bolt, o, reloadFn) {
       st.ejectCount = st.cycle >= 0 ? 1 : 0;
     }
     if (travel < 0.2 && st.cycle < 0 && st.reload < 0) state.ejected = false;
-    // Right hand rides the bolt knob.
+    // Right hand rides the bolt knob (and, if the reload has a loading pose,
+    // leaves it to feed rounds while the bolt is open).
     const hand = rig.right;
     if (handW > 0) {
       _a.copy(knob).applyAxisAngle(Z_AXIS, bolt.rotation.z).add(bolt.position);
@@ -2094,6 +2137,11 @@ function boltAnimation(rig, bolt, o, reloadFn) {
       _e.set(-0.2, 0.55, -1.2, "XYZ");
       _q.setFromEuler(_e);
       hand.quaternion.slerpQuaternions(rig.rightBase.quat, _q, handW);
+      const lw = st.reload >= 0 && o.load ? o.load.w : 0;
+      if (lw > 0) {
+        hand.position.lerp(o.load.pos, lw);
+        hand.quaternion.slerp(o.load.quat, lw);
+      }
     } else {
       hand.position.copy(rig.rightBase.pos);
       hand.quaternion.copy(rig.rightBase.quat);

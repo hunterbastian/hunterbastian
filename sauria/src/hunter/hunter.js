@@ -81,7 +81,8 @@ const WADE_FULL = 1.2; // depth at which wading is at its slowest
 const SLOW_GRADE = 0.15; // uphill starts to slow you here …
 const BLOCK_GRADE = 0.9; // … and above ~42° you can't climb (you slide along the contour)
 const STICK_GRADE = 1.6; // steeper drops than this per metre moved become a fall
-const SLIDE_SLOPE = 0.34; // terrain.slopeAt above this (≈49°) can't be stood on
+const SLIDE_SLOPE = 0.34; // terrain.slopeAt above this (≈49°) can't be stood on …
+const SLIDE_ACCEL = 7; // … and pulls you downhill at this many m/s²
 const FALL_SAFE = 6; // m of drop before it hurts
 const FALL_BREAK = 9.5; // … and before it breaks a leg
 const LEG_HEAL_TIME = 45;
@@ -134,7 +135,8 @@ const article = (name) => (/^[aeiou]/i.test(name) ? "an" : "a");
 const _near = [];
 const _cols = [];
 const _eye = new THREE.Vector3();
-const _fwd = new THREE.Vector3();
+const _grad = new THREE.Vector3();
+const _right = new THREE.Vector3();
 
 /* --- Hunter actor ------------------------------------------------------------ */
 
@@ -298,7 +300,7 @@ export class Hunter {
     if (!this.alive) {
       // Knees give out, then you hit the ground (ease-in like a fall).
       const k = smoothstep(0, 1, this._deadT / 0.95);
-      const base = this.swimming ? sea - 0.05 : this._feetY;
+      const base = this.swimming ? sea + 0.06 : this._feetY;
       const from = this.swimming ? sea + SWIM_EYE_ABOVE : this._feetY + lerp(EYE_STAND, EYE_CROUCH, this.crouchAmount);
       return lerp(from, base + (this.swimming ? 0 : EYE_DEAD), k * k);
     }
@@ -330,7 +332,6 @@ export class Hunter {
     dt = Math.min(dt, 0.1);
     this.age += dt;
     this.hurt = Math.max(0, this.hurt - dt * 2.2);
-    this.biteCooldown = 0;
     this._detectTeleport();
 
     if (!this.alive) {
@@ -451,8 +452,8 @@ export class Hunter {
     const t = this.world.terrain;
     if (t && !this.swimming && !this.airborne && typeof t.slopeAt === "function" && t.slopeAt(p.x, p.z) > SLIDE_SLOPE) {
       this._gradient(p.x, p.z);
-      v.x -= _grad.x * 2.4 * dt * 3;
-      v.z -= _grad.z * 2.4 * dt * 3;
+      v.x -= _grad.x * SLIDE_ACCEL * dt;
+      v.z -= _grad.z * SLIDE_ACCEL * dt;
     }
 
     let nx = p.x + v.x * dt;
@@ -489,7 +490,7 @@ export class Hunter {
     this._bounds();
 
     this.speed = Math.hypot(v.x, v.z);
-    this._vertical(dt, ground);
+    this._vertical(dt);
 
     // Gait for audio / AI / HUD.
     if (this.swimming) this.gait = "swim";
@@ -604,7 +605,7 @@ export class Hunter {
   }
 
   // Ground contact, falls (with damage), floating; then the eye's smoothed feet.
-  _vertical(dt, prevGround) {
+  _vertical(dt) {
     const p = this.position;
     const sea = this._sea();
     const g = this._ground(p.x, p.z);
@@ -630,12 +631,11 @@ export class Hunter {
     } else {
       const moved = Math.hypot(p.x - this._lastX, p.z - this._lastZ);
       const drop = p.y - g;
-      if (drop > 0.3 && drop > moved * STICK_GRADE + 0.04) {
+      if (drop > moved * STICK_GRADE + 0.03) {
         // Walked off an edge: keep the vertical speed we had while following the ground.
         this.airborne = true;
         this._fallStartY = p.y;
-        this._vy = Math.min(0, (g - prevGround) / dt, this._feetVel);
-        this._vy = Math.max(this._vy, -4);
+        this._vy = clamp(this._feetVel, -4, 0);
         p.y += this._vy * dt;
       } else {
         p.y = g;
@@ -653,12 +653,13 @@ export class Hunter {
     } else if (this.swimming) {
       this._feetVel = damp(this._feetVel, 0, 6, dt);
       this._feetY = damp(this._feetY, p.y, 6, dt);
-      this._prevGround = p.y;
+      this._prevGround = NaN; // re-seeded from the ground when we wade out
     } else {
       const r = 0.32;
       const avg =
         g * 0.4 +
         (this._ground(p.x + r, p.z) + this._ground(p.x - r, p.z) + this._ground(p.x, p.z + r) + this._ground(p.x, p.z - r)) * 0.15;
+      if (!Number.isFinite(this._prevGround)) this._prevGround = avg;
       const tv = clamp((avg - this._prevGround) / dt, -12, 12);
       this._prevGround = avg;
       this._feetVel = damp(this._feetVel, tv, 11, dt);
@@ -671,6 +672,7 @@ export class Hunter {
   _land(impact, drop, water) {
     this.airborne = false;
     this._vy = 0;
+    this._feetVel = 0; // the camera dip is the controller's spring, not the feet filter
     this.landSpeed = Math.max(0, impact);
     this.landCount++;
     this._noiseSpike = Math.max(this._noiseSpike, clamp(impact / 8, 0.25, 1) * (water ? 1.2 : 1));
@@ -786,11 +788,20 @@ export class Hunter {
     this.speed = Math.hypot(v.x, v.z);
     const g = this._ground(p.x, p.z);
     const sea = this._sea();
-    if (this.swimming) p.y = damp(p.y, Math.max(g, sea - 0.9), 1.5, dt);
-    else {
-      p.y = this.airborne ? Math.max(g, p.y + (this._vy -= GRAVITY * dt) * dt) : g;
-      if (p.y <= g) this.airborne = false;
-      this._feetY = damp(this._feetY, p.y, 10, dt);
+    if (this.swimming) {
+      p.y = damp(p.y, Math.max(g, sea - 0.9), 1.5, dt);
+    } else if (this.airborne) {
+      this._vy -= GRAVITY * dt;
+      p.y += this._vy * dt;
+      if (p.y <= g) {
+        p.y = g;
+        this.airborne = false;
+        this._vy = 0;
+      }
+      this._feetY = p.y;
+    } else {
+      p.y = g;
+      this._feetY = damp(this._feetY, g, 10, dt);
     }
     this.noise = damp(this.noise, 0, 4, dt);
   }
@@ -889,8 +900,6 @@ export class Hunter {
   }
 }
 
-const _grad = new THREE.Vector3();
-
 /* --- First-person controller --------------------------------------------- */
 
 const LOOK_SENSITIVITY = 0.0024; // rad per pixel at sensitivity 1
@@ -898,8 +907,6 @@ const PITCH_LIMIT = 1.45;
 const BINOCULAR_ZOOM = 0.2; // fov multiplier (≈5×)
 const SPRINT_FOV_KICK = 0.075;
 const MOVE_EPS = 0.08;
-
-const _right = new THREE.Vector3();
 
 export class HunterController {
   /**
@@ -954,7 +961,6 @@ export class HunterController {
     this._fireBlocked = false;
     this._deadRoll = 0;
     this._deadSide = 1;
-    this._swimBob = 0;
   }
 
   /**
@@ -963,12 +969,14 @@ export class HunterController {
    * @param {Hunter|null} hunter
    */
   possess(hunter) {
-    this.hunter = hunter || null;
     const cam = this.camera;
-    if (cam && Number.isFinite(cam.fov) && !this.hunter) {
+    // Hand back an unzoomed camera first so a re-possess never captures a scoped fov.
+    if (this.hunter && cam && Number.isFinite(this.baseFov)) {
       cam.fov = this.baseFov;
       cam.updateProjectionMatrix();
-    } else if (cam && Number.isFinite(cam.fov)) this.baseFov = cam.fov;
+    }
+    this.hunter = hunter || null;
+    if (this.hunter && cam && Number.isFinite(cam.fov)) this.baseFov = cam.fov;
     this.binoculars = false;
     this.zoom = 1;
     this.crouchToggled = false;
@@ -1036,20 +1044,26 @@ export class HunterController {
     if (h.heading !== this._writtenYaw) this.yaw = Number.isFinite(h.heading) ? h.heading : this.yaw;
     if (h.pitch !== this._writtenPitch) this.pitch = Number.isFinite(h.pitch) ? h.pitch : this.pitch;
 
-    // Drive the body ourselves if no ecosystem manages it (dropoff edge cases, tools).
-    const eco = this.world.ecosystem;
-    const managed = !!eco && Array.isArray(eco.creatures) && eco.creatures.includes(h);
-    if (!managed) h.update(dt);
-
     let fire = false;
     let aim = false;
     let reload = false;
     let switchTo = null;
+
+    const eco = this.world.ecosystem;
+    const managed = !!eco && Array.isArray(eco.creatures) && eco.creatures.includes(h);
+    let sprintIntent = false;
+    if (h.alive && input) {
+      this._look(input);
+      sprintIntent = this._drive(h, input);
+      h.heading = this.yaw;
+    }
+    // Drive the body ourselves when no ecosystem manages it (tools, edge cases),
+    // right after writing the intent so there's no frame of input latency.
+    if (!managed) h.update(dt);
     const lowered = !h.alive || h.swimming;
 
     if (h.alive && input) {
-      this._look(input);
-      const sprinting = this._drive(h, input);
+      const sprinting = sprintIntent || h.gait === "sprint";
 
       // Binoculars: B toggles; sprinting, swimming or reaching for the gun puts them away.
       if (input.pressed("binoculars") && !h.swimming) this.binoculars = !this.binoculars;
@@ -1059,9 +1073,11 @@ export class HunterController {
       reload = input.pressed("reload");
       if (input.pressed("weapon1")) switchTo = this._loadoutId(0);
       else if (input.pressed("weapon2")) switchTo = this._loadoutId(1);
+      // A trigger held while glassing (or the click that lowers the glasses) must be
+      // released before the gun will fire.
+      if (this.binoculars && fireHeld) this._fireBlocked = true;
       if (this.binoculars && (sprinting || h.swimming || firePressed || input.pressed("aim") || reload || switchTo !== null)) {
         this.binoculars = false;
-        if (firePressed) this._fireBlocked = true; // that click lowered the glasses; don't also shoot
       }
       if (!fireHeld) this._fireBlocked = false;
 
@@ -1259,7 +1275,7 @@ export class HunterController {
     if ((h.landCount || 0) !== this._landCount) {
       this._landCount = h.landCount || 0;
       const imp = h.landSpeed || 0;
-      this._dipVel -= clamp(imp * 0.13, 0.06, 1.7);
+      this._dipVel -= clamp(imp * 0.2, 0.1, 3.5);
       this._flinchPVel -= clamp(imp * 0.03, 0.01, 0.35);
       if (imp > 6) this.shake(clamp((imp - 6) * 0.06, 0, 0.5));
     }
@@ -1354,6 +1370,3 @@ export const HUNTER_TUNING = {
   swimEnter: SWIM_ENTER,
   fallSafe: FALL_SAFE,
 };
-
-// Keep a reference so bundlers / linters don't flag the shared scratch as unused.
-void _fwd;

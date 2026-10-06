@@ -57,9 +57,13 @@ export class Wind {
     this._veerPB = rng() * TAU;
 
     // Occasional frontal shifts: every few minutes the wind swings to a new
-    // quarter and eases there over ~half a minute.
+    // quarter, easing in and out over about a minute (S-curve, so the
+    // change builds noticeably rather than snapping).
     this._shift = 0;
+    this._shiftFrom = 0;
     this._shiftTarget = 0;
+    this._shiftAge = 0;
+    this._shiftDur = 1;
     this._shiftTimer = rand(rng, 120, 300);
 
     // Strength: a slowly breathing mean (minutes) …
@@ -79,6 +83,11 @@ export class Wind {
     this._gustAttack = 1.5;
     this._gustDecay = 4;
     this._gustYaw = 0;
+    // What is left of the previous gust when a new one starts; it keeps decaying
+    // so overlapping gusts never make strength or direction jump.
+    this._gustResid = 0;
+    this._gustResidYaw = 0;
+    this._gustYawOff = 0;
     /** Current gust contribution 0..~0.4 (0 between gusts). */
     this.gust = 0;
 
@@ -99,26 +108,36 @@ export class Wind {
       this._shiftTimer = rand(rng, 150, 360);
       const swing = rand(rng, 0.45, 1.15) * (rng() < 0.5 ? -1 : 1);
       // Keep the accumulated shift bounded so the prevailing wind stays recognisable.
-      this._shiftTarget = clamp(this._shiftTarget + swing, -1.6, 1.6);
+      this._shiftFrom = this._shift;
+      this._shiftTarget = clamp(this._shift + swing, -1.6, 1.6);
+      this._shiftAge = 0;
+      this._shiftDur = rand(rng, 40, 70);
     }
-    this._shift = damp(this._shift, this._shiftTarget, 0.075, dt);
+    this._shiftAge += dt;
+    this._shift = lerp(this._shiftFrom, this._shiftTarget, smoothstep(0, this._shiftDur, this._shiftAge));
 
     /* Gusts */
     this._gustTimer -= dt;
     if (this._gustTimer <= 0) {
       this._gustTimer = rand(rng, 6, 20);
+      this._gustResid = this.gust;
+      this._gustResidYaw = this._gustYawOff;
       this._gustAge = 0;
       this._gustAmp = rand(rng, 0.12, 0.38);
-      this._gustAttack = rand(rng, 0.9, 2.0);
+      this._gustAttack = rand(rng, 1.2, 2.2);
       this._gustDecay = rand(rng, 2.5, 5.5);
-      this._gustYaw = rand(rng, -0.18, 0.18); // gusts come in a little off-axis
+      this._gustYaw = rand(rng, -0.14, 0.14); // gusts come in a little off-axis
     }
     this._gustAge += dt;
     const ga = this._gustAge;
     const envelope = ga < this._gustAttack
       ? smoothstep(0, this._gustAttack, ga)
       : Math.exp(-(ga - this._gustAttack) / this._gustDecay);
-    this.gust = this._gustAmp * envelope;
+    const residK = Math.exp(-dt / 3);
+    this._gustResid *= residK;
+    this._gustResidYaw *= residK;
+    this.gust = this._gustResid + this._gustAmp * envelope;
+    this._gustYawOff = this._gustResidYaw + this._gustYaw * envelope;
 
     const flutter =
       0.05 * Math.sin(t * 2.1 + this._flutterP1) +
@@ -140,7 +159,7 @@ export class Wind {
       this._veerAmpA * Math.sin(t * this._veerWA + this._veerPA) +
       this._veerAmpB * Math.sin(t * this._veerWB + this._veerPB) +
       this._shift +
-      this._gustYaw * envelope +
+      this._gustYawOff +
       jitter;
     this.yaw = wrapAngle(yaw);
     this.vector.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));

@@ -56,6 +56,7 @@ const RADAR_FIRST = 1.5; // s after touchdown for the first ping
 const RADAR_RANGE = 600; // m
 const LURE_COOLDOWN = 20; // s
 const EXTRACT_RADIUS = 8; // m, horizontal, from the hovering chopper
+const BOARD_DELAY = 1.2; // s the chopper hovers before a hunter already beneath it climbs aboard
 const INBOUND_ETA = 12; // s: report "inbound" from here (or when on final)
 const LOW_HOVER_CLEAR = 11; // m of tree-free radius a low hover needs (rotor + canopy)
 const CANOPY_HOVER = 34; // m: over trees the chopper hovers high and lowers the hoist
@@ -621,6 +622,7 @@ export class HuntSession {
     if (!this.extraction) return;
     this.extraction.state = "landed";
     this.extraction.eta = 0;
+    this.extraction.landedAt = this.elapsed;
     this._emit("extraction", { state: "landed", eta: 0 });
   }
 
@@ -634,6 +636,7 @@ export class HuntSession {
       this._emit("extraction", { state: "inbound", eta: ex.eta });
     }
     if (ex.state !== "landed" || this.hunterDead || !this.hunter) return;
+    if (this.elapsed - (ex.landedAt ?? 0) < BOARD_DELAY) return;
     const p = this.hunter.position;
     const cx = h ? h.position.x : ex.x;
     const cz = h ? h.position.z : ex.z;

@@ -105,6 +105,8 @@ const HOVER_AGL = 2.6; // skids this far above the ground in a low hover
 const DEPART_AGL = 16;
 const APPROACH_RANGE = 420; // final-leg distance at which we report "approach"
 const LOOK_STEPS = 6;
+const REVERSE_ACCEL = 3.6; // m/s²: effective along-track deceleration in a braking U-turn
+const ETA_LOOKAHEAD = 150; // m: the terrain look-ahead makes it climb this far before a rise
 const ROTOR_OMEGA = 34; // rad/s (≈ 324 rpm)
 const TAIL_OMEGA = 57; // visual rate — the real ~170 rad/s strobes into a wagon wheel
 const DROP_HOLD = 1.8; // s settled before the hunter steps out
@@ -2415,10 +2417,46 @@ export class Helicopter {
     // Time lost getting up to cruise from the speed we already have toward the next
     // waypoint (a re-tasked chopper may be hovering, or pointing the other way).
     const v = this.velocity;
-    const v0 = dn > 1 ? clamp((v.x * (next.x - p.x) + v.z * (next.z - p.z)) / dn, 0, CRUISE_SPEED) : CRUISE_SPEED;
-    const spinUp = rem > brakeDist ? ((CRUISE_SPEED - v0) ** 2) / (2 * LONG_ACCEL * 0.85 * CRUISE_SPEED) : 0;
-    const drop = Math.max(0, this.altitude - tg.hover);
-    return travel + spinUp + Math.max(0, drop - rem * 0.2) / DESCENT_RATE + 1.2;
+    const va = dn > 1 ? (v.x * (next.x - p.x) + v.z * (next.z - p.z)) / dn : CRUISE_SPEED;
+    const v0 = clamp(va, 0, CRUISE_SPEED);
+    let spinUp = rem > brakeDist ? ((CRUISE_SPEED - v0) ** 2) / (2 * LONG_ACCEL * 0.85 * CRUISE_SPEED) : 0;
+    if (va < 0) {
+      // Called back while leaving: bleed off the outbound speed (braking and banking
+      // round together), then fly back the overshoot.
+      spinUp += -va / REVERSE_ACCEL + (va * va) / (2 * REVERSE_ACCEL * CRUISE_SPEED);
+    }
+    // Rising ground ahead: the chopper slows down when it can't out-climb the terrain,
+    // so sample the rest of the route and add the worst shortfall.
+    let climbDelay = 0;
+    if (this.terrain && rem > 1) {
+      const stepLen = Math.max(30, rem / 12);
+      let ax = p.x;
+      let az = p.z;
+      let travelled = 0;
+      let carry = stepLen;
+      for (let i = this._routeIndex; i <= this._route.length; i++) {
+        const w = i < this._route.length ? this._route[i] : tg;
+        const sx = w.x - ax;
+        const sz = w.z - az;
+        const L = Math.hypot(sx, sz);
+        while (carry <= L) {
+          const f = carry / L;
+          const need = this._ground(ax + sx * f, az + sz * f) + MIN_TRANSIT_AGL - p.y;
+          if (need > 0) {
+            const lead = Math.max(0, travelled + carry - ETA_LOOKAHEAD) / CRUISE_SPEED;
+            climbDelay = Math.max(climbDelay, need / (CLIMB_RATE * 0.75) - lead);
+          }
+          carry += stepLen;
+        }
+        carry -= L;
+        travelled += L;
+        ax = w.x;
+        az = w.z;
+      }
+    }
+    // Height to lose at the end, measured against the hover point's own ground.
+    const drop = Math.max(0, p.y - (this._ground(tg.x, tg.z) + tg.hover));
+    return travel + spinUp + climbDelay + Math.max(0, drop - rem * 0.2) / DESCENT_RATE + 1.2;
   }
 
   /* --- Internals: attitude & effects ---------------------------------------- */
