@@ -12,7 +12,7 @@
 // geometry upload and one draw call per animal (two for the feathered raptor).
 
 import * as THREE from "three";
-import { makeRng, rand, hash } from "../core/rng.js";
+import { makeRng, hash } from "../core/rng.js";
 import { clamp, lerp, damp, smoothstep, TAU } from "../core/math.js";
 import { getSpecies } from "./species.js";
 
@@ -192,9 +192,9 @@ function getFeatherTexture() {
         if (t < sh.fluff) alpha *= 0.55 + 0.45 * (t / sh.fluff);
         // Luminance: barbs angled toward the tip, dark shaft, optional bars.
         const barb = 0.88 + 0.12 * Math.sin((t * 46 - as * 14) * 1.0);
-        const shaft = as < 0.05 ? 0.62 : 1;
+        const shaft = as < 0.04 ? 0.82 : 1;
         const bar = sh.bar > 0 ? 1 - sh.bar * smoothstep(0.55, 0.75, Math.sin(t * 22) * 0.5 + 0.5) : 1;
-        const edgeDark = 1 - 0.18 * smoothstep(0.5 * w, w, as);
+        const edgeDark = 1 - 0.1 * smoothstep(0.5 * w, w, as);
         const lum = clamp(0.92 * barb * shaft * bar * edgeDark, 0, 1);
         const o = ((oy + y) * N + ox + x) * 4;
         const l = Math.round(lum * 255);
@@ -339,7 +339,7 @@ skin = mix( skin, uAccent, vSkin.z );
 skin *= 1.0 + ( coarseT.b - 0.5 ) * uSpots.z;
 // Scale colour fades out before individual scales shrink under ~2 px (no speckle at range or when pixelated).
 float sDetailFade = 1.0 - smoothstep( 0.008, 0.035, length( fwidth( fp ) ) );
-skin *= mix( 1.0, 0.95 + 0.1 * fineT.g, vSkin.w * sDetailFade );
+skin *= mix( 1.0, 0.96 + 0.08 * fineT.g, vSkin.w * sDetailFade );
 skin *= 1.0 - ( 1.0 - fineT.r ) * uScales.w * vSkin.w * ( 0.3 + 0.7 * sDetailFade );
 vec3 albedo = mix( vColor, skin, vSkin.x );
 albedo *= 1.0 - 0.3 * uWet;
@@ -1241,17 +1241,31 @@ function extendBlueprint(bp) {
   bp.rest = { pitch: restPitch, hipsY: Math.max(0.05, -low + H * 0.015) };
   bp.dead = { hipsY: widest * 0.94 };
 
-  /* Longest stance (half-length, model units) every leg can reach. */
-  let half = Infinity;
-  for (const leg of bp.legs) {
+  /* Longest stance (half-length, model units) every leg can reach, walking
+     upright and running in the lowered, bent-leg sprint posture. */
+  const RUN_DROP = 0.08;
+  bp.runDrop = RUN_DROP;
+  const reachHalf = (leg, drop, ext) => {
     const [l1, l2, l3] = leg.lengths;
     const ankleY = leg.ballH + l3 * Math.cos(leg.phi);
-    const hy = (leg.fore ? leg.hip.y : H) * 0.97 - ankleY;
-    const reach = Math.sqrt(Math.max(0, sq((l1 + l2) * 0.96) - hy * hy));
-    const dz0 = Math.abs(leg.ankle.z - leg.hip.z);
-    half = Math.min(half, Math.max(0.1 * (l1 + l2), reach - dz0));
+    const hy = (leg.fore ? leg.hip.y : H) - H * drop - ankleY;
+    const reach = Math.sqrt(Math.max(0, sq((l1 + l2) * ext) - hy * hy));
+    return Math.max(0.1 * (l1 + l2), reach - Math.abs(leg.ankle.z - leg.hip.z));
+  };
+  const st = { walk: Infinity, run: Infinity, walkHind: Infinity, runHind: Infinity };
+  for (const leg of bp.legs) {
+    const w = reachHalf(leg, 0.03, 0.96);
+    const r = reachHalf(leg, RUN_DROP + 0.02, 0.985);
+    leg.reachHalf = w;
+    st.walk = Math.min(st.walk, w);
+    st.run = Math.min(st.run, r);
+    if (!leg.fore) {
+      st.walkHind = Math.min(st.walkHind, w);
+      st.runHind = Math.min(st.runHind, r);
+    }
   }
-  bp.stanceHalf = half * 0.92;
+  for (const k in st) st[k] *= 0.92;
+  bp.stance = st;
 
   /* Static bind bases for the IK aim (see aimRotation). */
   const X = new V3(1, 0, 0);
@@ -2350,9 +2364,9 @@ function buildFeathers(bp, B) {
       const fanF = smoothstep(0.55, 0.95, tailF) * (1 - smoothstep(0.2, 0.45, Math.abs(at - Math.PI * 0.5)));
       if (fanF > 0) D.x += Math.sign(P.x || 1) * fanF * 0.75;
       D.normalize();
-      let len = neck ? 0.21 : 0.3;
-      let lift = neck ? 0.5 : 0.36;
-      let cell = rng() < 0.5 ? 0 : 2;
+      let len = neck ? 0.17 : 0.3;
+      let lift = neck ? 0.55 : 0.36;
+      let cell = neck ? (rng() < 0.6 ? 2 : 1) : rng() < 0.5 ? 0 : 2;
       if (tailF > 0) {
         len = lerp(0.3, 0.34, tailF) * (1 + fanF * 1.5);
         lift = lerp(0.3, 0.16, tailF);
@@ -2449,7 +2463,6 @@ const LEG_STRIDE = 15; // floats per leg in a pose: ground ball (3), meta dir (3
 const DEFAULT_ANIM = Object.freeze({ speed: 0, crouch: 0, swim: 0, turn: 0, action: null, actionT: 0, lookYaw: 0, hurt: 0 });
 
 const _e = new THREE.Euler(0, 0, 0, "YXZ");
-const _qa = new THREE.Quaternion();
 const _va = new V3();
 const _vb = new V3();
 const _vc = new V3();
@@ -2570,7 +2583,7 @@ export class DinoModel {
     u.uSpots.value.set(pat.spots[0], pat.spots[1] + (rng() - 0.5) * 0.06, pat.mottle, pat.dorsal);
     u.uStripe.value.set(pat.stripe[0], pat.stripe[1], pat.stripe[2], 0);
     const tile = sp.body.scaleTile || 0.3;
-    u.uScales.value.set(1 / tile, 1 / (tile * 6), 2.2, 0.38);
+    u.uScales.value.set(1 / tile, 1 / (tile * 6), 2.2, 0.28);
     u.uSeed.value.set(rng() * 40, rng() * 40, rng() * 40);
     this._uniforms = u;
     this._mat = createSkinMaterial(u, false);
@@ -2676,11 +2689,14 @@ export class DinoModel {
   }
 
   /**
-   * [hunter] World-space spheres approximating the body in its current pose.
-   * Pushes pooled objects (reused by this model on the next call) into `out`.
+   * [hunter] World-space spheres approximating the body in its current pose
+   * (head ×2, neck, body, tail ×3, legs). `out` is cleared and refilled with
+   * pooled objects owned by this model (valid until its next call), so a
+   * caller can keep one array per creature without it growing.
    * @returns {{x:number,y:number,z:number,r:number,part:string}[]}
    */
   getHitSpheres(out = []) {
+    out.length = 0;
     this.object.updateWorldMatrix(true, false);
     const M = this.object.matrixWorld;
     const sc = M.getMaxScaleOnAxis();
@@ -2827,9 +2843,11 @@ export class DinoModel {
     const v = this._speed;
     const rear = bp.body.bipedalSprint ? smoothstep(1.4, 3.0, fr) * amp : 0;
     this._rear = rear;
-    const duty = lerp(0.62, quad && rear < 0.5 ? 0.5 : 0.36, runRaw);
+    const duty = lerp(0.62, quad && rear < 0.5 ? 0.5 : 0.3, runRaw);
     // Stride from Alexander's dynamic-similarity rule, capped by what the legs can reach.
-    const lamMax = Math.min(4.2 * legW, (2 * bp.stanceHalf * s) / duty);
+    const st = bp.stance;
+    const half = lerp(lerp(st.walk, st.run, runRaw), lerp(st.walkHind, st.runHind, runRaw), rear);
+    const lamMax = Math.min(4.2 * legW, (2 * half * s) / duty);
     const lam = clamp(2.3 * legW * Math.pow(Math.max(fr, 0.01), 0.3), Math.min(0.7 * legW, lamMax), lamMax);
     this._phase = (this._phase + (v * dt) / lam) % 1;
     const ph = this._phase;
@@ -2846,7 +2864,7 @@ export class DinoModel {
 
     /* Body: vaulting bob at a walk, dipping bob at a run, side sway over the stance foot. */
     const bob = H * (quad ? 0.6 : 1) * lerp(0.016, 0.04, runRaw) * amp;
-    P[1] += bob * (1 - 2 * runRaw) * Math.cos(TAU * 2 * (ph - mid));
+    P[1] += bob * (1 - 2 * runRaw) * Math.cos(TAU * 2 * (ph - mid)) - H * bp.runDrop * runRaw * amp * (quad && rear < 0.5 ? 0.5 : 1);
     if (!quad || rear > 0.5) P[0] += H * 0.018 * (1 - 0.6 * runRaw) * amp * Math.cos(TAU * (ph - mid));
     const lean = quad ? 0.02 * runRaw * amp : (0.03 + 0.15 * runRaw) * amp;
     P[iH] += lean - rear * 0.3;

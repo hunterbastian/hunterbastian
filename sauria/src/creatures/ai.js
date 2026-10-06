@@ -224,6 +224,7 @@ export class Brain {
     this._small = num(sp.mass, 500) < 150;
     this._aggr = clamp(num(sp.aggression, 0.3), 0, 1);
     this._walkSpeed = num(sp.speed && sp.speed.walk, 1.5);
+    this._trotSpeed = num(sp.speed && sp.speed.trot, 4);
 
     // Stagger the ~4 Hz thinking so a crowd doesn't all think on one frame.
     const id = Number(creature.id) || Math.floor(this.rng() * 1000);
@@ -253,7 +254,6 @@ export class Brain {
     this._preyZ = 0;
     this._preyD = 1e9;
     this._rival = null;
-    this._rivalD = 1e9;
     this._herdN = 0;
     this._herdCX = 0;
     this._herdCZ = 0;
@@ -264,6 +264,7 @@ export class Brain {
     this._mateFleeZ = 0;
     this._leaderD = 0;
     this._herdR = 10;
+    this._herdFood = 100;
 
     // Memory of events.
     this._attacker = null;
@@ -309,7 +310,6 @@ export class Brain {
     this._aidUntil = -1e9;
 
     // Routine.
-    this._activity = "idle";
     this._activityUntil = 0;
     this._arrived = true;
     this._gatherT = 0;
@@ -468,6 +468,7 @@ export class Brain {
     let sepX = 0;
     let sepZ = 0;
     let mateFlee = 0;
+    let hungriest = num(c.food, 100);
     let mfx = 0;
     let mfz = 0;
     let threat = null;
@@ -504,6 +505,7 @@ export class Brain {
           herdN++;
           hcx += ox;
           hcz += oz;
+          hungriest = Math.min(hungriest, num(o.food, 100));
           const ob = o.brain;
           if (ob && ob.state === "flee" && d < 60 && o.velocity) {
             mateFlee++;
@@ -571,6 +573,7 @@ export class Brain {
     }
     this._sepX = sepX;
     this._sepZ = sepZ;
+    this._herdFood = hungriest;
     this._mateFleeN = mateFlee;
     this._mateFleeX = mfx;
     this._mateFleeZ = mfz;
@@ -618,7 +621,6 @@ export class Brain {
     this._preyScore = preyScore;
     this._preyBestD = preyD;
     this._rival = rival;
-    this._rivalD = rivalD;
   }
 
   // Detection strength 0..1 of `o` at distance d (best of the three senses).
@@ -1003,7 +1005,7 @@ export class Brain {
     }
 
     // Grazing / ambling / standing about.
-    if (this.state === "graze" && this._plantOk(this.target) && c.food < 99 && now < this._activityUntil) return;
+    if (this.state === "graze" && this._plantOk(this.target) && Math.min(c.food, L ? 100 : this._herdFood) < 99 && now < this._activityUntil) return;
     if (!L) {
       const busy =
         (this.state === "wander" && !this._arrived && now < this._activityUntil) ||
@@ -1027,7 +1029,8 @@ export class Brain {
     const c = this.creature;
     const now = this._now;
     const r = this.rng();
-    const hungry = c.food < 97;
+    // A leader settles the herd where there's browse while any of it is hungry.
+    const hungry = Math.min(c.food, this._herdFood) < 97;
     if (r < (hungry ? 0.6 : 0.2)) {
       const p = this._findPlant(c.position.x, c.position.z, 35);
       if (p) {
@@ -1071,7 +1074,8 @@ export class Brain {
     if (hpF < 0.3) {
       const t = this.target && this.target.position && this.target.alive ? this.target : null;
       const src = atk || this._threat || (this.state === "attack" || this.state === "hunt" ? t : null);
-      if (src && this._distTo(src) < 70) {
+      // Whoever just hurt us is worth running from even at rifle range.
+      if (src && this._distTo(src) < (src === atk ? 160 : 70)) {
         if (this.state !== "flee") return this._startFlee(src, src.position.x, src.position.z, rand(this.rng, 15, 25), true, "retreat");
         return;
       }
@@ -1398,7 +1402,8 @@ export class Brain {
     const now = this._now;
     const k = this.target;
     if (!k || !(num(k.meat, 0) >= 0.5) || k.fading) return false;
-    if (c.food < 99) {
+    // Hysteresis: a full animal stands guard and only tucks in again once peckish.
+    if (c.food < (this.mode === "guard" ? 88 : 99)) {
       if (this.mode === "guard") this.mode = "";
       return true;
     }
@@ -1697,7 +1702,10 @@ export class Brain {
     if (this.state === "flee" || this.state === "attack" || (this.state === "hunt" && this.mode === "chase")) return;
     if (this.state === "eat" && c.food < 90) return;
     this.alert = Math.min(1, this.alert + 0.15);
-    this._investigate(x, z, this._carn, this._carn ? rand(this.rng, 60, 80) : rand(this.rng, 40, 55));
+    // Long enough to actually get there (lures carry ~450 m), then nose about.
+    const d = Math.sqrt(dist2(c.position.x, c.position.z, x, z));
+    const v = lerp(this._walkSpeed, this._trotSpeed, 0.6) * 0.8;
+    this._investigate(x, z, this._carn, d / v + (this._carn ? rand(this.rng, 30, 45) : rand(this.rng, 20, 30)));
   }
 
   _onDamage(e) {
@@ -2233,7 +2241,7 @@ export class Brain {
     if (this.mode !== "search") {
       if (d > stop) {
         const crouch = this._carn && this._invHunting && d < 40 && this._style.ambush;
-        this._goTo(p.x, p.z, this._invHunting ? JOG : WALK, false, crouch, stop);
+        this._goTo(p.x, p.z, this._invHunting || d > 100 ? JOG : WALK, false, crouch, stop);
         return null;
       }
       this.mode = "search";

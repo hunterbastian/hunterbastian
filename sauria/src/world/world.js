@@ -11,6 +11,8 @@ import { Sky } from "./sky.js";
 import { Vegetation } from "./vegetation.js";
 import { Wind } from "./wind.js";
 import { Ecosystem } from "../creatures/ecosystem.js";
+import { SPECIES } from "../creatures/species.js";
+import { prewarmDinoGeometry } from "../creatures/dinoModel.js";
 
 /** Resolve after the browser has had a chance to paint (keeps loading UI alive). */
 const nextFrame = () =>
@@ -155,7 +157,10 @@ export class World {
             seed: hash(this.seed, "vegetation"),
             density: q.vegetationDensity,
             grass: q.grass,
+            renderer: this.renderer,
           });
+          // Sway follows the same wind that carries scent.
+          if (this.wind) this.vegetation.wind = this.wind;
           this.scene.add(this.vegetation.group);
         },
       },
@@ -163,6 +168,8 @@ export class World {
         label: "Waking the dinosaurs",
         weight: 0.15,
         run: () => {
+          // Build every species' shared skin once now, not as a hitch on first spawn.
+          prewarmDinoGeometry(Object.keys(SPECIES));
           this.ecosystem = new Ecosystem(this, {
             seed: hash(this.seed, "ecosystem"),
             npcCap: Math.round(GAME.npcCap * (q.npcScale ?? 1)),

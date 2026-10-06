@@ -368,7 +368,7 @@ export const SPECIES = {
         foot: STUMPY_FOOT,
       },
       fore: {
-        x: 0.36, y: 0.72, z: 1.5, footX: 0.42, footZ: 1.58, upper: 0.34, fore: 0.27, meta: 0.11, toe: 0.08, metaAngle: -0.1,
+        x: 0.36, y: 0.72, z: 1.5, footX: 0.42, footZ: 1.58, upper: 0.37, fore: 0.3, meta: 0.11, toe: 0.08, metaAngle: -0.1,
         radii: { top: [0.213, 0.263, 0.263], hip: [0.188, 0.213, 0.213], thigh: [0.156, 0.169, 0.169], knee: [0.1, 0.1, 0.1], calf: [0.094, 0.1, 0.094], ankle: [0.067, 0.069, 0.069], meta: [0.062, 0.063, 0.063], ball: [0.067, 0.067, 0.065] },
         foot: STUMPY_HAND,
       },
@@ -754,7 +754,7 @@ export const SPECIES = {
         foot: ORNITHOPOD_FOOT,
       },
       fore: {
-        x: 0.21, y: 1.08, z: 1.42, footX: 0.24, footZ: 1.54, upper: 0.46, fore: 0.4, meta: 0.15, toe: 0.07, metaAngle: -0.08,
+        x: 0.21, y: 1.0, z: 1.42, footX: 0.24, footZ: 1.54, upper: 0.52, fore: 0.44, meta: 0.16, toe: 0.07, metaAngle: -0.08,
         radii: { top: [0.138, 0.175, 0.175], hip: [0.125, 0.15, 0.15], thigh: [0.098, 0.111, 0.104], knee: [0.062, 0.062, 0.062], calf: [0.062, 0.069, 0.062], ankle: [0.04, 0.044, 0.044], meta: [0.038, 0.038, 0.038], ball: [0.039, 0.039, 0.037] },
         foot: { ...STUMPY_HAND, toes: STUMPY_HAND.toes.slice(1, 4), pad: false, thumbSpike: true },
       },
