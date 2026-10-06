@@ -2,3 +2,7 @@
 tests/out/
 *.png
 !apple-touch-icon.png
+
+# local tooling
+node_modules/
+.vercel/
