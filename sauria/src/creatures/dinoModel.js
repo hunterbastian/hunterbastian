@@ -1186,6 +1186,18 @@ function extendBlueprint(bp) {
     return y;
   };
   const nNeck = body.bones.neck;
+  // How a lowering neck shares its bend: evenly by default; `body.neckFlexBase`
+  // (0..0.95) moves it toward the base, so a tall, deep-necked sauropod reaches
+  // the ground with a straight sloping neck instead of curling it (and kneeling).
+  const flexBase = clamp(body.neckFlexBase ?? 0, 0, 0.95);
+  bp.neckFlex = null;
+  if (flexBase > 0) {
+    const w = [];
+    for (let k = 0; k < nNeck; k++) w.push(1 - flexBase * (nNeck > 1 ? k / (nNeck - 1) : 0));
+    const sum = w.reduce((acc, v) => acc + v, 0);
+    bp.neckFlex = w.map((v) => v / sum);
+  }
+  const flexW = bp.neckFlex;
   const solveBend = (drop, hipsPitch, spinePitch, chestPitch, headPitch, target) => {
     const angles = new Array(chain.length).fill(0);
     angles[0] = hipsPitch;
@@ -1195,7 +1207,7 @@ function extendBlueprint(bp) {
     let best = 0;
     let bestY = Infinity;
     for (let B = 0; B <= 2.4; B += 0.02) {
-      for (let k = 0; k < nNeck; k++) angles[3 + k] = B / nNeck;
+      for (let k = 0; k < nNeck; k++) angles[3 + k] = flexW ? B * flexW[k] : B / nNeck;
       const y = snoutY(H - drop, angles);
       if (y < bestY) {
         bestY = y;
@@ -1207,9 +1219,12 @@ function extendBlueprint(bp) {
   };
   const quad = bp.quad;
   // Lean / crouch further until the snout actually reaches the target height.
+  // `body.feedLean` scales how far a quadruped dips its shoulders before the
+  // neck takes over (a sauropod's neck does the reaching; its legs stay columns).
+  const lean = body.feedLean ?? 1;
   const solvePose = (headPitch, target) => {
     const p = quad
-      ? { drop: H * 0.03, hips: 0.0, spine: 0.04, chest: 0.08, head: headPitch }
+      ? { drop: H * 0.03 * lean, hips: 0.0, spine: 0.04 * lean, chest: 0.08 * lean, head: headPitch }
       : { drop: H * 0.1, hips: 0.3, spine: 0.05, chest: 0.05, head: headPitch };
     for (let it = 0; it < 14; it++) {
       const r = solveBend(p.drop, p.hips, p.spine, p.chest, p.head, target);
@@ -3051,7 +3066,9 @@ export class DinoModel {
       P[iH] += wE * e.hips + wD * d.hips;
       P[iS] += wE * e.spine + wD * d.spine;
       P[iC] += wE * e.chest + wD * d.chest;
-      neck(0, (wE * e.bend + wD * d.bend) / nN);
+      const bend = wE * e.bend + wD * d.bend;
+      if (bp.neckFlex) for (let k = 0; k < nN; k++) P[R + this._iNeck[k] * 3] += bend * bp.neckFlex[k];
+      else neck(0, bend / nN);
       P[iHead] += wE * e.head + wD * d.head;
       tail(0, -wf * Math.max(e.hips, d.hips) * 0.3, 0, Math.min(3, nT));
       P[iJaw] += wE * (0.08 + 0.1 * (0.5 + 0.5 * Math.sin(time * 7))) + wD * (0.05 + 0.03 * Math.sin(time * 12));

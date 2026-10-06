@@ -447,6 +447,20 @@ const PLANS = {
     g.body += eye(89.6, -41.6, 0.4);
     g.near += columnLeg(39, -21, 5.6, 1.4) + columnLeg(53, -20, 4.8, -0.6);
   },
+  brontosaurus(g) {
+    // Heavier than Diplodocus: a deep, slab-sided neck rising from high
+    // shoulders, a barrel torso, stocky columns and a shorter whip tail.
+    g.top = 47;
+    g.far += columnLeg(38, -22, 6.6, 1.2) + columnLeg(53, -21.5, 6.2, -0.4);
+    g.body += loft([
+      [4, -11, 0.2, 0.2], [11, -13.5, 0.7, 0.7], [18, -16.5, 1.5, 1.5], [25, -20.5, 2.7, 2.9],
+      [31, -24.2, 4, 4.9], [37, -26.8, 5, 7.9], [43, -27.6, 5.4, 8.8], [49, -27.4, 5, 7.9],
+      [55, -28.2, 4.2, 5], [61, -31.2, 3.6, 3.9], [67, -34.6, 3, 3.1], [73, -37.8, 2.4, 2.5],
+      [79, -40.6, 1.9, 2], [84, -42.4, 1.6, 1.6], [88.5, -43, 1.3, 1.3], [91.5, -42.6, 0.9, 0.9], [93.5, -41.8, 0.25, 0.25],
+    ]);
+    g.body += eye(89.8, -43.6, 0.4);
+    g.near += columnLeg(41, -22, 7, 1.2) + columnLeg(56, -21.5, 6.4, -0.4);
+  },
 };
 
 /** Standing person, `h` units tall, feet on the baseline — the field-guide scale figure. */

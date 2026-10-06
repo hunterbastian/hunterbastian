@@ -50,6 +50,7 @@ export const TROPHY_VALUES = {
   stegosaurus: 48,
   allosaurus: 60,
   diplodocus: 75,
+  brontosaurus: 72,
 };
 const HEADSHOT_BONUS = 1.5;
 const TARGET_BONUS = 1.5;

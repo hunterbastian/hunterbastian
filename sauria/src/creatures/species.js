@@ -925,6 +925,8 @@ export const SPECIES = {
     body: {
       plan: "quadruped",
       scaleTile: 0.85,
+      neckFlexBase: 0.7, // lowers the neck from the shoulders to drink, like a crane's jib
+      feedLean: 0.25,
       trunk: [
         // Whip tail: shorter and heavier than Diplodocus'.
         [-10.6, 1.5, 0.014, 0.014, 0.014],
