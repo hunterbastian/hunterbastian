@@ -335,9 +335,11 @@ function gullyNoise(px, pz, dirX, dirZ, out) {
 
 /**
  * Three octaves of gullies (wavelength 46 → 11.5 m) on a slope whose uphill
- * gradient is (gx, gz). Returns metres of relief to add (≈ ±amp).
+ * gradient is (gx, gz). Returns metres of relief to add (≈ ±amp). Octaves
+ * shorter than `minL` (≈ 2.6 grid cells) fade out: the mesh can't hold them
+ * and they would alias into a checkered corduroy instead of gullies.
  */
-function gullies(x, z, gx, gz, amp) {
+function gullies(x, z, gx, gz, amp, minL = 0) {
   const s = Math.hypot(gx, gz) || 1;
   const ux = gx / s;
   const uz = gz / s;
@@ -356,9 +358,10 @@ function gullies(x, z, gx, gz, amp) {
     const v = gullyNoise(x / L + o * 17.31, z / L - o * 9.17, -bz, bx, gullyGrad);
     // Sharpen troughs, round the spurs between them (V-shaped incisions).
     const shaped = v - 0.28 * (1 - v * v);
-    sum += a * shaped;
-    dX += (a * gullyGrad[0]) / L;
-    dZ += (a * gullyGrad[1]) / L;
+    const keep = smoothstep(minL, minL * 1.5, L);
+    sum += a * keep * shaped;
+    dX += (a * keep * gullyGrad[0]) / L;
+    dZ += (a * keep * gullyGrad[1]) / L;
     a *= 0.42;
     L *= 0.5;
   }
@@ -1010,8 +1013,8 @@ function synthMud(T) {
     col[i * 3] = c[0] * f * (1 - 0.35 * cr);
     col[i * 3 + 1] = c[1] * f * (1 - 0.35 * cr);
     col[i * 3 + 2] = c[2] * f * (1 - 0.35 * cr);
-    hgt[i] = clamp(0.45 + 0.22 * broad[i] + 0.04 * detail[i] - 0.12 * cr, 0, 1);
-    rough[i] = lerp(0.82, 0.48, puddle);
+    hgt[i] = clamp(0.45 + 0.22 * broad[i] + 0.04 * detail[i] - 0.07 * cr, 0, 1);
+    rough[i] = lerp(0.86, 0.58, puddle);
   }
   // Dead reed stems and bits of plant matter trodden into the silt.
   const w0 = Math.max(0.8, S / 480);
@@ -1191,6 +1194,11 @@ vec3 terN = normalize(vTerNrm);
 vec3 terDx = dFdx(vTerPos);
 vec3 terDy = dFdy(vTerPos);
 float terDist = length(vViewPosition);
+// Past ~50 m the near tile (2.6–6.5 m) repeats every few pixels and its broad
+// blotches line up into a visible grid. Fade it toward the layer's mean colour
+// with distance; the rotated far sample and the per-vertex macro tint carry
+// the variation from there.
+float terNearFade = smoothstep(45.0, 190.0, terDist) * 0.8;
 // Strata bands in world height (~4.8 m thick), wavering gently; each band
 // gets its own tint and the switch between bands is filtered by its screen
 // footprint so distant cliffs don't shimmer (especially in the pixel style).
@@ -1268,6 +1276,7 @@ for (int i = 0; i < 6; i++) {
     terRockN = normalize(nW);
     // Sedimentary strata on steep faces: grey, buff and the odd rust band.
     alb.rgb *= mix(vec3(1.0), terStrata, (1.0 - bl.y) * 0.9);
+    alb.rgb = mix(alb.rgb, terAvg[i], terNearFade * 0.7);
     alb.rgb *= mix(vec3(1.0), far.rgb / terAvg[i], 0.6);
   } else {
     far = textureGrad(terAlbedo, vec3(TER_ROT * vTerPos.xz * farK + 0.37, layer), TER_ROT * gx * (TER_FAR * TER_FAR_BLUR), TER_ROT * gy * (TER_FAR * TER_FAR_BLUR));
@@ -1275,6 +1284,7 @@ for (int i = 0; i < 6; i++) {
     vec4 n = textureGrad(terNormal, vec3(uv, layer), gx, gy);
     terNm[i] = n.xy * 2.0 - 1.0;
     terRg[i] = n.z;
+    alb.rgb = mix(alb.rgb, terAvg[i], terNearFade);
     alb.rgb *= mix(vec3(1.0), far.rgb / terAvg[i], 0.7);
   }
   terCol[i] = alb.rgb;
@@ -2587,6 +2597,7 @@ export class Terrain {
     // shelf formula clamps there); skip the full evaluation unless an islet is near.
     const deepC = -190 / g.R;
     const isletNear = (x, z) => g.islets.some((o) => Math.hypot(x - o.x, z - o.z) < o.r * 2.5 + 40);
+    const gullyMinL = 2.6 * V.step;
 
     for (let iz = 0; iz < n; iz++) {
       const z = V.origin + iz * V.step;
@@ -2651,10 +2662,11 @@ export class Terrain {
             (lGz[a] + (lGz[a + 1] - lGz[a]) * tx) * (1 - tz) + (lGz[a + LN] + (lGz[a + LN + 1] - lGz[a + LN]) * tx) * tz;
           const slope = Math.sqrt(gx * gx + gz * gz);
           // Some flanks are deeply furrowed, others smooth.
-          const region = 0.4 + 0.6 * smoothstep(-0.35, 0.35, g.nDetail(x * 0.0055 + 17.3, z * 0.0055 - 4.1));
-          const zone = 0.5 + 6.5 * f.mm + 2.4 * f.hm + 1.5 * f.cliff;
-          const amp = zone * region * smoothstep(0.1, 0.65, slope) * fall * smoothstep(1.5, 9, h);
-          if (amp > 0.04) h += gullies(x, z, gx, gz, amp);
+          const region = 0.2 + 0.8 * smoothstep(-0.25, 0.45, g.nDetail(x * 0.0055 + 17.3, z * 0.0055 - 4.1));
+          // Deep gullies belong to the high massif; foothills only get soft rills.
+          const zone = 0.4 + 6.5 * f.mm * f.mm + 1.6 * f.hm + 1.3 * f.cliff;
+          const amp = zone * region * smoothstep(0.15, 0.7, slope) * fall * smoothstep(1.5, 9, h);
+          if (amp > 0.04) h += gullies(x, z, gx, gz, amp, gullyMinL);
         }
         H[i] = h;
       }
@@ -2879,10 +2891,17 @@ export class Terrain {
         const gx = (hr - hl) / ((ix > 0 && ix < n - 1 ? 2 : 1) * cs);
         const gz = (hd - hu) / ((iz > 0 && iz < n - 1 ? 2 : 1) * cs);
         const slope = 1 - 1 / Math.sqrt(1 + gx * gx + gz * gz);
+        // Steepest one-sided slope: a sharp break (escarpment, sea cliff) can
+        // sit between two vertices whose central difference looks gentle, and
+        // top-projected grass or dirt stretched across it reads as streaks.
+        // Materials that must not stretch key off this one instead.
+        const sx = Math.max(Math.abs(hr - h), Math.abs(h - hl)) / cs;
+        const sz = Math.max(Math.abs(hd - h), Math.abs(h - hu)) / cs;
+        const steep = 1 - 1 / Math.sqrt(1 + sx * sx + sz * sz);
 
         const patch = lerpL(g.lPatch); // ±
         const macro = lerpL(g.lMacro);
-        const cav = (blurS[i] - h) * 0.11 + (blurL[i] - h) * 0.028;
+        const cav = (blurS[i] - h) * 0.08 + (blurL[i] - h) * 0.028;
         let ao = 1 - clamp(cav, 0, 0.5);
         w.fill(0);
 
@@ -2932,10 +2951,13 @@ export class Terrain {
               ? (1 - smoothstep(2.4, 4, h + patch * 0.8)) * (1 - smoothstep(24, 56, oceanD + patch * 14)) * (1 - smoothstep(0.1, 0.22, slope))
               : 0;
           const outcrop = (hm * 0.8 + g.mountain[i]) * smoothstep(0.62, 0.8, lerpL(g.lOutcrop));
+          // High ground is bare rock except on ledges and saddles, which
+          // hold thin, dry alpine turf.
+          const ledge = 0.45 + 0.55 * smoothstep(0.06, 0.18, steep);
           const wRock = Math.max(
-            smoothstep(0.2, 0.34, slope + patch * 0.05),
-            g.mountain[i] * smoothstep(75, 120, h + patch * 18),
-            smoothstep(98, 118, h + patch * 10),
+            smoothstep(0.22, 0.36, steep + patch * 0.05),
+            g.mountain[i] * smoothstep(75, 120, h + patch * 18) * ledge,
+            smoothstep(98, 118, h + patch * 10) * ledge,
             outcrop * 0.85
           );
 
@@ -2951,8 +2973,8 @@ export class Terrain {
           const sand = Math.max(wBeach, freshShore * sandyShore * 0.7, creek * 0.25);
           const mud = Math.max(wSwamp * (0.4 + 0.25 * patch + 0.15 * midN), freshShore * (1 - sandyShore) * 0.85, creek * 0.35);
           const dirt = Math.max(
-            smoothstep(0.09, 0.2, slope) * 0.8,
-            wForest * (0.34 + 0.2 * patch + 0.12 * midN),
+            smoothstep(0.13, 0.26, slope) * 0.7,
+            wForest * (0.62 + 0.25 * patch + 0.15 * midN),
             creek * 0.6,
             rock > 0.25 && rock < 0.9 ? 0.3 * (1 - Math.abs(rock - 0.55) * 3) : 0
           ) * (1 - rock * 0.6);
