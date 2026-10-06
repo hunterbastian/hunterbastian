@@ -39,8 +39,8 @@ const WALK = 0.45;
 const JOG = 0.8;
 const TROT = 1;
 
-const DEFENDERS = new Set(["stegosaurus", "gastonia", "diplodocus"]);
-const CHARGERS = new Set(["stegosaurus", "diplodocus"]);
+const DEFENDERS = new Set(["stegosaurus", "gastonia", "diplodocus", "brontosaurus"]);
+const CHARGERS = new Set(["stegosaurus", "diplodocus", "brontosaurus"]);
 
 // Hunting style per carnivore: chase = distance at which a stalk turns into a
 // sprint, crouch = distance inside which it creeps, callP = chance of a roar

@@ -9,15 +9,22 @@
 //                 update the HunterController, and put the camera on the door
 //                 seat each frame with `applyRideCamera(camera, lookYaw, lookPitch)`
 //                 (or read `hunterAnchor` yourself). The hunter actor is parked
-//                 on the landing zone meanwhile. `skipDropoff()` cuts to final.
-//   "hunting"     entered at touchdown: the hunter has been placed beside the
-//                 door facing out (`hunter.heading`); sync the controller's yaw
-//                 to it and hand control back.
-//   "extracting"  after `requestExtraction()`; watch `extraction` for the HUD.
-//   "ended"       `end()` ran (by you, or by us when the hunter reached the
-//                 hovering chopper). `summary` holds the results; on "extracted"
+//                 on the landing zone meanwhile, so it doubles as the world
+//                 focus (NPCs stream in around the LZ); register it with
+//                 `ecosystem.setPlayer` only at touchdown so nothing can bite a
+//                 hunter who is still in the air. `skipDropoff()` cuts to final.
+//   "hunting"     entered at touchdown (`onStateChange("hunting")`): the hunter
+//                 stands beside the door facing out (`hunter.heading`, pitch 0);
+//                 sync the controller's yaw to it and hand control back.
+//   "extracting"  after `requestExtraction()`; poll `extraction` ({ state, eta })
+//                 for the HUD. The hunt ends by itself once the hunter is within
+//                 8 m of the hovering chopper.
+//   "ended"       `end()` ran (by you — "died" when the hunter dies, "quit" from
+//                 the pause menu — or by us on extraction; `onEnd(summary)` fires
+//                 either way). `summary` holds the results; on "extracted"
 //                 `riding` is true again and the chopper flies the hunter out —
-//                 keep calling `update(dt)` until you leave the scene.
+//                 keep calling `update(dt)` until you leave the scene, then
+//                 `dispose()`.
 
 import * as THREE from "three";
 import { Helicopter } from "./helicopter.js";

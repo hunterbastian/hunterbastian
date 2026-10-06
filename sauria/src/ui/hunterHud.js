@@ -42,6 +42,9 @@ export const WEAPON_NAMES = {
   sniper: ".50 Sniper Rifle",
 };
 
+/** Short labels for the weapon slot tabs. */
+export const SHORT_NAMES = { revolver: "Revolver", shotgun: "Shotgun", crossbow: "Crossbow", rifle: "Rifle", sniper: "Sniper" };
+
 /* --- Icons & glyphs --- */
 
 // Hunter-specific 24×24 line icons, drawn like the survival set (class "ico").
@@ -128,15 +131,20 @@ const GUN_ART = {
     '<path class="l" d="M58.4 20.6c.8 4.8 6.2 5.8 9.2.2"/>',
 };
 
+// Tight boxes for when each weapon should fill its slot rather than share a scale.
+const GUN_CROP = { revolver: "51 6 63 32", shotgun: "2 8 156 28", crossbow: "2 1 145 34", rifle: "2 5 156 30", sniper: "2 2 156 32" };
+
 /**
  * Side-profile drawing of a weapon (SVG markup, class "hgun").
  * @param {string} id weapon id
  * @param {string} [cls] extra class names
+ * @param {boolean} [crop] fit the drawing to its own bounds (default: shared 160×40 scale)
  * @returns {string}
  */
-export function weaponGlyph(id, cls = "") {
+export function weaponGlyph(id, cls = "", crop = false) {
   const art = GUN_ART[id] || GUN_ART.rifle;
-  return `<svg class="hgun${cls ? ` ${cls}` : ""}" viewBox="0 0 160 40" aria-hidden="true" focusable="false">${art}</svg>`;
+  const box = crop ? GUN_CROP[id] || "0 0 160 40" : "0 0 160 40";
+  return `<svg class="hgun${cls ? ` ${cls}` : ""}" viewBox="${box}" preserveAspectRatio="${crop ? "xMaxYMid" : "xMidYMid"} meet" aria-hidden="true" focusable="false">${art}</svg>`;
 }
 
 /* --- Stylesheet --- */
@@ -263,6 +271,7 @@ function duplexSVG() {
     `<svg class="hh-ret hh-ret--duplex" viewBox="-100 -100 200 200" aria-hidden="true" focusable="false">` +
     `<path class="hh-ret__post" d="M-100 -1.7H-30V1.7H-100zM30 -1.7H100V1.7H30zM-1.7 30H1.7V100H-1.7zM-1.7 -100H1.7V-30H-1.7z"/>` +
     `<path class="hh-ret__hair" d="M-30 0H30M0 -30V30"/>` +
+    `<circle class="hh-ret__lit" r="0.75"/>` +
     `</svg>`
   );
 }
@@ -286,8 +295,7 @@ function mildotSVG() {
     `<path class="hh-ret__hair" d="M-62 0H62M0 -62V62"/>` +
     `<g class="hh-ret__dots">${dots}</g>` +
     `<g class="hh-ret__bdc">${bdc}</g>` +
-    `<path class="hh-ret__hair hh-ret__range" d="M-58 30V44M-58 44H-44M-58 37H-52"/>` +
-    `<text class="hh-ret__small" x="-58" y="27">RANGE</text>` +
+    `<circle class="hh-ret__lit" r="0.6"/>` +
     `</svg>`
   );
 }
@@ -613,6 +621,7 @@ export class HunterHud {
     const reloadHint = this.isTouch ? `Tap ${hicon("reload")} to reload` : `<kbd class="hh-kbd">R</kbd> to reload`;
     const m = `hh-bm-${this._uid}`;
     const g = `hh-bg-${this._uid}`;
+    const full = `x="-1%" y="-1%" width="102%" height="102%"`;
     el.innerHTML = `
       <div class="hh-fx hh-fx--hurt"></div>
       <div class="hh-fx hh-fx--low"></div>
@@ -629,13 +638,11 @@ export class HunterHud {
         <svg class="hh-bino__mask" width="100%" height="100%" aria-hidden="true" focusable="false">
           <defs>
             <radialGradient id="${g}"><stop offset="0.8" stop-color="#000"/><stop offset="1" stop-color="#fff"/></radialGradient>
-            <mask id="${m}" maskUnits="userSpaceOnUse">
-              <rect width="100%" height="100%" fill="#fff"/>
-              <circle class="hh-bino__c1" fill="url(#${g})"/><circle class="hh-bino__c2" fill="url(#${g})"/>
-              <circle class="hh-bino__k1" fill="#000"/><circle class="hh-bino__k2" fill="#000"/>
-            </mask>
+            <mask id="${m}a" maskUnits="userSpaceOnUse"><rect ${full} fill="#fff"/><circle class="hh-bino__c1" fill="url(#${g})"/></mask>
+            <mask id="${m}b" maskUnits="userSpaceOnUse"><rect ${full} fill="#fff"/><circle class="hh-bino__c2" fill="url(#${g})"/></mask>
           </defs>
-          <rect width="100%" height="100%" fill="#050504" mask="url(#${m})"/>
+          <!-- Two masks multiplied (nested), so the lenses' soft edges intersect without a seam. -->
+          <g mask="url(#${m}a)"><rect ${full} fill="#050504" mask="url(#${m}b)"/></g>
         </svg>
         <div class="hh-bino__ret"><i></i><i></i><i></i><i></i><span class="hh-bino__box"></span></div>
         <div class="hh-bino__lcd">
@@ -788,7 +795,7 @@ export class HunterHud {
     this._scopePower = $(".hh-scope__power");
     this._scopeMask = $(".hh-scope__mask");
     this._bino = $(".hh-bino");
-    this._binoC = [$(".hh-bino__c1"), $(".hh-bino__c2"), $(".hh-bino__k1"), $(".hh-bino__k2")];
+    this._binoC = [$(".hh-bino__c1"), $(".hh-bino__c2")];
     this._binoRange = $(".hh-bino__rv");
     this._binoName = $(".hh-bino__name");
     this._binoMass = $(".hh-bino__mass");
@@ -829,8 +836,6 @@ export class HunterHud {
     };
     set(this._binoC[0], w / 2 - off, r);
     set(this._binoC[1], w / 2 + off, r);
-    set(this._binoC[2], w / 2 - off, r * 0.8);
-    set(this._binoC[3], w / 2 + off, r * 0.8);
     this._bino.style.setProperty("--bino-r", `${r.toFixed(0)}px`);
   }
 
@@ -1101,9 +1106,8 @@ export class HunterHud {
   _gauge(key, value) {
     const v = clamp(Number(value) || 0, 0, 1);
     const q = Math.round(v * 50) / 50;
-    const ck = key === "vis" ? "vis" : key;
-    if (q === this._c[ck]) return;
-    this._c[ck] = q;
+    if (q === this._c[key]) return;
+    this._c[key] = q;
     this._gauges[key].style.transform = `scaleX(${q})`;
     const row = this._gaugeRows[key];
     row.classList.toggle("is-mid", q >= 0.45 && q < 0.75);
@@ -1121,7 +1125,7 @@ export class HunterHud {
       c.mag = -1;
       c.magSize = -1;
       this._ammo.dataset.kind = id;
-      this._ammoGlyph.innerHTML = weaponGlyph(id);
+      this._ammoGlyph.innerHTML = weaponGlyph(id, "", true);
       this._ammoTitle.textContent = def?.name || WEAPON_NAMES[id] || id;
     }
     // Slot tabs ("1 Rifle  2 Revolver") — only rebuilt when the loadout or selection changes.
@@ -1131,8 +1135,8 @@ export class HunterHud {
       c.slots = slotsKey;
       this._slots.innerHTML = loadout
         .map((w, i) => {
-          const short = (WEAPON_NAMES[w] || w).replace(/^\.\d+\s|^Double-Barrel\s|^Bolt-Action\s|\sRifle$/g, "");
-          return `<span class="hh-slot${w === id ? " is-on" : ""}"><kbd class="hh-kbd">${i + 1}</kbd>${escapeHtml(short || w)}</span>`;
+          const short = SHORT_NAMES[w] || this.weaponDefs?.[w]?.name || w;
+          return `<span class="hh-slot${w === id ? " is-on" : ""}"><kbd class="hh-kbd">${i + 1}</kbd>${escapeHtml(short)}</span>`;
         })
         .join("");
     }

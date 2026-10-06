@@ -10,7 +10,7 @@
 import { makeRng } from "../core/rng.js";
 import { clamp } from "../core/math.js";
 import { icon, escapeHtml, formatMass, speciesSilhouette, brandMark } from "./menu.js";
-import { ensureHunterStyles, hicon, weaponGlyph, WEAPON_NAMES } from "./hunterHud.js";
+import { ensureHunterStyles, hicon, weaponGlyph, WEAPON_NAMES, SHORT_NAMES } from "./hunterHud.js";
 
 /* --- Data --- */
 
@@ -45,7 +45,6 @@ const TROPHY_VALUE_FALLBACK = {
 const DANGER_LABEL = ["Skittish", "Defends itself", "Dangerous", "Deadly"];
 const DEFAULT_UNLOCKED = ["revolver", "shotgun", "rifle"];
 const DEFAULT_LOADOUT = ["rifle", "revolver"];
-const SHORT_NAMES = { revolver: "Revolver", shotgun: "Shotgun", crossbow: "Crossbow", rifle: "Rifle", sniper: "Sniper" };
 const PLAN_KEY = "sauria.hunter.plan.v1";
 const FOCUSABLE = 'button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
 
@@ -289,7 +288,7 @@ export class HunterMenu {
           <div class="hm-head">
             <p class="hm-eyebrow">Hunter's lodge · Trophy room</p>
             <h1 class="hm-title">Trophy room</h1>
-            <p class="hm-lede">Every animal you brought home on an extraction, best first.</p>
+            <p class="hm-lede">Every trophy you flew home with, best first.</p>
           </div>
           <div class="hm-room"></div>
         </div>

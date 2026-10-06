@@ -84,6 +84,21 @@ const STUMPY_HAND = {
   pad: true,
 };
 
+// Sauropod hind foot: a broad, elephant-like heel pad with short, nail-like toes around its front edge.
+const ELEPHANT_FOOT = {
+  kind: "stumpy",
+  toes: [
+    { yaw: -0.62, len: 0.62, r: 0.82 },
+    { yaw: -0.22, len: 0.78, r: 0.92 },
+    { yaw: 0.18, len: 0.72, r: 0.88 },
+    { yaw: 0.56, len: 0.52, r: 0.74 },
+  ],
+  hallux: false,
+  claw: 0.3,
+  hoof: true,
+  pad: true,
+};
+
 /* --- Species ------------------------------------------------------------- */
 
 export const SPECIES = {
@@ -861,9 +876,116 @@ export const SPECIES = {
       features: { teeth: true, dorsalSpines: true },
     },
   },
+
+  brontosaurus: {
+    id: "brontosaurus",
+    name: "Brontosaurus",
+    diet: "herbivore",
+    playable: true,
+    tagline: "Hatch the size of a dog. Grow into a mountain.",
+    description:
+      "A thunderously heavy sauropod with a neck like a slab of rock and a tail that cracks like a whip. " +
+      "You hatch tiny and defenceless among giants, so hide, browse and keep growing until you're the largest animal on the island.",
+    era: "Late Jurassic · Morrison Formation",
+    length: 22,
+    height: 4.6,
+    mass: 15000,
+    health: 5200,
+    bite: 150,
+    biteCooldown: 2.8,
+    biteRange: 3.6,
+    attack: "tail",
+    armor: 0.15,
+    bleed: 2,
+    speed: { walk: 1.7, trot: 3.3, sprint: 5.0, crouch: 1.2, swim: 1.8 },
+    turnRate: 0.9,
+    stamina: { regen: 6, sprintDrain: 9 },
+    metabolism: { hunger: 2.5, thirst: 2.9 },
+    growthMinutes: 45,
+    juvenileScale: 0.12,
+    swim: 0.5,
+    social: "herd",
+    groupSize: [2, 5],
+    aggression: 0.12,
+    perception: 70,
+    spawnWeight: 0.7,
+    biomes: ["plains", "swamp", "beach"],
+    call: { kind: "bellow", pitch: 38, duration: 3.4 },
+    colors: {
+      eye: "#2a1d10",
+      morphs: [
+        { base: "#7a6c58", dorsal: "#524637", belly: "#cbbd9f", pattern: "#4a3e31", light: "#d8caa9", accent: "#8e7356" },
+        { base: "#6e6c5a", dorsal: "#48473a", belly: "#c4c0a4", pattern: "#3d3c31", light: "#d2cfb2", accent: "#857456" },
+        { base: "#82705d", dorsal: "#5a4b3e", belly: "#d1c2a7", pattern: "#4b3e33", light: "#dccdb2", accent: "#977055" },
+        { base: "#6b6b62", dorsal: "#46473f", belly: "#c3c1ae", pattern: "#3a3b33", light: "#d0cfbd", accent: "#7d6c58" },
+      ],
+      // No stripes (that's Diplodocus): broad dapples, soft mottling, a dark back.
+      pattern: { bands: [0, 0.6, 3], spots: [0.55, 0.53], stripe: [0, 0, 0], dorsal: 0.82, mottle: 0.5 },
+    },
+    body: {
+      plan: "quadruped",
+      scaleTile: 0.85,
+      trunk: [
+        // Whip tail: shorter and heavier than Diplodocus'.
+        [-10.6, 1.5, 0.014, 0.014, 0.014],
+        [-9.5, 1.85, 0.04, 0.042, 0.042],
+        [-8.1, 2.42, 0.095, 0.105, 0.105],
+        [-6.6, 3.08, 0.19, 0.22, 0.22],
+        [-5.1, 3.76, 0.32, 0.37, 0.39, 2, -0.1],
+        [-3.55, 4.45, 0.51, 0.53, 0.61, 2.1],
+        [-2.0, 5.02, 0.77, 0.64, 0.9, 2.2, 0.04],
+        // Barrel torso: broad, deep-chested, near-level back with a high shoulder line.
+        [-0.85, 5.3, 1.04, 0.72, 1.38, 2.2, 0.06],
+        [0.35, 5.38, 1.24, 0.75, 1.78, 2.25, 0.08],
+        [1.6, 5.36, 1.4, 0.75, 2.12, 2.25, 0.1],
+        [2.85, 5.31, 1.42, 0.74, 2.2, 2.25, 0.1],
+        [3.95, 5.24, 1.2, 0.72, 1.92, 2.2, 0.06],
+        // Neck: deep and broad-bottomed (the cervical ribs), narrow along the top.
+        [4.9, 5.38, 0.92, 0.62, 1.46, 2.4, -0.25],
+        [6.0, 5.8, 0.77, 0.51, 1.18, 2.7, -0.48],
+        [7.25, 6.28, 0.65, 0.43, 1.0, 2.9, -0.55],
+        [8.5, 6.74, 0.55, 0.37, 0.86, 2.9, -0.55],
+        [9.65, 7.1, 0.43, 0.31, 0.66, 2.7, -0.45],
+        [10.45, 7.28, 0.25, 0.22, 0.33, 2.3, -0.2],
+      ],
+      head: {
+        at: [10.68, 7.24],
+        length: 0.74,
+        pitch: -0.5,
+        square: 2.5,
+        stations: [
+          [0.0, 0.2, 0.12, 0.14, 0],
+          [0.13, 0.25, 0.12, 0.155, -0.08],
+          [0.28, 0.23, 0.05, 0.145, -0.06],
+          [0.46, 0.17, 0.04, 0.13, 0],
+          [0.66, 0.14, 0.04, 0.125, 0.04],
+          [0.84, 0.13, 0.04, 0.125, 0.06],
+          [0.95, 0.11, 0.035, 0.115, 0.06],
+          [1.0, 0.04, 0.02, 0.06, 0],
+        ],
+        jaw: { hinge: 0.1, depth: [[0, 0.08], [0.2, 0.085], [0.6, 0.07], [0.92, 0.065], [1, 0.03]], width: 0.88 },
+        eye: { u: 0.24, v: 0.15, r: 0.035 },
+        nostril: { u: 0.2, v: 0.23, r: 0.026, top: true },
+        beak: 0,
+        teeth: { upper: 9, lower: 8, length: 0.04, from: 0.68, to: 0.98, peg: true },
+      },
+      bones: { tail: 11, neck: 8, spineZ: 1.5, chestZ: 3.2, neckZ: 4.75, tailZ: -1.4 },
+      hind: {
+        x: 0.95, footX: 1.0, footZ: 0.1, thigh: 2.1, shin: 1.62, meta: 0.55, toe: 0.3, metaAngle: 0.1,
+        radii: { top: [1.05, 1.25, 1.25], hip: [0.95, 1.12, 1.08], thigh: [0.82, 0.92, 0.88], knee: [0.52, 0.5, 0.5], calf: [0.5, 0.48, 0.56], ankle: [0.4, 0.4, 0.42], meta: [0.42, 0.42, 0.42], ball: [0.48, 0.48, 0.45] },
+        foot: ELEPHANT_FOOT,
+      },
+      fore: {
+        x: 0.98, y: 4.25, z: 3.85, footX: 1.04, footZ: 3.95, upper: 1.8, fore: 1.48, meta: 0.7, toe: 0.1, metaAngle: -0.03,
+        radii: { top: [0.78, 0.92, 0.92], hip: [0.7, 0.8, 0.8], thigh: [0.56, 0.62, 0.58], knee: [0.42, 0.42, 0.42], calf: [0.4, 0.42, 0.4], ankle: [0.34, 0.35, 0.35], meta: [0.35, 0.35, 0.35], ball: [0.4, 0.4, 0.38] },
+        foot: { kind: "column", toes: [], hallux: false, claw: 0, pad: true, thumbClaw: true },
+      },
+      features: { teeth: true },
+    },
+  },
 };
 
-export const PLAYABLE = ["dryosaurus", "utahraptor", "gastonia", "ceratosaurus", "stegosaurus", "allosaurus"];
+export const PLAYABLE = ["dryosaurus", "utahraptor", "gastonia", "ceratosaurus", "stegosaurus", "allosaurus", "brontosaurus"];
 
 /**
  * Look up a species definition.

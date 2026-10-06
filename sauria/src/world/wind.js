@@ -9,7 +9,7 @@
 
 import * as THREE from "three";
 import { makeRng, rand } from "../core/rng.js";
-import { TAU, clamp, lerp, smoothstep, damp, wrapAngle } from "../core/math.js";
+import { TAU, clamp, lerp, smoothstep, wrapAngle } from "../core/math.js";
 
 /* --- Tuning --- */
 
@@ -52,8 +52,8 @@ export class Wind {
     this._veerAmpA = rand(rng, 0.35, 0.6);
     this._veerWA = TAU / rand(rng, 240, 420);
     this._veerPA = rng() * TAU;
-    this._veerAmpB = rand(rng, 0.12, 0.22);
-    this._veerWB = TAU / rand(rng, 70, 140);
+    this._veerAmpB = rand(rng, 0.1, 0.18);
+    this._veerWB = TAU / rand(rng, 90, 160);
     this._veerPB = rng() * TAU;
 
     // Occasional frontal shifts: every few minutes the wind swings to a new
