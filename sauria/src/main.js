@@ -454,7 +454,23 @@ async function startHunterMode() {
     console.warn("[sauria] hunter mode unavailable", err);
     game.state = "menu";
     menu.show({ save: menuSaveSummary() });
+    flashNotice("Hunter mode is still being built — try Survival for now.");
   }
+}
+
+/** A small, self-dismissing notice for the title screen (the HUD is hidden there). */
+function flashNotice(text) {
+  const el = document.createElement("div");
+  el.setAttribute("role", "status");
+  el.textContent = text;
+  el.style.cssText =
+    "position:fixed;left:50%;bottom:calc(28px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:70;" +
+    "max-width:min(92vw,520px);padding:12px 18px;border-radius:var(--radius,6px);background:var(--c-panel,rgba(18,17,13,.86));" +
+    "color:var(--c-bone,#efe8d8);font:500 14px/1.4 var(--font-ui,system-ui,sans-serif);box-shadow:var(--shadow,0 8px 30px rgba(0,0,0,.4));" +
+    "border:1px solid var(--c-line,rgba(239,232,216,.16));text-align:center;transition:opacity .4s";
+  uiRoot.appendChild(el);
+  setTimeout(() => (el.style.opacity = "0"), 3600);
+  setTimeout(() => el.remove(), 4100);
 }
 
 /* ----------------------------------------------------------------------- */
@@ -467,9 +483,10 @@ let fpsFrames = 0;
 
 function frame(now) {
   requestAnimationFrame(frame);
-  const dt = clamp((now - last) / 1000, 0, 0.05);
+  const raw = Math.max(0, (now - last) / 1000);
+  const dt = Math.min(raw, 0.05);
   last = now;
-  fpsAcc += dt;
+  fpsAcc += raw; // real time, not the clamped step, or slow devices report inflated fps
   fpsFrames++;
   if (fpsAcc >= 0.5) {
     game.fps = Math.round(fpsFrames / fpsAcc);
