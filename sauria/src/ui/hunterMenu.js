@@ -23,10 +23,10 @@ export const HUNT_PHASES = [
 ];
 
 const EQUIPMENT = [
-  { id: "camo", name: "Camouflage", icon: "camo", desc: "Ghillie poncho. Animals spot you at 60% of the distance." },
-  { id: "coverScent", name: "Cover scent", icon: "sniff", desc: "Masks your smell — noses find you at a third of the range." },
-  { id: "radar", name: "Radar locator", icon: "radar", desc: "Pings your quarry within 600 m every ten seconds." },
-  { id: "lure", name: "Call device", icon: "call", desc: "Imitates your quarry's call to draw it in (Q)." },
+  { id: "camo", name: "Camouflage", icon: "camo", desc: "Eyes find you at 60% of the range." },
+  { id: "coverScent", name: "Cover scent", icon: "sniff", desc: "Noses find you at a third of it." },
+  { id: "radar", name: "Radar locator", icon: "radar", desc: "Pings quarry within 600 m." },
+  { id: "lure", name: "Call device", icon: "call", desc: "Mimics your quarry's call (Q)." },
 ];
 const EQUIPMENT_PENALTY = 0.1; // per item, mirrors HuntSession
 
@@ -40,6 +40,7 @@ const TROPHY_VALUE_FALLBACK = {
   stegosaurus: 48,
   allosaurus: 60,
   diplodocus: 75,
+  brontosaurus: 72,
 };
 
 const DANGER_LABEL = ["Skittish", "Defends itself", "Dangerous", "Deadly"];
@@ -377,7 +378,7 @@ export class HunterMenu {
               `<span class="hm-stat${cls}"><span class="hm-stat__label">${label}</span><span class="hm-stat__bar"><i style="transform:scaleX(${clamp(v, 0.04, 1).toFixed(3)})"></i></span><span class="hm-stat__v">${escapeHtml(text)}</span></span>`
           )
           .join("");
-        const meta = [`Mag ${d.magazine ?? "—"}`, d.scope > 0 ? `${d.scope}× scope` : null, d.pellets > 1 ? `${d.pellets} pellets` : null, d.projectile > 0 ? "Bolt drop" : null, d.loudness < 60 ? "Near-silent" : null]
+        const meta = [`Mag ${d.magazine ?? "—"}`, d.scope > 0 ? `${d.scope}×` : null, d.pellets > 1 ? `${d.pellets} pellets` : null, d.projectile > 0 ? "Bolt drop" : null]
           .filter(Boolean)
           .join(" · ");
         const lock = locked
@@ -386,12 +387,11 @@ export class HunterMenu {
           : "";
         return (
           `<button type="button" class="hm-arm${locked ? " is-locked" : ""}" data-arm="${escapeHtml(id)}" aria-pressed="false"${locked ? ` aria-disabled="true"` : ""} aria-label="${escapeHtml(d.name || id)}${locked ? `, locked — ${fmtInt(need)} points` : ""}">` +
-          `<span class="hm-arm__top"><span class="hm-arm__no">W·${String(i + 1).padStart(2, "0")}</span><span class="hm-arm__slot" aria-hidden="true"></span></span>` +
+          `<span class="hm-arm__top"><span class="hm-arm__no">W·${String(i + 1).padStart(2, "0")}<span class="hm-arm__meta">${escapeHtml(meta)}</span></span><span class="hm-arm__slot" aria-hidden="true"></span></span>` +
           `<span class="hm-arm__art">${weaponGlyph(id)}</span>` +
           `<span class="hm-arm__name">${escapeHtml(d.name || WEAPON_NAMES[id] || id)}</span>` +
           `<span class="hm-arm__desc">${escapeHtml(d.description || "")}</span>` +
           `<span class="hm-arm__stats">${bars}</span>` +
-          `<span class="hm-arm__meta">${escapeHtml(meta)}</span>` +
           lock +
           `</button>`
         );

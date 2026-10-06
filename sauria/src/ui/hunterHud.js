@@ -14,7 +14,7 @@
 // fills) is a transform or a single custom property.
 
 import * as THREE from "three";
-import { clamp, damp, remap } from "../core/math.js";
+import { clamp, remap } from "../core/math.js";
 import { icon, escapeHtml, formatMass, formatDuration, article, speciesSilhouette } from "./menu.js";
 
 /* --- Constants --- */
@@ -233,8 +233,10 @@ function deathHeadline(summary, hunter) {
   return "Lost on the island";
 }
 
-const SVG_NS = "http://www.w3.org/2000/svg";
 let uid = 0;
+
+/** True when the player asked the OS for less motion (decorative animations skip). */
+const reducedMotion = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 // Module-level temps: no allocation in update().
 const _origin = new THREE.Vector3();
@@ -326,12 +328,12 @@ export class HunterHud {
 
     // Cached display state: the DOM is written only when one of these changes.
     this._c = {
-      mode: "", gap: -1, crossA: -1, dotA: -1, bearing: -1, stripX: NaN, readout: "",
+      mode: "", gap: -1, crossA: -1, dotA: -1, bearing: -1, readout: "",
       windArrow: NaN, windText: "", windWarn: null, health: -1, stamina: -1, scent: -1, noise: -1, vis: -1,
       weapon: "", mag: -1, reserve: -1, magSize: -1, reloading: null, ring: -1, hint: "", slots: "",
       switching: null, targets: "", bag: "", radarOn: null, radarN: NaN, extract: "", extractSub: "",
       extractArrow: NaN, extractDist: "", extractPin: NaN, windPin: NaN, hurt: -1, low: -1, beating: null,
-      scopeRet: "", scopePower: "", bino: "", binoRange: "", lowStam: null, riding: null,
+      scopeRet: "", scopePower: "", bino: -1, binoRange: "", lowStam: null, etaKey: null, prompt: "",
     };
 
     this._hurt = 0;
@@ -343,6 +345,8 @@ export class HunterHud {
     this._blipCount = 0;
     this._radarAge = 99;
     this._radarSeen = false;
+    this._radarLast = { n: -1, fade: -1, bearing: -1, x: 0, z: 0, R: 0 };
+    this._expTimer = 0;
     this._toasts = [];
     this._tags = [];
     this._extraction = null; // { state, eta }
@@ -418,12 +422,17 @@ export class HunterHud {
     this._updateCompass(bearing, world, hunt, hunter);
     this._updateVitals(dt, hunter);
     this._updateAmmo(weapons, def);
-    this._updateExpedition(hunt, world);
+    this._expTimer -= dt;
+    if (this._expTimer <= 0) {
+      this._expTimer = 0.5;
+      this._updateExpedition(hunt, world);
+    }
     this._updateRadar(dt, hunt, hunter, bearing);
     this._updateExtraction(dt, hunt, hunter, world, bearing);
     if (mode === "scope") this._updateScope(weapons, def, camera);
     if (mode === "bino") this._updateBinoculars(dt, controller, weapons, hunt, camera, bearing);
     else this._rangeTimer = 0;
+    this._updatePrompt(controller, mode, alive);
     this._updateToasts(dt);
   }
 
@@ -654,6 +663,7 @@ export class HunterHud {
 
       <div class="hh-cross"><i class="hh-cross__t hh-cross__t--u"></i><i class="hh-cross__t hh-cross__t--r"></i><i class="hh-cross__t hh-cross__t--d"></i><i class="hh-cross__t hh-cross__t--l"></i><i class="hh-cross__dot"></i></div>
       <div class="hh-hit"><i></i><i></i><i></i><i></i></div>
+      <p class="hh-prompt"><span class="hh-prompt__text"></span></p>
 
       <div class="hh-compass">
         <div class="hh-compass__window">
@@ -677,12 +687,6 @@ export class HunterHud {
 
       <div class="hh-toasts"></div>
 
-      <div class="hh-exp">
-        <p class="hh-eyebrow">Quarry</p>
-        <p class="hh-exp__targets">Anything that moves</p>
-        <p class="hh-exp__bag"></p>
-      </div>
-
       <div class="hh-radar">
         <div class="hh-radar__face">
           <div class="hh-radar__sweep"></div>
@@ -691,6 +695,12 @@ export class HunterHud {
           <i class="hh-radar__me"></i>
         </div>
         <p class="hh-radar__label">Radar · ${RADAR_RANGE} m</p>
+      </div>
+
+      <div class="hh-exp">
+        <p class="hh-eyebrow">Quarry</p>
+        <p class="hh-exp__targets">Anything that moves</p>
+        <p class="hh-exp__bag"></p>
       </div>
 
       <div class="hh-status">
@@ -751,6 +761,8 @@ export class HunterHud {
     this._cross = $(".hh-cross");
     this._crossDot = $(".hh-cross__dot");
     this._hit = $(".hh-hit");
+    this._prompt = $(".hh-prompt");
+    this._promptText = $(".hh-prompt__text");
     this._compassWin = $(".hh-compass__window");
     this._strip = $(".hh-compass__strip");
     this._readout = $(".hh-compass__readout");
@@ -813,8 +825,9 @@ export class HunterHud {
     if (cw > 0) this._compassW = cw;
     const rw = this._radarFace?.clientWidth;
     if (rw > 0) this._radarR = rw / 2;
-    this._c.stripX = NaN;
+    this._c.bearing = -1; // re-centre the compass strip for the new width
     this._c.radarN = NaN;
+    if (this._radarLast) this._radarLast.n = -1;
     this._c.windPin = NaN;
     this._c.extractPin = NaN;
     this._layoutBinoculars();
@@ -861,7 +874,7 @@ export class HunterHud {
       this.toast(name ? `Call device — ${name} call sent` : "Call device sounded", "info");
     });
     on("dryfire", () => {
-      if (!this.visible || !this._ammo.animate) return;
+      if (!this.visible || !this._ammo.animate || reducedMotion()) return;
       this._ammo.animate([{ transform: "translateX(0)" }, { transform: "translateX(-4px)" }, { transform: "translateX(3px)" }, { transform: "translateX(0)" }], { duration: 220, easing: "ease-out" });
     });
   }
@@ -896,8 +909,9 @@ export class HunterHud {
     }
     this._blipCount = n;
     this._radarAge = 0;
+    this._radarLast.n = -1;
     this._radarSeen = true;
-    if (this.visible && this._radarFace.animate) {
+    if (this.visible && this._radarFace.animate && !reducedMotion()) {
       this._radarFace.animate([{ boxShadow: "0 0 0 0 rgba(214,165,78,0.45)" }, { boxShadow: "0 0 0 14px rgba(214,165,78,0)" }], { duration: 900, easing: "ease-out" });
     }
   }
@@ -1009,7 +1023,7 @@ export class HunterHud {
         c.windWarn = warn;
         this._wind.classList.toggle("is-warn", warn);
       }
-      this._placePin(this._pinWind, calm ? null : relDeg(bearing, from), "windPin");
+      this._placePin(this._pinWind, calm ? null : relDeg(bearing, from), "windPin", false);
     } else {
       if (c.windText !== "—") {
         c.windText = "—";
@@ -1029,26 +1043,47 @@ export class HunterHud {
         if (dx * dx + dz * dz > 1) heliRel = relDeg(bearing, bearingOf(Math.atan2(dx, dz)));
       }
     }
-    this._placePin(this._pinHeli, heliRel, "extractPin");
+    this._placePin(this._pinHeli, heliRel, "extractPin", true);
   }
 
-  _placePin(el, rel, key) {
+  /**
+   * Position a marker on the compass strip. `rel` is degrees off the view centre
+   * (null hides it). Off-strip markers either pin to the edge with an outward
+   * chevron (`edge`) or hide — the wind already has its own arrow below.
+   */
+  _placePin(el, rel, key, edge) {
     const c = this._c;
-    if (rel === null) {
+    // Keep edge-pinned markers inside the unfaded part of the strip (mask fades the outer 16%).
+    const half = this._compassW * 0.34 - 6;
+    const off = rel === null ? 0 : rel * PX_PER_DEG;
+    const outside = Math.abs(off) > this._compassW / 2 - 10;
+    if (rel === null || (outside && !edge)) {
       if (c[key] !== null) {
         c[key] = null;
         el.classList.remove("is-on");
       }
       return;
     }
-    const half = this._compassW / 2 - 12;
-    const x = Math.round(clamp(rel * PX_PER_DEG, -half, half) + this._compassW / 2);
+    const x = Math.round(clamp(off, -half, half) + this._compassW / 2);
     if (x !== c[key]) {
       if (c[key] === null || Number.isNaN(c[key])) el.classList.add("is-on");
       c[key] = x;
       el.style.transform = `translate3d(${x}px,0,0)`;
-      el.classList.toggle("is-edge", Math.abs(rel * PX_PER_DEG) > half);
+      const side = Math.abs(off) > half ? (off < 0 ? "l" : "r") : "";
+      if (side !== (el.dataset.edge || "")) el.dataset.edge = side;
     }
+  }
+
+  /** Context line under the crosshair ("Out of breath", "Swimming — weapon stowed"…). */
+  _updatePrompt(controller, mode, alive) {
+    const c = this._c;
+    const p = alive && mode !== "riding" ? controller?.prompt : null;
+    const text = typeof p === "string" ? p : "";
+    if (text === c.prompt) return;
+    c.prompt = text;
+    // Keep the old words in place while the line fades out.
+    if (text) this._promptText.textContent = text;
+    this._prompt.classList.toggle("is-on", !!text);
   }
 
   _updateVitals(dt, hunter) {
@@ -1231,7 +1266,16 @@ export class HunterHud {
     const pz = hunter.position.z;
     const R = this._radarR - 4;
     const k = R / RADAR_RANGE;
-    const fade = clamp(1 - this._radarAge / RADAR_FADE, 0.18, 1);
+    const fade = Math.round(clamp(1 - this._radarAge / RADAR_FADE, 0.18, 1) * 50) / 50;
+    // Nothing moved, turned or faded since last frame: leave the blips alone.
+    const r = this._radarLast;
+    if (r.n === this._blipCount && r.fade === fade && r.bearing === bearing && Math.abs(r.x - px) < 0.5 && Math.abs(r.z - pz) < 0.5 && r.R === R) return;
+    r.n = this._blipCount;
+    r.fade = fade;
+    r.bearing = bearing;
+    r.x = px;
+    r.z = pz;
+    r.R = R;
     for (let i = 0; i < BLIP_POOL; i++) {
       const el = this._blipEls[i];
       const b = this._blips[i];
@@ -1252,7 +1296,7 @@ export class HunterHud {
         sy *= R / d;
       }
       el.style.transform = `translate3d(${sx.toFixed(1)}px,${sy.toFixed(1)}px,0)`;
-      el.style.opacity = fade.toFixed(2);
+      el.style.opacity = fade;
       b.on = true;
     }
   }
@@ -1284,6 +1328,7 @@ export class HunterHud {
         state === "called" ? "Extraction called" : state === "inbound" ? "Helicopter inbound" : state === "landed" ? "Get under the helicopter" : "";
       c.extractSub = "";
       c.extractDist = "";
+      c.etaKey = null;
     }
     if (!ex) return;
 
@@ -1291,14 +1336,18 @@ export class HunterHud {
     const eta = Number(ex.eta);
     if (Number.isFinite(eta) && Math.abs(eta - this._etaLocal) > 1.5) this._etaLocal = eta;
     this._etaLocal = Math.max(0, this._etaLocal - dt);
+    const etaKey = state === "landed" ? -2 : this._etaLocal > 0.5 ? Math.ceil(this._etaLocal) : -1;
     const sub =
-      state === "landed"
+      etaKey === c.etaKey
+        ? c.extractSub
+        : state === "landed"
         ? "Walk under the rotor to board"
         : this._etaLocal > 0.5
           ? `ETA ${fmtClock(this._etaLocal)}`
           : state === "called"
             ? "Scrambling…"
             : "On final approach";
+    c.etaKey = etaKey;
     if (sub !== c.extractSub) {
       c.extractSub = sub;
       this._extractSub.textContent = sub;
@@ -1345,13 +1394,12 @@ export class HunterHud {
   _updateBinoculars(dt, controller, weapons, hunt, camera, bearing) {
     const c = this._c;
     const zoom = Number(controller?.zoom);
-    const mag = zoom > 0 && zoom < 1 ? `${Math.round(1 / zoom)}×` : "8×";
-    const brg = `BRG ${pad3(bearing)}° ${cardinalOf(bearing)}`;
-    const foot = `${brg}|${mag}`;
-    if (foot !== c.bino) {
-      c.bino = foot;
-      this._binoBrg.textContent = brg;
-      this._binoZoom.textContent = mag;
+    const power = zoom > 0 && zoom < 1 ? Math.round(1 / zoom) : 8;
+    const key = Math.round(bearing) * 100 + power;
+    if (key !== c.bino) {
+      c.bino = key;
+      this._binoBrg.textContent = `BRG ${pad3(bearing)}° ${cardinalOf(bearing)}`;
+      this._binoZoom.textContent = `${power}×`;
     }
 
     this._rangeTimer -= dt;

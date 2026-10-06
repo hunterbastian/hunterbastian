@@ -449,6 +449,7 @@ async function startHunterMode() {
         audio,
         menu,
         hud,
+        map: game.map,
         uiRoot,
         isTouch,
         settings: () => settings,
@@ -459,6 +460,10 @@ async function startHunterMode() {
         onSessionStart: (session) => {
           game.hunter = session;
           game.state = "hunter";
+        },
+        onPlanner: () => {
+          game.hunter = null;
+          game.state = "hunter-menu";
         },
       });
     }
@@ -735,6 +740,9 @@ window.__sauria = {
   },
   get audio() {
     return audio;
+  },
+  get hunterMode() {
+    return game.hunterMode ?? null;
   },
   input,
   renderer,
