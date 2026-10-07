@@ -24,7 +24,7 @@ const MOVE_EPS = 0.12; // stick/key magnitude that counts as "moving"
 const CONTEXT_INTERVAL = 0.1; // s between findFood / canDrink probes
 const HINT_INTERVAL = 0.5; // s between hint checks
 const HINT_SPACING = 9; // s minimum between two hint toasts
-const HINT_KEY = "sauria.hints.v1";
+const HINT_KEY = "underfern.hints.v1";
 const FLASH_TIME = 1.6; // s a transient prompt ("Sniff ready in 4 s") stays
 
 // Damage types that are impacts (worth a camera shake), not slow attrition.

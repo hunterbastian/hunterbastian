@@ -223,7 +223,7 @@ const BASE_CSS = `
 }
 `;
 
-const STYLE_ID = "sauria-touch-base";
+const STYLE_ID = "underfern-touch-base";
 
 /* --- Helpers ----------------------------------------------------------------- */
 

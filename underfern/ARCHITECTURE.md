@@ -1,6 +1,6 @@
-# Sauria — architecture & module contract
+# Underfern — architecture & module contract
 
-Sauria is a single-player, third-person **dinosaur survival** game for the browser,
+Underfern is a single-player, third-person **dinosaur survival** game for the browser,
 in the spirit of *The Isle*: you hatch as a juvenile dinosaur on a misty,
 overgrown island and have to eat, drink, hide, fight and grow to adulthood while
 other dinosaurs (carnivores and herbivores, driven by AI) live their own lives
@@ -74,7 +74,7 @@ working (add, don't rename) and note it in your report.
 ## File layout & ownership
 
 ```
-sauria/
+underfern/
   index.html            UI      import map, <div id="app"> › <canvas id="game">, <div id="ui">, loads src/main.js
   style.css             UI      all CSS (HUD, menu, map, touch controls, overlays)
   icon.svg              UI
@@ -630,7 +630,7 @@ export class World {
 enabled), owns the render-style pipeline (`"detailed"` direct render vs `"pixel"`
 low-res target + nearest upscale + dither pass), picks quality, builds the world, runs the state machine
 (`menu` → `playing` ⇄ `paused` → `dead`), saves/loads, handles resize/visibility,
-and exposes a test hook `window.__sauria`.
+and exposes a test hook `window.__underfern`.
 
 URL params: `?species=<id>` autostart · `?growth=0..1` · `?t=0..1` time of day
 (pauses the clock) · `?seed=N` · `?quality=low|high` · `?style=detailed|pixel` · `?debug=1` (fps/overlay) ·
@@ -679,7 +679,7 @@ hunter at a landing zone (short fly-in, then it departs) → first-person hunt �
 dinosaurs (each kill of any species is a trophy; target species score more) → press X to
 call extraction; the helicopter arrives after ~25 s and hovers low at your position; walk
 under it (≤ 8 m) to extract → **summary** (trophies, points). Points persist in
-`localStorage` (`sauria.hunter.v1`) and unlock weapons. Dying ends the hunt and loses that
+`localStorage` (`underfern.hunter.v1`) and unlock weapons. Dying ends the hunt and loses that
 hunt's trophies. A **trophy room** lists every trophy with species, weight, distance,
 headshot, date.
 
@@ -834,5 +834,5 @@ export class HunterMenu {
 - `src/hunter/hunterMode.js` — `createHunterMode(deps)` returns
   `{ open, begin, update, render, pause, resume, quit, setSensitivity, toast, session, hunter, weapons }`;
   main.js forwards `update`/`render` while its state is `"hunter"`.
-- Test hook: `window.__sauria.advance(seconds, dt = 0.05)` runs the state machine
+- Test hook: `window.__underfern.advance(seconds, dt = 0.05)` runs the state machine
   without drawing. `node tests/run-tests.mjs` runs unit + smoke tests headlessly.

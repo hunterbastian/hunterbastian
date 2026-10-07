@@ -836,7 +836,7 @@ export class Menu {
     this._returnFocus = null;
     this._scrollLockUntil = 0;
     this._scrollRaf = 0;
-    this._id = `sauria-menu-${++uid}`;
+    this._id = `underfern-menu-${++uid}`;
 
     this._build();
     this._bind();
@@ -973,14 +973,14 @@ export class Menu {
     const id = this._id;
     const el = document.createElement("section");
     el.className = "menu";
-    el.setAttribute("aria-label", "Sauria — main menu");
+    el.setAttribute("aria-label", "Underfern — main menu");
     el.innerHTML = `
       <div class="menu__veil" aria-hidden="true">${contourSVG(hash("contours", 2026))}</div>
       <div class="menu__scrim" aria-hidden="true"></div>
       <header class="menu__bar">
         <div class="brand">
           <svg class="brand__mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false">${TRACK_MARK}</svg>
-          <span class="brand__name">Sauria</span>
+          <span class="brand__name">Underfern</span>
           <span class="brand__sub">A field guide to staying alive</span>
         </div>
         <nav class="menu__tools" aria-label="Menu tools">
@@ -991,7 +991,7 @@ export class Menu {
 
       <div class="screen screen--title" data-screen="title">
         <p class="eyebrow title__eyebrow">Late Jurassic · Utah · 150 million years ago</p>
-        <h1 class="wordmark">Sauria</h1>
+        <h1 class="wordmark">Underfern</h1>
         <p class="tagline">Hatch small. Stay hidden. Grow into something the island fears.</p>
         <div class="loading" role="progressbar" aria-label="Preparing the island" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
           <div class="loading__track"><div class="loading__fill"></div></div>

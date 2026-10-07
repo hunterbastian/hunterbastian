@@ -46,7 +46,7 @@ const TROPHY_VALUE_FALLBACK = {
 const DANGER_LABEL = ["Skittish", "Defends itself", "Dangerous", "Deadly"];
 const DEFAULT_UNLOCKED = ["revolver", "shotgun", "rifle"];
 const DEFAULT_LOADOUT = ["rifle", "revolver"];
-const PLAN_KEY = "sauria.hunter.plan.v1";
+const PLAN_KEY = "underfern.hunter.plan.v1";
 const FOCUSABLE = 'button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
 
 /* --- Helpers --- */
@@ -239,7 +239,7 @@ export class HunterMenu {
     el.innerHTML = `
       <div class="hm__bg" aria-hidden="true">${topoSVG(20260)}</div>
       <header class="hm-top">
-        <div class="hm-brand">${brandMark("hm-brand__mark")}<span class="hm-brand__name">Sauria</span><span class="hm-brand__sep"></span><em class="hm-brand__sub">Hunter's lodge</em></div>
+        <div class="hm-brand">${brandMark("hm-brand__mark")}<span class="hm-brand__name">Underfern</span><span class="hm-brand__sep"></span><em class="hm-brand__sub">Hunter's lodge</em></div>
         <div class="hm-tabs" role="tablist" aria-label="Lodge">
           <button type="button" class="hm-tab" role="tab" id="hm-tab-plan" aria-controls="hm-view-plan" data-view="plan" aria-selected="true">${icon("flag")}<span>Expedition</span></button>
           <button type="button" class="hm-tab" role="tab" id="hm-tab-trophies" aria-controls="hm-view-trophies" data-view="trophies" aria-selected="false">${hicon("ledger")}<span>Trophy room</span><span class="hm-tab__n">0</span></button>

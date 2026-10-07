@@ -1,10 +1,12 @@
-// Sauria — boot, game state machine and the frame loop.
+// Underfern — boot, game state machine and the frame loop.
 //
 // States: "loading" → "menu" (cinematic flight over the live island) →
 // "playing" ⇄ "paused" → "dead" → (respawn | menu). Hunter mode is loaded on
 // demand from ./hunter/hunterMode.js and takes over the loop while it runs.
 
-// First: lays out the app frame (and turns it sideways on a phone held upright)
+// Copy saves from the working title before anything reads storage.
+import "./core/migrate.js";
+// Then lay out the app frame (and turn it sideways on a phone held upright)
 // before anything measures it.
 import { appSize, onAppResize, tryLockLandscape } from "./core/screen.js";
 import * as THREE from "three";
@@ -31,7 +33,7 @@ const num = (key) => {
   return v === null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v);
 };
 const DEBUG = params.get("debug") === "1";
-const SETTINGS_KEY = "sauria.settings.v1";
+const SETTINGS_KEY = "underfern.settings.v1";
 
 const store = {
   get(key) {
@@ -426,7 +428,7 @@ menu.onSettingsChange = (next) => {
       if (game.state === "menu" || game.state === "loading") {
         location.reload(); // terrain resolution / density / shadows are baked at load
       } else {
-        const text = "Quality changes apply the next time Sauria loads";
+        const text = "Quality changes apply the next time Underfern loads";
         if (game.hunter && game.hunterMode?.toast) game.hunterMode.toast(text, "info");
         else hud.toast(text, "info");
       }
@@ -486,7 +488,7 @@ async function startHunterMode() {
     game.state = "hunter-menu";
     game.hunterMode.open();
   } catch (err) {
-    console.warn("[sauria] hunter mode unavailable", err);
+    console.warn("[underfern] hunter mode unavailable", err);
     game.state = "menu";
     menu.show({ save: menuSaveSummary() });
     flashNotice("Hunter mode is still being built — try Survival for now.");
@@ -663,7 +665,7 @@ async function boot() {
         pos: Number.isFinite(px) && Number.isFinite(pz) ? { x: px, z: pz } : null,
       });
     } catch (err) {
-      console.warn("[sauria] unknown ?species", autostart, err);
+      console.warn("[underfern] unknown ?species", autostart, err);
     }
   } else if (params.get("hunter") === "1") {
     startHunterMode();
@@ -736,7 +738,7 @@ function updateDebug() {
     .join("\n");
 }
 
-window.__sauria = {
+window.__underfern = {
   get state() {
     return game.state;
   },
@@ -790,7 +792,7 @@ window.__sauria = {
 
 requestAnimationFrame(frame);
 boot().catch((err) => {
-  console.error("[sauria] failed to start", err);
+  console.error("[underfern] failed to start", err);
   recordError(err?.message || err);
-  menu.setLoading(0, "Sauria couldn't start on this device. Try reloading, or a different browser.");
+  menu.setLoading(0, "Underfern couldn't start on this device. Try reloading, or a different browser.");
 });

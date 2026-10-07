@@ -20,7 +20,7 @@ export const GAME = {
   npcDespawn: 320, // ...and vanish beyond this
   npcCap: 26, // living NPCs at once (scaled by quality)
   carcassLifetime: 600, // seconds before a carcass rots away
-  saveKey: "sauria.save.v1",
+  saveKey: "underfern.save.v1",
 };
 
 // Two render profiles. main.js picks one (auto: low on touch / small screens),

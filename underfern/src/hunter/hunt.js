@@ -33,7 +33,7 @@ import { TAU, clamp } from "../core/math.js";
 
 /* --- Profile ----------------------------------------------------------------- */
 
-const PROFILE_KEY = "sauria.hunter.v1";
+const PROFILE_KEY = "underfern.hunter.v1";
 const PROFILE_VERSION = 1;
 const DEFAULT_WEAPONS = ["revolver", "shotgun", "rifle"];
 const MAX_STORED_TROPHIES = 500; // keeps the localStorage entry well under quota

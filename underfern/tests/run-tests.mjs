@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Sauria test runner — `node tests/run-tests.mjs` from sauria/.
+// Underfern test runner — `node tests/run-tests.mjs` from underfern/.
 //
-// 1. Serves sauria/ from a tiny static server on a free port.
+// 1. Serves underfern/ from a tiny static server on a free port.
 // 2. Launches headless Chromium (Playwright) with SwiftShader WebGL.
 // 3. Runs tests/unit.html (browser-side unit tests, results on window.__unit).
 // 4. Runs smoke tests against the real game: survival in both render styles,
@@ -12,7 +12,7 @@
 //
 // Headless WebGL is software-rendered and very slow (a frame can take a
 // second), and main.js clamps dt to 0.05 s, so game time crawls. The smoke
-// tests therefore fast-forward the simulation with `__sauria.advance()` /
+// tests therefore fast-forward the simulation with `__underfern.advance()` /
 // `hunterMode.update()` (no drawing) and only wait on real frames for
 // screenshots.
 //
@@ -140,7 +140,7 @@ async function openPage(browser, url, { mobile = false, upright = false } = {}) 
 }
 
 const waitState = (page, states, timeout = BOOT_TIMEOUT) =>
-  page.waitForFunction((s) => window.__sauria && s.includes(window.__sauria.state), [].concat(states), { timeout, polling: 250 });
+  page.waitForFunction((s) => window.__underfern && s.includes(window.__underfern.state), [].concat(states), { timeout, polling: 250 });
 
 /** Wait for `n` real frames to be drawn (each can take ~1 s under SwiftShader). */
 const frames = (page, n = 2) =>
@@ -168,7 +168,7 @@ function expect(cond, msg) {
  * the last check (each error fails only the step it happened in).
  */
 async function expectClean(page, errors) {
-  const recorded = await page.evaluate(() => (window.__sauria ? window.__sauria.errors.slice() : []));
+  const recorded = await page.evaluate(() => (window.__underfern ? window.__underfern.errors.slice() : []));
   const fresh = recorded.slice(errors.gameSeen || 0);
   errors.gameSeen = recorded.length;
   const all = [...errors.splice(0), ...fresh.map((e) => `game error: ${e}`)];
@@ -177,16 +177,16 @@ async function expectClean(page, errors) {
 
 /** Hold keys while fast-forwarding `seconds` of game time; returns metres travelled. */
 async function driveWithKeys(page, keys, seconds) {
-  const start = await page.evaluate(() => __sauria.player.position.toArray());
+  const start = await page.evaluate(() => __underfern.player.position.toArray());
   for (const k of keys) await page.keyboard.down(k);
   let info;
   try {
     // Read the result in the same task as the fast-forward: a real frame could
     // otherwise slip in after the keys are released.
     info = await page.evaluate((s) => {
-      __sauria.advance(s);
-      const p = __sauria.player;
-      return { pos: p.position.toArray(), gait: p.gait, state: __sauria.state };
+      __underfern.advance(s);
+      const p = __underfern.player;
+      return { pos: p.position.toArray(), gait: p.gait, state: __underfern.state };
     }, seconds);
   } finally {
     for (const k of keys.slice().reverse()) await page.keyboard.up(k);
@@ -207,19 +207,19 @@ const SUITES = [
         async run({ page, errors }) {
           await waitState(page, "playing");
           const info = await page.evaluate(() => ({
-            state: __sauria.state,
-            style: __sauria.style,
+            state: __underfern.state,
+            style: __underfern.style,
             canvasStyle: document.getElementById("game").dataset.style,
-            species: __sauria.player?.species.id,
-            alive: __sauria.player?.alive,
+            species: __underfern.player?.species.id,
+            alive: __underfern.player?.alive,
             hud: !!document.querySelector("#ui *"),
           }));
           expect(info.species === "dryosaurus" && info.alive, `expected a living dryosaurus, got ${JSON.stringify(info)}`);
           expect(info.style === "pixel" && info.canvasStyle === "pixel", `expected the pixel style, got ${info.style}/${info.canvasStyle}`);
-          const buf = await page.evaluate(() => [__sauria.renderer.domElement.width, __sauria.renderer.domElement.height, innerHeight]);
+          const buf = await page.evaluate(() => [__underfern.renderer.domElement.width, __underfern.renderer.domElement.height, innerHeight]);
           expect(buf[1] < buf[2], `pixel style should draw fewer rows than the window (${buf[1]} vs ${buf[2]})`);
           // The camera swoops down from the title flight (≤ 3.2 s); let it land behind the player.
-          await page.evaluate(() => __sauria.advance(3.5));
+          await page.evaluate(() => __underfern.advance(3.5));
           await frames(page, 2);
           await shot(page, "survival-pixel");
           await expectClean(page, errors);
@@ -246,10 +246,10 @@ const SUITES = [
       {
         name: "survival: death → death screen → hatch again",
         async run({ page, errors }) {
-          await page.evaluate(() => __sauria.player.takeDamage(1e9, null, "fall"));
-          await page.evaluate(() => __sauria.advance(0.2));
-          expect((await page.evaluate(() => __sauria.state)) === "dead", "state should be 'dead' after a fatal fall");
-          await page.evaluate(() => __sauria.advance(3.5));
+          await page.evaluate(() => __underfern.player.takeDamage(1e9, null, "fall"));
+          await page.evaluate(() => __underfern.advance(0.2));
+          expect((await page.evaluate(() => __underfern.state)) === "dead", "state should be 'dead' after a fatal fall");
+          await page.evaluate(() => __underfern.advance(3.5));
           await page.waitForFunction(() => document.querySelector(".ovl--death")?.classList.contains("is-open"), null, { timeout: 30_000 });
           const cause = await page.locator(".ovl--death .death__cause").innerText();
           expect(/fall/i.test(cause), `death screen cause should mention the fall, got "${cause}"`);
@@ -257,7 +257,7 @@ const SUITES = [
           await shot(page, "survival-death");
           await page.click(".ovl--death [data-act='respawn']");
           await waitState(page, "playing", 30_000);
-          const p = await page.evaluate(() => ({ alive: __sauria.player?.alive, growth: __sauria.player?.growth, open: document.querySelector(".ovl--death").classList.contains("is-open") }));
+          const p = await page.evaluate(() => ({ alive: __underfern.player?.alive, growth: __underfern.player?.growth, open: document.querySelector(".ovl--death").classList.contains("is-open") }));
           expect(p.alive && p.growth === 0 && !p.open, `respawn should hatch a fresh juvenile, got ${JSON.stringify(p)}`);
           await expectClean(page, errors);
         },
@@ -272,7 +272,7 @@ const SUITES = [
         name: "survival (allosaurus, detailed): autostarts, sprints with W+Shift",
         async run({ page, errors }) {
           await waitState(page, "playing");
-          const style = await page.evaluate(() => [__sauria.style, document.getElementById("game").dataset.style]);
+          const style = await page.evaluate(() => [__underfern.style, document.getElementById("game").dataset.style]);
           expect(style[0] === "detailed" && style[1] === "detailed", `expected the detailed style, got ${style}`);
           const r = await driveWithKeys(page, ["ShiftLeft", "KeyW"], 2.5);
           expect(r.dist > 3, `allosaurus moved only ${r.dist.toFixed(2)} m sprinting for 2.5 s`);
@@ -287,10 +287,10 @@ const SUITES = [
         name: "survival: pause and resume",
         async run({ page, errors }) {
           await page.keyboard.press("Escape");
-          await page.evaluate(() => __sauria.advance(0.1));
-          expect((await page.evaluate(() => __sauria.state)) === "paused", "Esc should pause");
-          await page.evaluate(() => __sauria.resume());
-          expect((await page.evaluate(() => __sauria.state)) === "playing", "resume should return to play");
+          await page.evaluate(() => __underfern.advance(0.1));
+          expect((await page.evaluate(() => __underfern.state)) === "paused", "Esc should pause");
+          await page.evaluate(() => __underfern.resume());
+          expect((await page.evaluate(() => __underfern.state)) === "playing", "resume should return to play");
           await expectClean(page, errors);
         },
       },
@@ -306,8 +306,8 @@ const SUITES = [
         async run({ page, ctx, errors }) {
           await waitState(page, "playing");
           const setup = await page.evaluate(() => ({
-            isTouch: __sauria.input.isTouch,
-            style: __sauria.style,
+            isTouch: __underfern.input.isTouch,
+            style: __underfern.style,
             zone: (() => {
               const r = document.querySelector(".touch-zone--move")?.getBoundingClientRect();
               return r ? { x: r.x, y: r.y, w: r.width, h: r.height } : null;
@@ -322,16 +322,16 @@ const SUITES = [
           const touch = (type, pts) => client.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
           const x = setup.zone.x + setup.zone.w * 0.45;
           const y = setup.zone.y + setup.zone.h * 0.65;
-          const start = await page.evaluate(() => __sauria.player.position.toArray());
+          const start = await page.evaluate(() => __underfern.player.position.toArray());
           await touch("touchStart", [{ x, y, id: 1 }]);
           for (let i = 1; i <= 6; i++) await touch("touchMove", [{ x, y: y - i * 14, id: 1 }]);
-          const axis = await page.evaluate(() => __sauria.input.moveAxis());
+          const axis = await page.evaluate(() => __underfern.input.moveAxis());
           expect(Math.hypot(axis.x, axis.y) > 0.5 && axis.y > 0.4, `joystick axis should point forward, got ${JSON.stringify(axis)}`);
-          await page.evaluate(() => __sauria.advance(2.5));
+          await page.evaluate(() => __underfern.advance(2.5));
           await frames(page, 1);
           await shot(page, "touch-joystick");
           await touch("touchEnd", []);
-          const after = await page.evaluate(() => ({ pos: __sauria.player.position.toArray(), axis: __sauria.input.moveAxis() }));
+          const after = await page.evaluate(() => ({ pos: __underfern.player.position.toArray(), axis: __underfern.input.moveAxis() }));
           const dist = Math.hypot(after.pos[0] - start[0], after.pos[2] - start[2]);
           expect(dist > 1, `stegosaurus moved only ${dist.toFixed(2)} m with the stick held for 2.5 s`);
           expect(Math.hypot(after.axis.x, after.axis.y) === 0, `releasing the stick should zero the axis, got ${JSON.stringify(after.axis)}`);
@@ -349,10 +349,10 @@ const SUITES = [
           expect(c, "no pause touch button");
           const client = await ctx.newCDPSession(page);
           await client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: c[0], y: c[1], id: 2 }] });
-          await page.evaluate(() => __sauria.advance(0.1));
+          await page.evaluate(() => __underfern.advance(0.1));
           await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-          await page.evaluate(() => __sauria.advance(0.1));
-          expect((await page.evaluate(() => __sauria.state)) === "paused", "the pause button should pause the game");
+          await page.evaluate(() => __underfern.advance(0.1));
+          expect((await page.evaluate(() => __underfern.state)) === "paused", "the pause button should pause the game");
           await expectClean(page, errors);
         },
       },
@@ -367,14 +367,14 @@ const SUITES = [
               el.value = String(v);
               el.dispatchEvent(new Event("input", { bubbles: true }));
               el.dispatchEvent(new Event("change", { bubbles: true }));
-              return window.__sauria.renderer.domElement.height;
+              return window.__underfern.renderer.domElement.height;
             }, v);
           const mid = await rowsAt(0.5);
           const chunky = await rowsAt(1);
           const fine = await rowsAt(0);
           expect(chunky < mid && mid < fine, `rows should shrink as pixels grow: fine ${fine}, in between ${mid}, chunky ${chunky}`);
           await rowsAt(0.75);
-          const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("sauria.settings.v1") || "{}").pixelSize);
+          const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("underfern.settings.v1") || "{}").pixelSize);
           expect(saved === 0.75, `the pixel size should persist (saved ${saved})`);
           await frames(page, 1);
           await shot(page, "touch-settings");
@@ -396,14 +396,14 @@ const SUITES = [
           const f = await page.evaluate(() => {
             const app = document.getElementById("app");
             const r = app.getBoundingClientRect();
-            const c = __sauria.renderer.domElement;
+            const c = __underfern.renderer.domElement;
             const cs = getComputedStyle(app);
             return {
               rotated: document.documentElement.classList.contains("is-rotated"),
               app: [app.clientWidth, app.clientHeight],
               rect: [Math.round(r.width), Math.round(r.height)],
               buf: [c.width, c.height],
-              aspect: __sauria.camera.aspect,
+              aspect: __underfern.camera.aspect,
               view: [innerWidth, innerHeight],
               insets: ["--sa-t", "--sa-r", "--sa-b", "--sa-l"].map((k) => cs.getPropertyValue(k).trim()),
             };
@@ -412,7 +412,7 @@ const SUITES = [
           expect(f.app[0] === f.view[1] && f.app[1] === f.view[0], `the app should be laid out landscape (${f.app} in a ${f.view} viewport)`);
           expect(f.rect[0] === f.view[0] && f.rect[1] === f.view[1], `the turned app should cover the viewport exactly (${f.rect})`);
           expect(f.buf[0] > f.buf[1] && f.aspect > 1.5, `the drawing buffer should be landscape-shaped (${f.buf}, aspect ${f.aspect.toFixed(2)})`);
-          await page.evaluate(() => __sauria.advance(3.5));
+          await page.evaluate(() => __underfern.advance(3.5));
           await frames(page, 2);
           await shot(page, "upright-hud");
           await expectClean(page, errors);
@@ -436,7 +436,7 @@ const SUITES = [
           const touch = (type, pts) => client.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
           const ax = zone.w * 0.22;
           const ay = zone.h * 0.65;
-          const start = await page.evaluate(() => ({ pos: __sauria.player.position.toArray(), yaw: __sauria.controller.camera.yaw }));
+          const start = await page.evaluate(() => ({ pos: __underfern.player.position.toArray(), yaw: __underfern.controller.camera.yaw }));
           const [x0, y0] = await toClient(ax, ay);
           await touch("touchStart", [{ x: x0, y: y0, id: 1 }]);
           let last = [x0, y0];
@@ -445,11 +445,11 @@ const SUITES = [
             await touch("touchMove", [{ x: last[0], y: last[1], id: 1 }]);
           }
           expect(last[0] > x0 + 60 && Math.abs(last[1] - y0) < 1, `the thumb should travel toward the phone's right edge (${x0},${y0} → ${last})`);
-          const axis = await page.evaluate(() => ({ ...__sauria.input.moveAxis() }));
+          const axis = await page.evaluate(() => ({ ...__underfern.input.moveAxis() }));
           expect(axis.y > 0.6 && Math.abs(axis.x) < 0.25, `the stick should read forward, got ${JSON.stringify(axis)}`);
-          await page.evaluate(() => __sauria.advance(2.5));
+          await page.evaluate(() => __underfern.advance(2.5));
           await touch("touchEnd", []);
-          const end = await page.evaluate(() => __sauria.player.position.toArray());
+          const end = await page.evaluate(() => __underfern.player.position.toArray());
           const dx = end[0] - start.pos[0];
           const dz = end[2] - start.pos[2];
           const dist = Math.hypot(dx, dz);
@@ -473,10 +473,10 @@ const SUITES = [
           expect(c[0] > 300 && c[1] > 600, `the pause button should be near the phone's bottom-right corner (app top-right), at ${c.map(Math.round)}`);
           const client = await ctx.newCDPSession(page);
           await client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: c[0], y: c[1], id: 2 }] });
-          await page.evaluate(() => __sauria.advance(0.1));
+          await page.evaluate(() => __underfern.advance(0.1));
           await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-          await page.evaluate(() => __sauria.advance(0.1));
-          expect((await page.evaluate(() => __sauria.state)) === "paused", "the pause button should pause the game");
+          await page.evaluate(() => __underfern.advance(0.1));
+          expect((await page.evaluate(() => __underfern.state)) === "paused", "the pause button should pause the game");
           await expectClean(page, errors);
         },
       },
@@ -490,7 +490,7 @@ const SUITES = [
         name: "hunter: ?hunter=1 opens the expedition planner",
         async run({ page, errors }) {
           await waitState(page, "hunter-menu");
-          await page.waitForFunction(() => !!window.__sauria.hunterMode, null, { timeout: 60_000 });
+          await page.waitForFunction(() => !!window.__underfern.hunterMode, null, { timeout: 60_000 });
           await frames(page, 2);
           await shot(page, "hunter-planner");
           await expectClean(page, errors);
@@ -500,20 +500,20 @@ const SUITES = [
         name: "hunter: begin → drop-off flight (fast-forwarded) → hunting",
         async run({ page, errors }) {
           await page.evaluate(() =>
-            __sauria.hunterMode.begin({ weapons: ["rifle", "revolver"], equipment: { radar: true, lure: true }, targets: ["camptosaurus"], phase: 0.45 }),
+            __underfern.hunterMode.begin({ weapons: ["rifle", "revolver"], equipment: { radar: true, lure: true }, targets: ["camptosaurus"], phase: 0.45 }),
           );
           await waitState(page, "hunter", 60_000);
           const ff = await page.evaluate(() => {
-            const hm = __sauria.hunterMode;
+            const hm = __underfern.hunterMode;
             const first = hm.session.state;
             let i = 0;
             while (hm.session.state !== "hunting" && i < 2400) {
               hm.update(0.05);
-              __sauria.input.endFrame();
+              __underfern.input.endFrame();
               i++;
             }
             const h = hm.hunter;
-            return { first, steps: i, state: hm.session.state, alive: h.alive, onGround: h.position.y - __sauria.world.terrain.heightAt(h.position.x, h.position.z), player: __sauria.world.player === h };
+            return { first, steps: i, state: hm.session.state, alive: h.alive, onGround: h.position.y - __underfern.world.terrain.heightAt(h.position.x, h.position.z), player: __underfern.world.player === h };
           });
           expect(ff.first === "dropoff", `a hunt should open with the drop-off flight, got "${ff.first}"`);
           expect(ff.state === "hunting", `drop-off didn't finish within 120 s of game time (state ${ff.state}, ${ff.steps} steps)`);
@@ -530,31 +530,31 @@ const SUITES = [
           // Let the weapon finish raising before pulling the trigger.
           await page.evaluate(() => {
             for (let i = 0; i < 30; i++) {
-              __sauria.hunterMode.update(0.05);
-              __sauria.input.endFrame();
+              __underfern.hunterMode.update(0.05);
+              __underfern.input.endFrame();
             }
           });
           const before = await page.evaluate(() => {
-            const w = __sauria.hunterMode.weapons;
+            const w = __underfern.hunterMode.weapons;
             window.__shots = [];
-            window.__offShot = __sauria.world.events.on("shot", (e) => window.__shots.push({ weapon: e.weapon, loudness: e.loudness }));
+            window.__offShot = __underfern.world.events.on("shot", (e) => window.__shots.push({ weapon: e.weapon, loudness: e.loudness }));
             return { weapon: w.current, mag: w.ammo[w.current].mag };
           });
           await page.keyboard.down("KeyF");
           await page.evaluate(() => {
             for (let i = 0; i < 6; i++) {
-              __sauria.hunterMode.update(0.05);
-              __sauria.input.endFrame();
+              __underfern.hunterMode.update(0.05);
+              __underfern.input.endFrame();
             }
           });
           await page.keyboard.up("KeyF");
           const after = await page.evaluate(() => {
             for (let i = 0; i < 4; i++) {
-              __sauria.hunterMode.update(0.05);
-              __sauria.input.endFrame();
+              __underfern.hunterMode.update(0.05);
+              __underfern.input.endFrame();
             }
             window.__offShot();
-            const w = __sauria.hunterMode.weapons;
+            const w = __underfern.hunterMode.weapons;
             return { shots: window.__shots, mag: w.ammo[w.current].mag };
           });
           expect(after.shots.length >= 1, `holding F should fire (${JSON.stringify(before)})`);
@@ -568,9 +568,9 @@ const SUITES = [
       {
         name: "hunter: quit returns to the title menu",
         async run({ page, errors }) {
-          await page.evaluate(() => __sauria.hunterMode.quit());
+          await page.evaluate(() => __underfern.hunterMode.quit());
           await waitState(page, "menu", 30_000);
-          const p = await page.evaluate(() => ({ player: __sauria.world.player, mode: __sauria.world.mode }));
+          const p = await page.evaluate(() => ({ player: __underfern.world.player, mode: __underfern.world.mode }));
           expect(p.player === null && p.mode === "survival", `quitting should clear the hunter (${JSON.stringify(p)})`);
           await frames(page, 2);
           await shot(page, "menu-after-hunt");
@@ -642,7 +642,7 @@ const browser = await chromium.launch({
   args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"],
 });
 
-console.log(`Sauria tests · serving ${ROOT} at ${base}`);
+console.log(`Underfern tests · serving ${ROOT} at ${base}`);
 try {
   if (RUN_UNIT) await runUnit(browser, base);
   if (RUN_SMOKE) await runSmoke(browser, base);

@@ -1,4 +1,4 @@
-// Sauria — procedural sound engine (AUDIO).
+// Underfern — procedural sound engine (AUDIO).
 //
 // Every sound is synthesised with the Web Audio API at runtime; there are no
 // sample files. The graph is built once in start():

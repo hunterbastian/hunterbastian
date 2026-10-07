@@ -1,4 +1,4 @@
-// Screen frame — Sauria always plays in landscape.
+// Screen frame — Underfern always plays in landscape.
 //
 // iOS Safari can't lock orientation (no screen.orientation.lock, the manifest's
 // "orientation" is ignored) and many players keep Portrait Orientation Lock on.

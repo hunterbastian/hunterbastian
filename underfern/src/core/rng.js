@@ -1,4 +1,4 @@
-// Seeded randomness. Everything procedural in Sauria (terrain, vegetation,
+// Seeded randomness. Everything procedural in Underfern (terrain, vegetation,
 // spawns, patterns) draws from these so a seed reproduces the same island.
 
 /** mulberry32 — tiny, fast, good-enough PRNG. Returns floats in [0, 1). */

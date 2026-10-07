@@ -1,6 +1,6 @@
-# Sauria
+# Underfern
 
-**Sauria** is a 3D dinosaur survival game that runs in your browser. You hatch
+**Underfern** is a 3D dinosaur survival game that runs in your browser. You hatch
 on a misty Late Jurassic island and have to eat, drink, hide, fight and grow from
 a fragile juvenile into a full-grown adult, while carnivores and herbivores driven
 by their own AI hunt, graze, herd and sleep around you. It leans on the moody
@@ -31,28 +31,28 @@ Browsers won't load ES modules or import maps from `file://`, so serve the folde
 with any static server:
 
 ```bash
-cd sauria
+cd underfern
 python3 -m http.server 8000
 # then visit http://localhost:8000
 ```
 
-or `npx serve sauria`. It runs best in a current Chrome, Edge, Firefox or Safari
+or `npx serve underfern`. It runs best in a current Chrome, Edge, Firefox or Safari
 (desktop or iOS/Android) with WebGL 2. The layout uses CSS container queries, so
 it needs Safari 16 / iOS 16 or newer (Chrome 105+, Firefox 110+).
 
 ## Deploy (Vercel)
 
-Sauria is a self-contained static site, so it needs no build.
+Underfern is a self-contained static site, so it needs no build.
 
 **Dashboard (recommended):** import the repo at [vercel.com/new](https://vercel.com/new),
-then set **Root Directory → `sauria`** and **Framework Preset → Other**. Deploy.
+then set **Root Directory → `underfern`** and **Framework Preset → Other**. Deploy.
 Once the repo is connected, Vercel publishes a preview URL for every branch/PR and
 a production URL from `main` (the same setup as `../aria`).
 
 **CLI:**
 
 ```bash
-cd sauria
+cd underfern
 npx vercel        # preview deploy
 npx vercel --prod # production deploy
 ```
@@ -64,14 +64,14 @@ folder (for example `vendor/three-r181/`) and update the import map in
 `index.html`. Otherwise returning players keep the old copy.
 
 **GitHub Pages / any static host:** every path in the game is relative, so it also
-works from a sub-path (`https://<user>.github.io/<repo>/sauria/`). Publish the repo,
-or just the `sauria/` folder, as is.
+works from a sub-path (`https://<user>.github.io/<repo>/underfern/`). Publish the repo,
+or just the `underfern/` folder, as is.
 
 **On iPhone / Android:** open the site in Safari or Chrome and use *Add to Home
 Screen*. It launches full-screen like a native game (web manifest + apple-touch
 icon).
 
-Sauria always plays in **landscape**. iOS can't lock a web page's orientation,
+Underfern always plays in **landscape**. iOS can't lock a web page's orientation,
 so on a phone held upright the game turns itself sideways: turn the phone
 counter-clockwise (home indicator on the right) to play. This works with
 Portrait Orientation Lock on, and if rotation is unlocked the phone simply
@@ -246,7 +246,7 @@ adult Allosaurus at dawn.
 ## Tests
 
 ```bash
-cd sauria
+cd underfern
 node tests/run-tests.mjs            # everything (a few minutes)
 node tests/run-tests.mjs --unit     # unit tests only (seconds)
 node tests/run-tests.mjs --smoke    # smoke tests only
@@ -280,14 +280,14 @@ there is one and otherwise falls back to the global install.
   and exits non-zero on failure. Any console error counts as a failure.
 
 Software rendering is slow (about 1–3 fps), so the smoke tests fast-forward game
-time through the `window.__sauria` test hook instead of waiting on frames.
+time through the `window.__underfern` test hook instead of waiting on frames.
 
 ## How it works
 
 Plain ES modules under `src/`, loaded by `index.html` through an import map:
 
 - `main.js`: boot, the game state machine (menu → playing ⇄ paused → dead, plus
-  hunter mode), the render-style pipeline, saves and the `window.__sauria` test
+  hunter mode), the render-style pipeline, saves and the `window.__underfern` test
   hook
 - `core/screen.js`: the app frame (`#app`). On a phone held upright it lays the
   game out at landscape size and rotates it 90°; everything that reads pointer
@@ -319,4 +319,4 @@ numbers.
 - Fonts: Fraunces, Archivo and IBM Plex Mono via Google Fonts (SIL Open Font
   License).
 - Inspired by *The Isle* (Afterthought) and *Carnivores: Dinosaur Hunter* (Action
-  Forms, 1998). Sauria is an independent fan project, not affiliated with either.
+  Forms, 1998). Underfern is an independent fan project, not affiliated with either.

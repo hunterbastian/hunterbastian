@@ -176,7 +176,7 @@ export function ensureHunterStyles() {
   const link = document.createElement("link");
   link.rel = "stylesheet";
   link.href = href;
-  link.dataset.sauria = "hunter";
+  link.dataset.underfern = "hunter";
   stylesPromise = settle(link);
   document.head.appendChild(link);
   return stylesPromise;
@@ -531,7 +531,7 @@ export class HunterHud {
     const html =
       `<article class="hh-sheet hh-sheet--${escapeHtml(result)}" role="dialog" aria-modal="true" aria-labelledby="hh-sum-${this._uid}">` +
       `<header class="hh-sheet__head">` +
-      `<p class="hh-sheet__brand">${hicon("ledger")}<span>Sauria · Hunter's lodge</span></p>` +
+      `<p class="hh-sheet__brand">${hicon("ledger")}<span>Underfern · Hunter's lodge</span></p>` +
       `<p class="hh-sheet__date">Expedition report · ${escapeHtml(date)}</p>` +
       `</header>` +
       `<div class="hh-sheet__title">` +

@@ -1,9 +1,9 @@
-// Sauria — browser-side unit tests for the pure-ish modules (rng, noise,
+// Underfern — browser-side unit tests for the pure-ish modules (rng, noise,
 // terrain, species, wind, weapons) plus the creature / ecosystem simulation on a
 // real low-resolution World. No rendering: everything here is plain JS, so it
 // runs at full speed even under SwiftShader.
 //
-// Open tests/unit.html in a browser (served from sauria/) to see the results,
+// Open tests/unit.html in a browser (served from underfern/) to see the results,
 // or run `node tests/run-tests.mjs`, which reads window.__unit.
 
 import * as THREE from "three";
