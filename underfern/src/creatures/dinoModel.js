@@ -1076,7 +1076,7 @@ function dominantBone(bp, a) {
 }
 
 /**
- * Second blueprint pass: extra skull sculpting, ballistic hit spheres, and the
+ * Second blueprint pass: extra skull sculpting, hit spheres, and the
  * per-species pose numbers the animator needs (how far the neck bends to
  * reach the ground, how low the hips go lying down, how long a stride the legs
  * can reach without skating).
@@ -2704,8 +2704,9 @@ export class DinoModel {
   }
 
   /**
-   * [hunter] World-space spheres approximating the body in its current pose
-   * (head ×2, neck, body, tail ×3, legs). `out` is cleared and refilled with
+   * World-space spheres approximating the body in its current pose (head ×2,
+   * neck, body, tail ×3, legs) — what melee strikes measure their reach
+   * against (creature.js _reachDistance). `out` is cleared and refilled with
    * pooled objects owned by this model (valid until its next call), so a
    * caller can keep one array per creature without it growing.
    * @returns {{x:number,y:number,z:number,r:number,part:string}[]}

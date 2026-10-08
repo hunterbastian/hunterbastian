@@ -2832,20 +2832,6 @@ export class Vegetation {
     return removed;
   }
 
-  /**
-   * Canopy cover 0..1 around a point (trees within `radius`, weighted by size).
-   * Not in the core contract — for hunter visibility / AI hiding spots.
-   */
-  coverAt(x, z, radius = 9) {
-    const list = this.collidersNear(x, z, radius, this._coverScratch || (this._coverScratch = []));
-    let sum = 0;
-    for (let i = 0; i < list.length; i++) {
-      const c = list[i];
-      if (c.kind === "tree" || c.kind === "treefern") sum += Math.min(1, c.height / 14);
-    }
-    return 1 - Math.exp(-sum * 0.45);
-  }
-
   /** Force alpha-to-coverage on/off for foliage (normally auto-detected from the canvas MSAA). */
   setAlphaToCoverage(on) {
     on = !!on;

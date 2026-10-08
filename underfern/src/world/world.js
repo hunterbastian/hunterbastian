@@ -39,8 +39,6 @@ export class World {
     this.rng = makeRng(hash(this.seed, "world"));
     /** Seconds of simulated time since the world was built. */
     this.time = 0;
-    /** "survival" | "hunter" — set by main when a mode starts. */
-    this.mode = "survival";
 
     this.terrain = null;
     this.water = null;
@@ -48,8 +46,6 @@ export class World {
     this.vegetation = null;
     this.wind = null;
     this.ecosystem = null;
-    /** [hunter] Helicopter while a hunt is running (HuntSession sets it). */
-    this.helicopter = null;
 
     if (!deferred) for (const step of this._steps()) step.run();
   }
@@ -75,7 +71,7 @@ export class World {
     return world;
   }
 
-  /** The player's creature (or hunter actor), if any. */
+  /** The player's creature, if any. */
   get player() {
     return this.ecosystem ? this.ecosystem.player : null;
   }

@@ -1,13 +1,12 @@
 // Input — keyboard, mouse (pointer lock) and touch, normalised into a small
 // vocabulary of actions that the controllers poll once per frame:
-//   held   → isDown(action)    "sprint" | "crouch" | "interact" | "bite" | "aim"
+//   held   → isDown(action)    "sprint" | "crouch" | "interact" | "bite"
 //   edges  → pressed(action)   "bite" | "call" | "sniff" | "rest" | "map" | "pause" | "help" |
-//                              "interact" | "crouch" | "reload" | "weapon1" | "weapon2" |
-//                              "binoculars" | "extract" | "aim"
+//                              "interact" | "crouch"
 //   axes   → moveAxis(), consumeLook(), consumeZoom()
 // On touch devices Input builds its own on-screen controls inside `uiRoot`
-// (floating joystick, drag-to-look, action buttons per mode; Bite / Fire also
-// slides to look, and `lookHeld` says a touch look is under way). Pointer positions
+// (floating joystick, drag-to-look, action buttons; Bite also slides to look,
+// and `lookHeld` says a touch look is under way). Pointer positions
 // are read in the app's frame (core/screen.js toApp), which a phone held upright
 // turns sideways: "up" on the stick is the app's top, the phone's right edge.
 
@@ -31,27 +30,20 @@ const HELD_KEYS = {
   crouch: ["ControlLeft", "ControlRight"],
   interact: ["KeyE"],
   bite: ["KeyF"],
-  aim: [],
 };
 
-/** Keys that fire one-frame edges. One key may fire several (R = sniff + reload). */
+/** Keys that fire one-frame edges. */
 const EDGE_KEYS = {
   KeyF: ["bite"],
   KeyE: ["interact"],
   KeyC: ["crouch"],
   KeyQ: ["call"],
-  KeyR: ["sniff", "reload"],
+  KeyR: ["sniff"],
   KeyZ: ["rest"],
   KeyM: ["map"],
   Escape: ["pause"],
   KeyP: ["pause"],
   KeyH: ["help"],
-  Digit1: ["weapon1"],
-  Numpad1: ["weapon1"],
-  Digit2: ["weapon2"],
-  Numpad2: ["weapon2"],
-  KeyB: ["binoculars"],
-  KeyX: ["extract"],
 };
 
 // Edges that still register while `enabled` is false, so main can close the
@@ -67,19 +59,18 @@ const GAME_CODES = new Set([
 ]);
 
 const MOUSE_LEFT = 1;
-const MOUSE_RIGHT = 2;
 
 // Touch drags cover far fewer pixels than a mouse sweep for the same intent;
 // scale them so a thumb flick across half the screen turns ~150°.
 const TOUCH_LOOK_SCALE = 1.9;
-// …but a slow, deliberate drag (lining up a scoped shot, nudging the camera)
+// …but a slow, deliberate drag (lining up a bite, nudging the camera)
 // gets a finer gain: below TOUCH_LOOK_SLOW px/s the scale drops to this
 // fraction, blending back to the full scale by TOUCH_LOOK_FAST px/s.
 const TOUCH_LOOK_PRECISION = 0.55;
 const TOUCH_LOOK_SLOW = 60;
 const TOUCH_LOOK_FAST = 600;
-// A thumb on Bite / Fire that slides further than this (px, app frame) turns
-// the view like the look pad; the wobble of a press never nudges the aim.
+// A thumb on Bite that slides further than this (px, app frame) turns
+// the view like the look pad; the wobble of a press never nudges the camera.
 const BTN_LOOK_SLOP = 10;
 const STICK_DEAD_ZONE = 0.12;
 const STICK_FALLBACK_RADIUS = 60; // px, used when CSS hasn't sized the stick
@@ -94,7 +85,7 @@ const PAUSE_DEDUPE_MS = 300;
 // screen coordinates (hundreds of px). Real per-event deltas stay well below.
 const LOCKED_SPIKE_PX = 500;
 
-/* --- Touch button sets ------------------------------------------------------ */
+/* --- Touch buttons ---------------------------------------------------------- */
 
 // 24×24 stroke icons drawn in currentColor so the UI can theme them.
 const ICONS = {
@@ -108,8 +99,6 @@ const ICONS = {
   crouch: '<path d="M12 3.5v10.5"/><path d="M7.5 9.5L12 14l4.5-4.5"/><path d="M4.5 19h15"/>',
   call:
     '<path d="M3.5 9.5v5h3.2l4.8 4V5.5l-4.8 4H3.5z"/><path d="M15 9a4.2 4.2 0 0 1 0 6"/><path d="M17.6 6.3a8 8 0 0 1 0 11.4"/>',
-  lure:
-    '<path d="M3 10.2v3.6l9.5 4.6V5.6z"/><path d="M12.5 8.2h2.8a3.8 3.8 0 0 1 0 7.6h-2.8"/><path d="M20 9.2c.9 1.6.9 4 0 5.6"/>',
   sniff:
     '<path d="M7 20.5c-1.9-2.8 1.9-4.6 0-7.6s1.9-4.8 0-7.9"/><path d="M12 20.5c-1.9-2.8 1.9-4.6 0-7.6s1.9-4.8 0-7.9"/>' +
     '<path d="M17 20.5c-1.9-2.8 1.9-4.6 0-7.6s1.9-4.8 0-7.9"/>',
@@ -117,58 +106,27 @@ const ICONS = {
   map:
     '<path d="M3.5 6.6L9 4.3l6 2.4 5.5-2.3v13.4L15 20.1l-6-2.4-5.5 2.3z"/><path d="M9 4.3v13.4"/><path d="M15 6.7v13.4"/>',
   pause: '<path d="M8.5 5v14"/><path d="M15.5 5v14"/>',
-  fire:
-    '<circle cx="12" cy="12" r="6.6"/><path d="M12 2.5v4.2M12 17.3v4.2M2.5 12h4.2M17.3 12h4.2"/>' +
-    '<circle cx="12" cy="12" r="1.1" fill="currentColor" stroke="none"/>',
-  aim:
-    '<path d="M4 8.5V4h4.5"/><path d="M15.5 4H20v4.5"/><path d="M20 15.5V20h-4.5"/><path d="M8.5 20H4v-4.5"/>' +
-    '<circle cx="12" cy="12" r="2.6"/>',
-  reload: '<path d="M20 12a8 8 0 1 1-2.5-5.8"/><path d="M20.2 3.8v4.6h-4.6"/>',
-  binoculars:
-    '<circle cx="6.8" cy="15.6" r="3.9"/><circle cx="17.2" cy="15.6" r="3.9"/>' +
-    '<path d="M4.4 12.4L6.6 5h3.2v6.8"/><path d="M19.6 12.4L17.4 5h-3.2v6.8"/><path d="M9.8 14h4.4"/>',
-  extract:
-    '<path d="M3 4.8h18"/><path d="M12 4.8v3.4"/><path d="M5.6 13.2c0-3 2.9-5 6.9-5s6.4 2 6.4 5-2.4 4.4-6.4 4.4-6.9-1.4-6.9-4.4z"/>' +
-    '<path d="M5.6 12.6H2"/><path d="M9 17.4l-1 2.8M16 17.4l1 2.8M6 20.2h12.5"/>',
-  swap: '<path d="M4 8h13"/><path d="M14 4.5L17.5 8 14 11.5"/><path d="M20 16H7"/><path d="M10 12.5L6.5 16l3.5 3.5"/>',
 };
 
 /**
- * Button layouts per mode. `slot` names a position in the thumb-reach layout
+ * The touch button layout. `slot` names a position in the thumb-reach layout
  * (see BASE_CSS): "primary" big button bottom-right, "arc0..3" an inner ring
- * around it, "outer0..2" an outer ring, "top0..3" small utility buttons.
+ * around it, "outer0..2" an outer ring, "top0..1" small utility buttons.
  * `kind`: "hold" (isDown while touched), "tap" (edge only), "latch" (tap to
- * toggle a held state — sprint/aim, so two thumbs stay free for move + look).
+ * toggle a held state — sprint, so two thumbs stay free for move + look).
  * `look`: the button doubles as a look pad (slide past BTN_LOOK_SLOP to turn).
  */
-const BUTTON_SETS = {
-  dino: [
-    { action: "bite", slot: "primary", icon: "bite", label: "Bite", kind: "hold", look: true },
-    { action: "sprint", slot: "arc0", icon: "sprint", label: "Sprint", kind: "latch" },
-    { action: "interact", slot: "arc1", icon: "interact", label: "Eat or drink", short: "Eat/Drink", kind: "hold" },
-    { action: "sniff", slot: "arc2", icon: "sniff", label: "Sniff", kind: "tap" },
-    { action: "crouch", slot: "arc3", icon: "crouch", label: "Crouch", kind: "tap" },
-    { action: "rest", slot: "outer0", icon: "rest", label: "Rest", kind: "tap" },
-    { action: "call", slot: "outer1", icon: "call", label: "Call", kind: "tap" },
-    { action: "map", slot: "top1", icon: "map", label: "Map", kind: "tap" },
-    { action: "pause", slot: "top0", icon: "pause", label: "Pause", kind: "tap" },
-  ],
-  hunter: [
-    { action: "bite", slot: "primary", icon: "fire", label: "Fire", kind: "hold", look: true },
-    { action: "aim", slot: "arc0", icon: "aim", label: "Aim", kind: "latch" },
-    { action: "reload", slot: "arc1", icon: "reload", label: "Reload", kind: "tap" },
-    { action: "sprint", slot: "arc2", icon: "sprint", label: "Sprint", kind: "latch" },
-    { action: "crouch", slot: "arc3", icon: "crouch", label: "Crouch", kind: "tap" },
-    { action: "swap", slot: "outer0", icon: "swap", label: "Switch weapon", short: "Swap", kind: "tap" },
-    { action: "binoculars", slot: "outer1", icon: "binoculars", label: "Binoculars", short: "Binocs", kind: "tap" },
-    // Up in the utility row: on touch the HUD's ammo readout sits under that
-    // row, where the outer ring's third slot would land.
-    { action: "call", slot: "top3", icon: "lure", label: "Lure call", short: "Lure", kind: "tap" },
-    { action: "extract", slot: "top2", icon: "extract", label: "Call extraction", kind: "tap" },
-    { action: "map", slot: "top1", icon: "map", label: "Map", kind: "tap" },
-    { action: "pause", slot: "top0", icon: "pause", label: "Pause", kind: "tap" },
-  ],
-};
+const BUTTONS = [
+  { action: "bite", slot: "primary", icon: "bite", label: "Bite", kind: "hold", look: true },
+  { action: "sprint", slot: "arc0", icon: "sprint", label: "Sprint", kind: "latch" },
+  { action: "interact", slot: "arc1", icon: "interact", label: "Eat or drink", short: "Eat/Drink", kind: "hold" },
+  { action: "sniff", slot: "arc2", icon: "sniff", label: "Sniff", kind: "tap" },
+  { action: "crouch", slot: "arc3", icon: "crouch", label: "Crouch", kind: "tap" },
+  { action: "rest", slot: "outer0", icon: "rest", label: "Rest", kind: "tap" },
+  { action: "call", slot: "outer1", icon: "call", label: "Call", kind: "tap" },
+  { action: "map", slot: "top1", icon: "map", label: "Map", kind: "tap" },
+  { action: "pause", slot: "top0", icon: "pause", label: "Pause", kind: "tap" },
+];
 
 /*
  * Functional baseline for the touch layer. Every selector is wrapped in
@@ -209,8 +167,6 @@ const BASE_CSS = `
 :where(.touch-btn[data-slot^="top"] .touch-btn__label){display:none}
 :where(.touch-btn[data-slot="top0"]){right:calc(14px + var(--sa-r,0px))}
 :where(.touch-btn[data-slot="top1"]){right:calc(66px + var(--sa-r,0px))}
-:where(.touch-btn[data-slot="top2"]){right:calc(118px + var(--sa-r,0px))}
-:where(.touch-btn[data-slot="top3"]){right:calc(170px + var(--sa-r,0px))}
 @container app (max-width:520px){
 :where(.touch-stick){width:116px;height:116px;margin:-58px 0 0 -58px}
 :where(.touch-stick__knob){width:50px;height:50px;margin:-25px 0 0 -25px}
@@ -270,8 +226,6 @@ export class Input {
     this.isTouch = typeof touch === "boolean" ? touch : detectTouch();
     /** True while the document's pointer lock is on our canvas. */
     this.pointerLocked = false;
-    /** "dino" | "hunter" — selects the touch button set. */
-    this.mode = "dino";
     /**
      * Called (synchronously, inside the event) on user gestures that grant
      * user activation — keydown, mousedown, pointerup, touchend, click — so
@@ -301,12 +255,11 @@ export class Input {
     this._lastPauseTime = -1e9;
     // Mouse drag-to-look fallback when pointer lock is unavailable.
     this._drag = { active: false, button: -1, x: 0, y: 0, moved: 0, acts: false };
-    this._lastWeapon = "weapon1";
 
     // Touch state.
     this._touchCount = Object.create(null); // action → pointers holding it
     this._btnPointers = new Map(); // pointerId → { action, el, kind, drag }
-    this._latch = { sprint: false, aim: false };
+    this._latch = { sprint: false };
     // cx/cy: the stick's origin (input is measured from it); bx/by: where its
     // base is drawn (the origin, pulled in from the screen edges).
     this._stick = { id: -1, cx: 0, cy: 0, bx: 0, by: 0, x: 0, y: 0, radius: STICK_FALLBACK_RADIUS };
@@ -346,7 +299,7 @@ export class Input {
     if (on) this._placeStickAtRest();
   }
 
-  /** A touch look is under way: a thumb on the look pad, or one sliding from Bite / Fire. */
+  /** A touch look is under way: a thumb on the look pad, or one sliding from Bite. */
   get lookHeld() {
     if (!this._enabled) return false;
     if (this._look.id !== -1) return true;
@@ -380,7 +333,7 @@ export class Input {
 
   /**
    * Is a held action currently down? "sprint" | "crouch" (Ctrl hold) |
-   * "interact" | "bite" | "aim". Touch latches (sprint/aim) count as held.
+   * "interact" | "bite". The touch Sprint latch counts as held.
    * @param {string} action
    */
   isDown(action) {
@@ -389,7 +342,6 @@ export class Input {
     if (keys && this._anyKey(keys)) return true;
     // Mouse bits are only set while the mouse drives gameplay (see _onMouseDown).
     if (action === "bite" && this._mouse & MOUSE_LEFT) return true;
-    if (action === "aim" && this._mouse & MOUSE_RIGHT) return true;
     if (this._touchCount[action] > 0) return true;
     return this._latch[action] === true;
   }
@@ -446,19 +398,6 @@ export class Input {
   /** Clear the one-frame edge state. Call once at the end of every frame. */
   endFrame() {
     this._edges.clear();
-  }
-
-  /**
-   * [hunter] Swap the touch button set: "dino" (survival) or "hunter".
-   * @param {"dino"|"hunter"} mode
-   */
-  setMode(mode) {
-    const next = mode === "hunter" ? "hunter" : "dino";
-    if (next === this.mode) return;
-    this.mode = next;
-    this._latch.sprint = false;
-    this._latch.aim = false;
-    if (this.touchRoot) this._buildButtons();
   }
 
   /**
@@ -616,7 +555,6 @@ export class Input {
       if (uiOnly && !UI_EDGES.has(a)) continue;
       if (a === "pause") this._pauseEdge();
       else this._edges.add(a);
-      if (a === "weapon1" || a === "weapon2") this._lastWeapon = a;
     }
   }
 
@@ -639,20 +577,19 @@ export class Input {
 
   _onMouseDown(e) {
     if (!this._enabled || this._isCompatMouse() || !this._isGameSurface(e.target)) return;
-    // Back/forward thumb buttons would navigate away mid-hunt.
+    // Back/forward thumb buttons would navigate away mid-game.
     if (e.button === 3 || e.button === 4) {
       e.preventDefault();
       return;
     }
     if (this.pointerLocked) {
       if (e.button === 0) this._pressMouse(MOUSE_LEFT, "bite");
-      else if (e.button === 2) this._pressMouse(MOUSE_RIGHT, "aim");
       return;
     }
     // Not locked: this click (re)captures the mouse. Chrome refuses a lock
     // for ~1 s after Esc, so every click retries. Until a lock lands, a drag
     // looks around; once a lock attempt has failed (or locking is impossible,
-    // e.g. iPad / sandboxed iframe) clicks also act: LMB click = bite, RMB = aim.
+    // e.g. iPad / sandboxed iframe) clicks also act: LMB click = bite.
     const canLock = this._lockSupported && !this.isTouch;
     const acts = !canLock || this._lockFailed;
     if (canLock) this.requestPointerLock();
@@ -665,7 +602,6 @@ export class Input {
     d.y = pt.y;
     d.moved = 0;
     d.acts = acts;
-    if (acts && e.button === 2) this._pressMouse(MOUSE_RIGHT, "aim");
   }
 
   _pressMouse(bit, action) {
@@ -684,7 +620,6 @@ export class Input {
       d.active = false;
     }
     if (e.button === 0) this._mouse &= ~MOUSE_LEFT;
-    else if (e.button === 2) this._mouse &= ~MOUSE_RIGHT;
   }
 
   _onMouseMove(e) {
@@ -772,7 +707,6 @@ export class Input {
 
     const root = document.createElement("div");
     root.className = "touch";
-    root.dataset.mode = this.mode;
     // Functional, not cosmetic: without these iOS would pan/zoom/select.
     root.style.touchAction = "none";
     root.style.webkitUserSelect = "none";
@@ -826,12 +760,8 @@ export class Input {
 
   _buildButtons() {
     const root = this.touchRoot;
-    for (const b of this._buttons.values()) b.el.remove();
-    this._buttons.clear();
-    this._releaseButtons();
-    root.dataset.mode = this.mode;
     const opts = this._ac ? { signal: this._ac.signal } : undefined;
-    for (const def of BUTTON_SETS[this.mode]) {
+    for (const def of BUTTONS) {
       const el = document.createElement("button");
       el.type = "button";
       el.className = "touch-btn";
@@ -844,7 +774,7 @@ export class Input {
         `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">${ICONS[def.icon]}</svg>` +
         `<span class="touch-btn__label" aria-hidden="true">${def.short || def.label}</span>`;
       el.addEventListener("pointerdown", (e) => this._btnDown(e, def, el), opts);
-      // The big button doubles as a look pad: hold Bite / Fire and slide to turn.
+      // The big button doubles as a look pad: hold Bite and slide to turn.
       if (def.look) el.addEventListener("pointermove", (e) => this._btnMove(e), opts);
       for (const t of ["pointerup", "pointercancel", "lostpointercapture"]) {
         el.addEventListener(t, (e) => this._btnUp(e), opts);
@@ -897,28 +827,11 @@ export class Input {
     if (!this._enabled) return;
     const a = def.action;
     if (def.kind === "latch") {
-      // Aim tapped behind raised binoculars lowers them back into the aim
-      // (the edge below), so a latched Aim stays on rather than toggling off.
-      const glassing = a === "aim" && this._latch.aim && this._buttons.get("binoculars")?.active;
-      if (!glassing) {
-        this._latch[a] = !this._latch[a];
-        this.setActive(a, this._latch[a]);
-        // Aiming walks, so Sprint and Aim can't both be on: the newer tap wins.
-        if (this._latch[a]) this._unlatch(a === "aim" ? "sprint" : "aim");
-      }
-      if (a === "aim") this._edges.add("aim");
-      return;
-    }
-    if (a === "swap") {
-      // The hunter controller listens for weapon1 / weapon2; alternate them.
-      const next = this._lastWeapon === "weapon1" ? "weapon2" : "weapon1";
-      this._lastWeapon = next;
-      this._edges.add(next);
-      this._edges.add("swap");
+      this._latch[a] = !this._latch[a];
+      this.setActive(a, this._latch[a]);
       return;
     }
     this._edges.add(a);
-    if (a === "sniff") this._edges.add("reload"); // mirrors the R key
   }
 
   _btnUp(e) {
@@ -933,12 +846,6 @@ export class Input {
     for (const rec of this._btnPointers.values()) rec.el.classList.remove("touch-btn--held");
     this._btnPointers.clear();
     for (const k in this._touchCount) this._touchCount[k] = 0;
-  }
-
-  _unlatch(a) {
-    if (!this._latch[a]) return;
-    this._latch[a] = false;
-    this.setActive(a, false);
   }
 
   /** Measure the stick radius from CSS so the knob travel matches the art. */
@@ -1140,9 +1047,7 @@ export class Input {
     this._releaseButtons();
     if (all) {
       this._latch.sprint = false;
-      this._latch.aim = false;
       this.setActive("sprint", false);
-      this.setActive("aim", false);
     }
   }
 }

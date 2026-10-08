@@ -6,14 +6,6 @@ overgrown island and have to eat, drink, hide, fight and grow to adulthood while
 other dinosaurs (carnivores and herbivores, driven by AI) live their own lives
 around you.
 
-It has **two modes on the same island**:
-- **Survival** (*The Isle*-style) — play as a dinosaur, described in most of this file.
-- **Hunter** (*Carnivores: Dinosaur Hunter*-style) — play as a first-person human
-  hunter dropped onto the island by helicopter; stalk dinosaurs using wind, scent,
-  camouflage and calls, bag trophies, and call the chopper to extract before a
-  predator gets you. See **Hunter mode** at the end. Shared modules must support
-  both (hooks are marked **[hunter]** below).
-
 This file is the **contract** between modules. If you implement a module, match
 the exported names, constructor signatures, fields and units below exactly — other
 modules are written against them. If you must deviate, keep the documented API
@@ -51,7 +43,7 @@ working (add, don't rename) and note it in your report.
   colour maps) — no image files. Keep it fast: instancing, LOD where it pays,
   shared materials, texture atlases.
 - **Two render styles, same assets.** `"detailed"` (default — full resolution, MSAA)
-  and `"pixel"` (retro, *Carnivores '98* / PS1 vibe: the 3D scene is rendered to a
+  and `"pixel"` (retro, late-'90s / PS1 vibe: the 3D scene is rendered to a
   low-resolution target — ≈ 270–400 px tall — and upscaled with nearest-neighbour,
   with optional ordered dithering and gentle colour quantisation; the DOM UI stays
   crisp on top). `main.js` owns this pipeline (settings + `?style=pixel`). Assets
@@ -88,6 +80,7 @@ underfern/
   src/world/water.js    ATMOSPHERE
   src/world/sky.js      ATMOSPHERE
   src/world/vegetation.js VEGETATION
+  src/world/wind.js     ATMOSPHERE  wind field: scent drift for the AI's sense of smell, vegetation sway
   src/world/world.js    INTEGRATION
   src/creatures/species.js  DINO-ART
   src/creatures/dinoModel.js DINO-ART
@@ -102,15 +95,6 @@ underfern/
   src/ui/map.js         UI
   src/audio/audio.js    AUDIO
   src/main.js           INTEGRATION
-  src/world/wind.js     HUNT        [hunter] wind field (scent drift) — used by AI in both modes
-  src/hunter/hunter.js  HUNTER-FP   [hunter] Hunter actor + first-person HunterController
-  src/hunter/weapons.js HUNTER-GUNS [hunter] weapon defs, WeaponSystem, ballistics, hit effects
-  src/hunter/viewmodel.js HUNTER-GUNS [hunter] first-person gun + hands meshes & animation
-  src/hunter/hunt.js    HUNT        [hunter] HuntSession: loadout, trophies, scoring, radar, lure, extraction, profile
-  src/hunter/helicopter.js HUNT     [hunter] detailed helicopter + drop-off / extraction flight
-  src/ui/hunterHud.js   HUNTER-UI   [hunter] crosshair, ammo, wind, scope/binoculars, radar, summary
-  src/ui/hunterMenu.js  HUNTER-UI   [hunter] loadout / target selection / trophy room
-  hunter.css            HUNTER-UI   [hunter] styles for the hunter UI (uses the design tokens from style.css)
   tests/                INTEGRATION (run-tests.mjs, unit.html, smoke)
   README.md             INTEGRATION
 ```
@@ -320,6 +304,19 @@ scattered trees + ferns on plains, horsetails & dead snags in swamps, sparse
 conifers + boulders on highlands, cycads/palms near beaches). Spatial hashing for
 queries. Respect `density`.
 
+### `world/wind.js` (ATMOSPHERE)
+
+```js
+export class Wind {
+  constructor(seed)
+  yaw;        // direction the wind blows TOWARD (heading convention)
+  strength;   // 0..1 (gusts)
+  vector;     // THREE.Vector3 unit (x, 0, z) toward which it blows
+  update(dt)  // slow drift of direction (minutes), gusty strength (seconds)
+  scentFactor(fromX, fromZ, toX, toZ) // scent from → to: ≈1.6 straight downwind, ≈1 crosswind, ≈0.15 upwind (blend with strength)
+}
+```
+
 ### `creatures/species.js` (DINO-ART)
 
 ```js
@@ -362,8 +359,8 @@ export class DinoModel {
   getHeadPosition(target) // world position of the mouth/snout tip (after scale & parent transforms)
   getTailPosition(target) // world position near the tail tip
   setTint(color, amount)  // e.g. darken a rotting carcass
-  getHitSpheres(out = []) // [hunter] → [{ x, y, z, r, part }] WORLD-space spheres approximating the body for
-                          //   ballistics, following the current animation (bone world positions).
+  getHitSpheres(out = []) // → [{ x, y, z, r, part }] WORLD-space spheres approximating the body, following the
+                          //   current animation (bone world positions); melee strikes measure their reach against them.
                           //   part: "head" | "neck" | "body" | "tail" | "leg". ~8–14 spheres; head sphere(s) tight.
   update(dt, anim)        // anim = {
                           //   speed,          // planar m/s (drives gait cycle; stride matched to scaled leg length)
@@ -417,8 +414,7 @@ export class Creature {
   update(dt)                 // full sim step (movement, terrain follow, swimming, collisions, metabolism,
                              //  growth, regen, bleeding, actions, model animation)
   takeDamage(amount, source /* Creature|null */, type) // → damage dealt after armor; emits "damage"
-                             //   [hunter] type "shot": armor applies at half strength
-  scent; noise; visibility;  // [hunter] 0..1 stealth signals AI reads for ANY target (dinos: scent 1,
+  scent; noise; visibility;  // 0..1 stealth signals the AI senses read for ANY target (scent 1,
                              //   noise from gait (idle 0.05 … sprint 1, crouch ×0.4), visibility 1 (×0.6 crouched))
   heal(amount)
   die(cause, killer = null)  // emits "death"
@@ -449,14 +445,8 @@ export class Ecosystem {
   nearestCarcass(x, z, radius, minMeat = 0.5)  // → Carcass | null
   eatCarcass(carcass, amount)                  // → kg removed
   clear()             // remove all NPCs + carcasses (new game)
-  setSpawnBias(map)   // [hunter] { speciesId: multiplier } applied to spawn weights (hunt targets); {} resets
 }
 ```
-**[hunter]** `setPlayer(actor)` must also accept a **Hunter actor** (creature-compatible,
-`isHunter: true`, `model: null`): it is pushed into `creatures` so bites/queries/AI see
-it, but it has no model (don't add to the scene) and leaves **no carcass**. The
-ecosystem still calls `actor.update(dt)` like any creature. Code defensively for
-`model == null` everywhere.
 When a creature dies its model stays in the world as a carcass (lying on its
 side), `meat = mass · 0.5`, darkening/sinking as it's eaten or rots
 (`GAME.carcassLifetime`). The ecosystem creates a `Brain` for every NPC
@@ -482,16 +472,11 @@ Perception shrinks for a crouching player and at night. Listen to `"call"` event
 (answer same-species calls, herbivores get alert near carnivore calls) and react
 to being damaged (`lastAttacker`).
 
-**[hunter] Senses.** Detection of any target combines three senses: **sight**
+**Senses.** Detection of any target combines three senses: **sight**
 (`perception × target.visibility`, needs rough line of sight — forest/night cut it),
 **hearing** (`target.noise × ~60 m`), and **smell** (`perception × 1.4 × target.scent ×
 world.wind.scentFactor(target.x, target.z, me.x, me.z)` — downwind of a target you smell it
-from far away; upwind barely; guard with `world.wind ? … : 1`). React to `"shot"` events
-(herbivores within `loudness` metres bolt away from the shot; carnivores within ~60% of it
-come to investigate) and `"lure"` events (members of `species` within ~450 m walk/jog toward
-`x,z` to investigate; carnivores arrive hunting). The hunter (`target.isHunter`) is small prey
-(85 kg) to carnivores, a threat herbivores flee from; big herbivores (stegosaurus, diplodocus)
-may charge a hunter within ~15 m.
+from far away; upwind barely; guard with `world.wind ? … : 1`).
 
 ### `player/input.js` (PLAYER)
 
@@ -504,7 +489,7 @@ export class Input {
   pressed(action)     // edge:   "bite" | "call" | "sniff" | "rest" | "map" | "pause" | "help" | "interact" | "crouch"
   consumeLook()       // → { dx, dy } pixels since last call (pointer-locked mouse or touch drag)
   consumeZoom()       // → wheel delta since last call
-  lookHeld            // a touch look is under way (thumb on the look pad, or sliding from Bite / Fire)
+  lookHeld            // a touch look is under way (thumb on the look pad, or sliding from Bite)
   requestPointerLock()
   endFrame()          // clear edge state
 }
@@ -512,17 +497,12 @@ export class Input {
 Bindings: WASD/arrows move · Shift sprint · C toggle crouch (Ctrl hold) · LMB/F
 bite · E (hold) eat/drink · Q call · R sniff · Z rest · M map · Esc/P pause ·
 H help · wheel zoom · click canvas to lock the pointer.
-**[hunter]** extra actions — held: `"aim"` (RMB); edges: `"reload"` (R — same key as sniff, both
-fire), `"weapon1"` / `"weapon2"` (1 / 2), `"binoculars"` (B), `"extract"` (X); in hunter mode
-LMB/F is `"bite"` = fire. `input.setMode("dino" | "hunter")` swaps the touch button set
-(hunter: fire (`data-action="bite"`), aim, reload, binoculars, call (lure), map, extract,
-crouch, sprint, pause).
 Touch (`isTouch`): Input builds its own controls in `uiRoot` —
 `<div class="touch">` containing a left-side joystick
 (`.touch-stick` › `.touch-stick__knob`), right-side drag-to-look area, and buttons
 `<button class="touch-btn" data-action="bite|interact|sprint|call|sniff|rest|map|pause|crouch">`.
-Bite / Fire doubles as a look pad: a thumb that slides more than 10 px from the press turns
-the view like the look area (the press still bites / fires).
+Bite doubles as a look pad: a thumb that slides more than 10 px from the press turns
+the view like the look area (the press still bites).
 CSS for these classes lives in `style.css` (UI).
 
 ### `player/camera.js` (PLAYER)
@@ -564,15 +544,13 @@ export class Hud {
   update(dt, { player, controller, world, camera })  // bars, growth, status chips, compass, prompt, sniff markers, vignette
   toast(text, kind = "info")                           // "info" | "good" | "warn" | "danger"
   showDeath(summary, onRespawn, onMenu); hideDeath();  // summary = { speciesName, growth, survivedSec, kills, cause }
-  showPause(onResume, onQuit); hidePause();
-  toggleHelp();
+  showPause(onResume, onQuit, onSettings); hidePause(); // onSettings (optional) adds a Settings item
+  toggleHelp(force);                                   // field notes: open (true), close (false), or toggle
 }
 export class Menu {
   constructor(root, { species /* SpeciesDef[] (playable, in order) */ })
   show({ save = null } = {}); hide();                  // save = { speciesId, speciesName, growth, day } | null
   onStart = (speciesId) => {};  onContinue = () => {};
-  onHunter = () => {};                                 // [hunter] a clear secondary entry on the title
-                                                       //   screen: "Hunter mode" (Carnivores-style) → main opens HunterMenu
   setLoading(progress /* 0..1 */, label)               // loading state before the world is ready
   settings;                                            // { style: "detailed"|"pixel", quality: "auto"|"high"|"low",
                                                        //   muted: bool, sensitivity: 0.5..2 } — a Settings panel on the title
@@ -585,7 +563,7 @@ export class MapView {
 }
 ```
 **Design tokens** (UI defines them on `:root` in `style.css` — the safe areas and gutters on
-`#app`, since they're measured in the app frame; the hunter UI reuses them):
+`#app`, since they're measured in the app frame):
 `--font-display`, `--font-ui`, `--font-mono`, `--c-bone`, `--c-paper`, `--c-ink`, `--c-moss`,
 `--c-ochre`, `--c-rust`, `--c-blood`, `--c-panel` (translucent dark panel bg), `--c-line`
 (hairline colour), `--radius`, `--shadow`, `--blur`, `--ease`, `--safe-b` (bottom safe area).
@@ -608,13 +586,6 @@ Everything synthesised with Web Audio (no files): ambient beds crossfaded by
 water near lakes), player footsteps scaled by mass and gait, spatialised species
 calls (distance attenuation + stereo pan vs. listener yaw; smaller = higher
 pitch), bites/hits, eating/drinking, growth chime, low-health heartbeat.
-**[hunter]** also: `"shot"` (per `weapon`: revolver crack, shotgun boom, crossbow thwip,
-rifle/sniper crack + long rolling echo off the hills), `"hit"` (meaty impact, spatial),
-`"reload"` / `"dryfire"` (mechanical clicks), `"lure"` (a hunter's call-device imitation of the
-species — reuse the species call synth, slightly "reedy"), `"radar"` (soft electronic ping),
-`"trophy"` (understated sting), and a rotor loop polled from `world.helicopter`
-(`{ active, position }`, may be null) with distance attenuation + doppler-ish pitch. In
-hunter mode the player's footsteps come from `player.isHunter` (boots on grass/rock, wading).
 
 ### `world/world.js` & `main.js` (INTEGRATION)
 
@@ -623,9 +594,7 @@ export class World {
   constructor({ scene, camera, renderer, seed, quality })
   scene; camera; renderer; quality; seed; events /* EventBus */; rng; time;
   terrain; water; vegetation; sky; ecosystem;
-  wind;                   // [hunter] Wind (world/wind.js) — create it when the module exists; AI guards for null
-  helicopter;             // [hunter] null | Helicopter (set by HuntSession)
-  mode;                   // "survival" | "hunter"
+  wind;                   // Wind (world/wind.js) — scent drift for the AI's smell; AI guards for null
   get player()            // ecosystem.player
   update(dt, focus)       // sky → vegetation → ecosystem → water
 }
@@ -658,185 +627,15 @@ URL params: `?species=<id>` autostart · `?growth=0..1` · `?t=0..1` time of day
 | `newDay` | `{ day }` |
 | `spawn` | `{ creature }` |
 | `sniff` | `{ creature }` |
-| `shot` | [hunter] `{ shooter, weapon /* id */, x, y, z, loudness /* hearing radius m */ }` |
-| `hit` | [hunter] `{ target, shooter, damage, part, headshot, x, y, z }` |
-| `reload` / `dryfire` | [hunter] `{ weapon }` |
-| `lure` | [hunter] `{ species /* id */, x, z, shooter }` — a hunter's call device |
-| `radar` | [hunter] `{ blips: [{ x, z, species }] }` |
-| `trophy` | [hunter] `{ trophy }` — see HuntSession |
-| `extraction` | [hunter] `{ state: "called" \| "inbound" \| "landed" \| "departed", eta }` |
 
 Large per-frame things (footsteps, gait) are polled, not evented.
 
 ---
 
-## Hunter mode ([hunter])
-
-*Carnivores: Dinosaur Hunter*-style mode on the same island, sharing terrain, sky,
-water, vegetation, dinosaurs, AI, audio and UI language.
-
-**Flow.** Title screen → **Hunter mode** → `HunterMenu`: pick 2 weapons (from unlocked),
-equipment toggles (camouflage, cover scent, radar locator, call device — each costs a
-little from the hunt score multiplier, like Carnivores), 1–3 target species (they spawn
-more often via `ecosystem.setSpawnBias`), time of day → **Hunt**. A helicopter drops the
-hunter at a landing zone (short fly-in, then it departs) → first-person hunt → shoot
-dinosaurs (each kill of any species is a trophy; target species score more) → press X to
-call extraction; the helicopter arrives after ~25 s and hovers low at your position; walk
-under it (≤ 8 m) to extract → **summary** (trophies, points). Points persist in
-`localStorage` (`underfern.hunter.v1`) and unlock weapons. Dying ends the hunt and loses that
-hunt's trophies. A **trophy room** lists every trophy with species, weight, distance,
-headshot, date.
-
-**Feel.** Slow, tense stalking. Wind matters (scent carries downwind), crouching is
-quiet, sprinting is loud, gunshots scare herbivores off and draw carnivores in. Big
-carnivores can and will hunt you. Minimal HUD: crosshair, ammo, compass with wind arrow,
-health/stamina slivers, radar pings when equipped. Binoculars (B) with rangefinder +
-species ID. Scoped rifles zoom on aim.
-
-**Weapons** (`WEAPONS` in `weapons.js`; numbers are starting points):
-
-| id | name | dmg × pellets | mag | notes | unlock pts |
-| --- | --- | --- | --- | --- | --- |
-| `revolver` | .44 Revolver | 45 | 6 | fast, short range | 0 |
-| `shotgun` | Double-Barrel 12ga | 16 × 9 | 2 | big spread, devastating close | 0 |
-| `crossbow` | Crossbow | 110 | 1 | **near-silent**, projectile with drop, slow reload | 150 |
-| `rifle` | Bolt-Action Rifle | 140 | 5 | 2.5× scope, loud | 0 |
-| `sniper` | .50 Sniper Rifle | 320 | 3 | 6× scope, very loud, heavy sway | 400 |
-
-Headshots ×2.5; damage falls off past each weapon's effective range; armor half-applies.
-
-### `world/wind.js` (HUNT)
-
-```js
-export class Wind {
-  constructor(seed)
-  yaw;        // direction the wind blows TOWARD (heading convention)
-  strength;   // 0..1 (gusts)
-  vector;     // THREE.Vector3 unit (x, 0, z) toward which it blows
-  update(dt)  // slow drift of direction (minutes), gusty strength (seconds)
-  scentFactor(fromX, fromZ, toX, toZ) // scent from → to: ≈1.6 straight downwind, ≈1 crosswind, ≈0.15 upwind (blend with strength)
-}
-```
-
-### `hunter/hunter.js` (HUNTER-FP)
-
-```js
-export const HUMAN;  // pseudo-species { id: "human", name: "Hunter", diet: "human", length: 0.6, height: 1.0,
-                     //   mass: 85, health: 100, speed: { walk: 1.6, trot: 3.4, sprint: 6.2, crouch: 1.1, swim: 1.2 }, ... }
-export class Hunter {   // creature-compatible actor (see Creature contract), isHunter = true, isPlayer = true, model = null
-  constructor(world, { x, z, heading = 0, equipment = {} })
-  // all Creature fields AI / creature.js / HUD read: id, alive, species (HUMAN), growth 1, health, stamina, food 100,
-  // water 100, bleeding, legBroken, crouching, swimming, position, velocity, heading, speed, gait, age, kills,
-  // lastAttacker, lastDamageTime, causeOfDeath, hurt, brain null, model null, intent { moveX, moveZ, sprint, crouch }
-  pitch;                         // look pitch (radians)
-  scent; noise; visibility;      // 0..1, from movement, crouch, equipment (cover scent ×0.35 scent, camo ×0.6 visibility),
-                                 //   forest cover / night (lower visibility)
-  get scale(); get mass(); get maxHealth(); get radius(); get stage(); get diet();
-  eyePosition(target); forward(target); headPosition(target)   // headPosition = eye
-  update(dt)                     // walk on terrain (step smoothing), wade/swim (no drowning while stamina > 0),
-                                 //   collisions (trees, creatures), stamina, bleeding, slow regen, emits like creatures
-  takeDamage(amount, source, type); heal(amount); die(cause, killer); dispose();
-}
-export class HunterController {
-  constructor({ world, input, camera /* THREE.PerspectiveCamera */, weapons /* WeaponSystem */, audio = null })
-  hunter; binoculars /* bool */; zoom /* current fov multiplier */;
-  possess(hunter)
-  update(dt)  // pointer-lock mouse look (yaw/pitch on the camera at hunter.eyePosition), WASD camera-relative intent,
-              // head bob & sway, landing dip, FOV kick on sprint, ADS / scope / binocular zoom (fov) with lower look
-              // sensitivity, drives weapons.update(dt, {...}) with fire/aim/reload/switch, toggles binoculars
-}
-```
-
-### `hunter/weapons.js` + `hunter/viewmodel.js` (HUNTER-GUNS)
-
-```js
-export const WEAPONS;        // { [id]: { id, name, description, damage, pellets, spread, range, magazine, reserve,
-                             //   fireInterval, reloadTime, zoom, scope, loudness, projectile /* 0 hitscan | m/s */,
-                             //   gravity, recoil, sway, unlockPoints } }
-export class WeaponSystem {
-  constructor({ world, camera, loadout /* [id, id] */ })
-  current /* id */; ammo /* { [id]: { mag, reserve } } */; aiming /* 0..1 */; reloading; canFire;
-  viewmodel;                 // THREE.Group — add as a CHILD of the camera (main adds the camera to the scene)
-  update(dt, { fire, aim, reload, switchTo /* id|null */, moving, sprinting, binoculars })
-  raycast(origin, dir, maxDist) // → { creature, part, point, distance } | { terrain|tree, point } | null
-}
-// viewmodel.js
-export function createViewmodel(weaponId) // → { object, update(dt, state), dispose } detailed, smooth gun + gloved hands
-                                           //   (bevelled steel, procedural wood grain, worn edges; PBR-ish materials):
-                                           //   idle sway, walk bob, recoil kick, reload animation, ADS pose, muzzle point
-```
-Hit detection marches the ray against the terrain heightfield, tree trunks
-(`vegetation.collidersNear` as vertical cylinders) and creature hit spheres
-(`model.getHitSpheres`; broad-phase by creature position). Crossbow bolts are simulated
-projectiles with gravity. Effects (pooled): muzzle flash (sprite + brief PointLight),
-faint tracer, dust/splash puff on terrain/water, blood puff on creatures. Emits `shot`,
-`hit`, `reload`, `dryfire`; calls `creature.takeDamage(dmg, hunter, "shot")`.
-
-### `hunter/hunt.js` + `hunter/helicopter.js` (HUNT)
-
-```js
-export class HuntSession {
-  constructor({ world, events })
-  static loadProfile()        // → { points, unlocked: { weapons: [] }, trophies: [], hunts } (localStorage, try/catch)
-  static saveProfile(profile)
-  profile; active; state;     // "dropoff" | "hunting" | "extracting" | "ended"
-  trophies;                   // this hunt: [{ id, speciesId, speciesName, mass, score, headshot, distance, weapon, time, target }]
-  score;
-  start({ hunter, weapons, equipment: { camo, coverScent, radar, lure }, targets /* species ids */ })
-                              // landing zone, setSpawnBias, helicopter drop-off, world.helicopter
-  update(dt)                  // radar pings (every ~10 s → "radar" event) if equipped, trophy detection on "death" whose
-                              //   killer is the hunter, extraction flow, helicopter
-  lure()                      // emit "lure" for a random/first target species at the hunter (cooldown ~20 s)
-  requestExtraction()         // → helicopter inbound; "extraction" events
-  end(result /* "extracted" | "died" | "quit" */) // → summary { result, trophies, score, points, unlocked, duration }
-}
-export class Helicopter {      // helicopter.js
-  constructor(scene)
-  object; active; position;    // detailed, smooth-shaded; spinning rotors; landing light at night; rotor-wash dust
-  dropOff(point, onDone); pickUp(point, onArrive); update(dt); dispose();
-}
-```
-Score = species trophy value (by mass) × size × (headshot 1.5) × (target 1.5) × equipment
-multiplier (each equipment item −10%). Points = score summed on extraction.
-
-### `ui/hunterHud.js` + `ui/hunterMenu.js` + `hunter.css` (HUNTER-UI)
-
-```js
-export class HunterHud {
-  constructor(root, { events, isTouch })    // injects <link rel="stylesheet" href="hunter.css"> once
-  show(); hide();
-  update(dt, { hunter, controller, weapons, hunt, world, camera })
-  // crosshair (spreads with movement/spread, hidden while scoped), hit marker (headshot variant), ammo (mag / reserve,
-  // weapon name), compass with wind arrow + strength, health/stamina slivers, stealth meter (scent/noise/visibility),
-  // scope overlay (black vignette + reticle, per weapon), binocular overlay (rangefinder distance + species name/
-  // estimated weight of the creature under the reticle), radar blips (corner minimap pings), trophy toasts,
-  // extraction status/ETA, damage vignette
-  toast(text, kind)
-  showSummary(summary, onAgain, onMenu)     // hunt results: trophies list, score, points earned, unlocks
-  showDeath(summary, onMenu)
-}
-export class HunterMenu {
-  constructor(root, { species /* huntable SpeciesDef[] */, weapons /* WEAPONS */ })
-  show(profile); hide();
-  onStart = ({ weapons, equipment, targets, phase }) => {};
-  onBack = () => {};
-  // loadout screen (weapon cards with stats + locked state/points), equipment toggles with score-multiplier
-  // readout, target species picker, time-of-day choice, trophy room view
-}
-```
-
----
-
 ## Additions after integration
 
-- `Hud.showPause(onResume, onQuit, onSettings, { hunter, notes, quitNote } = {})` and
-  `Hud.toggleHelp(force, { hunter } = {})` — the pause overlay and field notes are
-  shared with Hunter mode, which passes its own notes and help sheet.
 - `Menu.settingsOpen` — true from the moment the settings panel opens.
 - `Menu.settings.pixelSize` (0 fine … 1 chunky, default 0.5) — the pixel render style
   blends the render resolution between full and chunky; `?pixel=0..1` overrides it.
-- `src/hunter/hunterMode.js` — `createHunterMode(deps)` returns
-  `{ open, begin, update, render, pause, resume, quit, setSensitivity, toast, session, hunter, weapons }`;
-  main.js forwards `update`/`render` while its state is `"hunter"`.
 - Test hook: `window.__underfern.advance(seconds, dt = 0.05)` runs the state machine
   without drawing. `node tests/run-tests.mjs` runs unit + smoke tests headlessly.

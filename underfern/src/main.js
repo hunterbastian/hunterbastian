@@ -1,8 +1,7 @@
 // Underfern — boot, game state machine and the frame loop.
 //
 // States: "loading" → "menu" (cinematic flight over the live island) →
-// "playing" ⇄ "paused" → "dead" → (respawn | menu). Hunter mode is loaded on
-// demand from ./hunter/hunterMode.js and takes over the loop while it runs.
+// "playing" ⇄ "paused" → "dead" → (respawn | menu).
 
 // Copy saves from the working title before anything reads storage.
 import "./core/migrate.js";
@@ -108,7 +107,6 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 2000);
 camera.position.set(0, 120, 0);
-scene.add(camera); // hunter viewmodels hang off the camera
 
 /**
  * Size the drawing buffer. "pixel" draws the 3D scene at a few hundred pixels
@@ -196,7 +194,6 @@ const game = {
   saveTimer: 0,
   deathTimer: 0,
   deathShown: false,
-  hunter: null, // active hunter-mode session (from hunterMode.js)
   fps: 0,
   errors: [],
 };
@@ -209,7 +206,7 @@ const attractFocus = new THREE.Vector3();
 
 function saveGame() {
   const p = game.world?.player;
-  if (game.state === "dead" || !p || !p.alive || p.isHunter) return;
+  if (game.state === "dead" || !p || !p.alive) return;
   const sky = game.world.sky;
   store.set(GAME.saveKey, {
     v: 1,
@@ -284,8 +281,6 @@ function startSurvival(speciesId, { growth = 0, from = null, pos = null } = {}) 
   const species = getSpecies(speciesId);
   audio?.start();
   tryLockLandscape(); // Android fullscreen / installed app; a no-op elsewhere
-  world.mode = "survival";
-  input.setMode?.("dino");
 
   const eco = world.ecosystem;
   eco.clearPlayer();
@@ -356,10 +351,6 @@ function resumeGame() {
 }
 
 function quitToMenu() {
-  if (game.hunter) {
-    game.hunter.quit?.();
-    return;
-  }
   saveGame();
   showMenu();
 }
@@ -368,14 +359,11 @@ function quitToMenu() {
 function showMenu() {
   const world = game.world;
   world.ecosystem.clearPlayer();
-  world.mode = "survival";
   hud.hideDeath();
   hud.hidePause();
-  hud.toggleHelp(false); // hide() only closes it while the HUD is visible (not after a hunt)
   hud.hide();
   game.map?.close();
   input.enabled = false;
-  input.setMode?.("dino");
   game.state = "menu";
   menu.show({ save: menuSaveSummary() });
 }
@@ -415,7 +403,6 @@ menu.onSettingsChange = (next) => {
   store.set(SETTINGS_KEY, settings);
   audio?.setMuted(settings.muted);
   if (game.tpc) game.tpc.sensitivity = settings.sensitivity;
-  game.hunter?.setSensitivity?.(settings.sensitivity);
   if (params.get("style") === null && settings.style !== style) {
     style = settings.style === "pixel" ? "pixel" : "detailed";
     resize();
@@ -428,9 +415,7 @@ menu.onSettingsChange = (next) => {
       if (game.state === "menu" || game.state === "loading") {
         location.reload(); // terrain resolution / density / shadows are baked at load
       } else {
-        const text = "Quality changes apply the next time Underfern loads";
-        if (game.hunter && game.hunterMode?.toast) game.hunterMode.toast(text, "info");
-        else hud.toast(text, "info");
+        hud.toast("Quality changes apply the next time Underfern loads", "info");
       }
     }
   }
@@ -448,67 +433,6 @@ menu.onContinue = () => {
   const s = loadSave();
   if (s) startSurvival(s.speciesId, { from: s });
 };
-menu.onHunter = () => startHunterMode();
-
-/** Hunter mode lives in its own module; load it on first use. */
-async function startHunterMode() {
-  audio?.start();
-  tryLockLandscape(); // inside the start gesture, before the module loads
-  try {
-    const mod = await import("./hunter/hunterMode.js");
-    if (!game.hunterMode) {
-      game.hunterMode = mod.createHunterMode({
-        world: game.world,
-        renderer,
-        scene,
-        camera,
-        input,
-        audio,
-        menu,
-        hud,
-        map: game.map,
-        uiRoot,
-        isTouch,
-        settings: () => settings,
-        onExit: () => {
-          game.hunter = null;
-          showMenu();
-        },
-        onSessionStart: (session) => {
-          game.hunter = session;
-          game.state = "hunter";
-        },
-        onPlanner: () => {
-          game.hunter = null;
-          game.state = "hunter-menu";
-        },
-      });
-    }
-    menu.hide();
-    game.state = "hunter-menu";
-    game.hunterMode.open();
-  } catch (err) {
-    console.warn("[underfern] hunter mode unavailable", err);
-    game.state = "menu";
-    menu.show({ save: menuSaveSummary() });
-    flashNotice("Hunter mode is still being built — try Survival for now.");
-  }
-}
-
-/** A small, self-dismissing notice for the title screen (the HUD is hidden there). */
-function flashNotice(text) {
-  const el = document.createElement("div");
-  el.setAttribute("role", "status");
-  el.textContent = text;
-  el.style.cssText =
-    "position:fixed;left:50%;bottom:calc(28px + var(--safe-b,0px));transform:translateX(-50%);z-index:70;" +
-    "max-width:min(92cqw,520px);padding:12px 18px;border-radius:var(--radius,6px);background:var(--c-panel,rgba(18,17,13,.86));" +
-    "color:var(--c-bone,#efe8d8);font:500 14px/1.4 var(--font-ui,system-ui,sans-serif);box-shadow:var(--shadow,0 8px 30px rgba(0,0,0,.4));" +
-    "border:1px solid var(--c-line,rgba(239,232,216,.16));text-align:center;transition:opacity .4s";
-  uiRoot.appendChild(el);
-  setTimeout(() => (el.style.opacity = "0"), 3600);
-  setTimeout(() => el.remove(), 4100);
-}
 
 /* ----------------------------------------------------------------------- */
 /* Frame loop                                                                */
@@ -538,8 +462,7 @@ function frame(now) {
 
   step(dt);
 
-  if (game.hunter?.render) game.hunter.render(renderer, scene, camera);
-  else renderer.render(scene, camera);
+  renderer.render(scene, camera);
 
   if (DEBUG) updateDebug();
   input.endFrame();
@@ -549,8 +472,7 @@ function frame(now) {
 function step(dt) {
   const world = game.world;
   switch (game.state) {
-    case "menu":
-    case "hunter-menu": {
+    case "menu": {
       game.tpc.cinematic(dt, world.terrain);
       attractFocus.set(camera.position.x, 0, camera.position.z);
       world.update(dt, attractFocus);
@@ -593,10 +515,6 @@ function step(dt) {
       if (!game.deathShown && game.deathTimer > 2.6) showDeathScreen();
       break;
     }
-    case "hunter": {
-      game.hunter?.update(dt);
-      break;
-    }
     default:
       break;
   }
@@ -637,7 +555,7 @@ async function boot() {
   game.map = new MapView(uiRoot, world.terrain);
 
   world.events.on("death", (e) => {
-    if (e.creature && e.creature === world.ecosystem.player && !e.creature.isHunter && game.state === "playing") {
+    if (e.creature && e.creature === world.ecosystem.player && game.state === "playing") {
       onPlayerDeath();
     }
   });
@@ -667,8 +585,6 @@ async function boot() {
     } catch (err) {
       console.warn("[underfern] unknown ?species", autostart, err);
     }
-  } else if (params.get("hunter") === "1") {
-    startHunterMode();
   }
 }
 
@@ -680,7 +596,6 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     saveGame();
     if (game.state === "playing") pauseGame();
-    game.hunter?.pause?.();
   }
   last = performance.now();
 });
@@ -766,14 +681,10 @@ window.__underfern = {
   get audio() {
     return audio;
   },
-  get hunterMode() {
-    return game.hunterMode ?? null;
-  },
   input,
   renderer,
   camera,
   startGame: (speciesId, opts) => startSurvival(speciesId, opts),
-  startHunter: () => startHunterMode(),
   setPhase: (p) => game.world?.sky.setPhase(p),
   /** Fast-forward the state machine `seconds` of game time without drawing (tests). */
   advance: (seconds = 1, dt = 0.05) => {

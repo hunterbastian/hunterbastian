@@ -5,7 +5,7 @@
 //   steer   — feelers (deep water, steep ground, island edge, tree trunks) + unstick
 // Brains only ever READ the documented world / creature fields and WRITE
 // `creature.intent` (plus the optional `creature.lookTarget` for head turns), so
-// the same code drives NPCs in Survival and Hunter mode.
+// the same code drives every NPC.
 
 import { clamp, lerp, smoothstep, angleDiff, yawFromDir, dist2 } from "../core/math.js";
 import { rand } from "../core/rng.js";
@@ -27,9 +27,7 @@ const SMELL_MUL = 1.4; // smell range = perception × this × scent × wind fact
 const MEMORY_TIME = 6; // s a lost threat / quarry stays "known" at its last position
 const CALL_ANSWER_RANGE = 250;
 const CALL_ALERT_RANGE = 100;
-const LURE_RANGE = 450;
 const SPAWN_GRACE = 45; // s a freshly spawned player is not hunted (unless provoked)
-const HUNTER_MASS = 85;
 const JUVENILE = 0.4; // growth below this is a juvenile
 const ALERT_DECAY = 0.04; // per second
 
@@ -40,7 +38,6 @@ const JOG = 0.8;
 const TROT = 1;
 
 const DEFENDERS = new Set(["stegosaurus", "gastonia", "diplodocus", "brontosaurus"]);
-const CHARGERS = new Set(["stegosaurus", "diplodocus", "brontosaurus"]);
 
 // Hunting style per carnivore: chase = distance at which a stalk turns into a
 // sprint, crouch = distance inside which it creeps, callP = chance of a roar
@@ -70,7 +67,6 @@ function massOf(o) {
   if (!o) return 100;
   const m = o.mass;
   if (Number.isFinite(m)) return m;
-  if (o.isHunter) return HUNTER_MASS;
   return num(o.species && o.species.mass, 100);
 }
 
@@ -161,8 +157,6 @@ function attach(brain) {
       reg.offs.push(typeof off === "function" ? off : () => bus.off && bus.off(name, fn));
     };
     sub("call", fanOut("_hearCall"));
-    sub("shot", fanOut("_hearShot"));
-    sub("lure", fanOut("_hearLure"));
     sub("damage", (e) => {
       const b = e && e.target && e.target.brain;
       if (b && b._reg === reg) b._onDamage(e);
@@ -191,7 +185,7 @@ function detach(brain) {
 
 export class Brain {
   /**
-   * @param {object} creature the Creature (or creature-compatible actor) to drive
+   * @param {object} creature the Creature to drive
    * @param {object} world World — terrain, vegetation, ecosystem, sky, wind (may be null), events
    * @param {() => number} rng seeded random in [0, 1)
    * @param {{ id, species, members: object[], leader: object } | null} group herd / pack shared with mates
@@ -206,25 +200,23 @@ export class Brain {
     this.state = "idle";
     /** Creature | Carcass | FoodPlant | { x, z } | null */
     this.target = null;
-    /** Finer phase within the state: "stalk" | "chase" | "bite" | "defend" | "charge" | "guard" | "retreat" | "yield" | "wary" | "search" | "" */
+    /** Finer phase within the state: "stalk" | "chase" | "bite" | "defend" | "guard" | "retreat" | "yield" | "wary" | "search" | "" */
     this.mode = "";
     /** 0..1 nervousness: sharper senses, more glances, wider flight distance. */
     this.alert = 0;
-    /** 0..1 how close this animal is to noticing the player — a stealth meter for HUDs. */
+    /** 0..1 how close this animal is to noticing the player — its stealth meter. */
     this.awareness = 0;
 
     const sp = creature.species || {};
     this._carn = sp.diet === "carnivore";
     this._style = HUNT_STYLE[sp.id] || DEFAULT_STYLE;
     this._defender = DEFENDERS.has(sp.id);
-    this._charger = CHARGERS.has(sp.id);
     this._tail = sp.attack === "tail";
     this._fovCos = this._carn ? -0.35 : -0.85; // ~220° vs ~300° field of view
     this._swimmer = num(sp.swim, 0) >= 0.7;
     this._small = num(sp.mass, 500) < 150;
     this._aggr = clamp(num(sp.aggression, 0.3), 0, 1);
     this._walkSpeed = num(sp.speed && sp.speed.walk, 1.5);
-    this._trotSpeed = num(sp.speed && sp.speed.trot, 4);
 
     // Stagger the ~4 Hz thinking so a crowd doesn't all think on one frame.
     const id = Number(creature.id) || Math.floor(this.rng() * 1000);
@@ -270,10 +262,7 @@ export class Brain {
     this._attacker = null;
     this._attackedAt = -1e9;
     this._defendRoll = 1;
-    this._chargeRollUntil = -1e9;
-    this._chargeYes = false;
-    this._chargeUntil = 0;
-    this._chargeSide = this.rng() < 0.5 ? -1 : 1;
+    this._side = this.rng() < 0.5 ? -1 : 1; // ±1: the way it favours when circling or swinging
     this._ignoreObj = null;
     this._ignoreUntil = -1e9;
     this._oppPrey = null;
@@ -305,7 +294,6 @@ export class Brain {
     this._chaseT = 0;
     this._chaseBest = 1e9;
     this._flank = 0;
-    this._swung = false;
     this._eatTry = 0;
     this._aidUntil = -1e9;
 
@@ -323,9 +311,8 @@ export class Brain {
     this._atWater = false;
     this._approachT = 0;
 
-    // Investigation (lure / gunshot).
+    // Investigation (a prey animal's call).
     this._invActive = false;
-    this._invHunting = false;
     this._invUntil = 0;
     this._invSearchT = 0;
 
@@ -390,8 +377,7 @@ export class Brain {
     const tg = this.target;
     if (tg) {
       let label = "point";
-      if (tg.isHunter) label = "hunter";
-      else if (tg.position && tg.species) label = `${tg.species.id}#${tg.id}`;
+      if (tg.position && tg.species) label = `${tg.species.id}#${tg.id}`;
       else if (tg.meat !== undefined) label = "carcass";
       else if (tg.kind) label = tg.kind;
       const d = Math.sqrt(dist2(c.position.x, c.position.z, xOf(tg), zOf(tg)));
@@ -695,11 +681,6 @@ export class Brain {
   // 0 = harmless; otherwise roughly "how many of me it could eat".
   _dangerOf(o) {
     const c = this.creature;
-    if (o.isHunter) {
-      if (this._carn) return 0; // carnivores see a meal
-      if (c.growth < JUVENILE) return 1.5;
-      return this._charger ? 0.45 : 1;
-    }
     const osp = o.species;
     if (!osp || osp.diet !== "carnivore") return 0;
     const om = massOf(o);
@@ -712,7 +693,6 @@ export class Brain {
   }
 
   _isPreyKind(o) {
-    if (o.isHunter) return true;
     const osp = o.species;
     if (!osp || osp.id === this.creature.species.id) return false;
     if (osp.diet === "herbivore") return true;
@@ -730,20 +710,17 @@ export class Brain {
     if (pm > my * 1.6 * (1 + 0.6 * (pack - 1))) return 0; // more than we can handle
     const r = pm / my;
     let s = r < 0.015 ? 0.15 : r < 0.06 ? 0.5 : r <= 1 ? 1 : Math.max(0.2, 1 - (r - 1) * 0.5);
-    if (o.isHunter) s = Math.max(s, 0.7);
-    else {
-      const osp = o.species;
-      if (num(o.growth, 1) < JUVENILE) s *= 1.5;
-      const hpF = num(o.health, 1) / Math.max(1, num(o.maxHealth, 1));
-      if (hpF < 0.6) s *= 1.4;
-      if (num(o.bleeding, 0) > 0) s *= 1.15;
-      // Isolated animals get taken; big herds of big animals are trouble.
-      const herd = matesNear(o, 25);
-      s *= herd === 0 ? 1.5 : 1 / (1 + 0.22 * herd);
-      if (herd >= 3 && r > 0.6 && pack < 2) s *= 0.5;
-      if (num(osp.armor, 0) >= 0.4 && my < pm * 2) s *= 0.15; // Gastonia's spikes aren't worth it
-      if (DEFENDERS.has(osp.id) && r > 0.5) s *= 0.4;
-    }
+    const osp = o.species;
+    if (num(o.growth, 1) < JUVENILE) s *= 1.5;
+    const hpF = num(o.health, 1) / Math.max(1, num(o.maxHealth, 1));
+    if (hpF < 0.6) s *= 1.4;
+    if (num(o.bleeding, 0) > 0) s *= 1.15;
+    // Isolated animals get taken; big herds of big animals are trouble.
+    const herd = matesNear(o, 25);
+    s *= herd === 0 ? 1.5 : 1 / (1 + 0.22 * herd);
+    if (herd >= 3 && r > 0.6 && pack < 2) s *= 0.5;
+    if (num(osp.armor, 0) >= 0.4 && my < pm * 2) s *= 0.15; // Gastonia's spikes aren't worth it
+    if (DEFENDERS.has(osp.id) && r > 0.5) s *= 0.4;
     if (o.isPlayer) s *= 0.5 + this._aggr;
     if (o === this.target) s *= 1.5; // stick with the current quarry
     if (this.group) {
@@ -777,16 +754,11 @@ export class Brain {
   // eating is tolerated much closer (prey watch it instead).
   _fleeDist(th) {
     const c = this.creature;
-    let base;
-    if (th.isHunter) base = c.growth < JUVENILE ? 60 : this._charger ? 30 : 46;
-    else base = 20 + 24 * Math.sqrt(Math.min(4, num(this._threatDanger, 1)));
+    let base = 20 + 24 * Math.sqrt(Math.min(4, num(this._threatDanger, 1)));
     if (this._small) base *= 1.25;
     if (c.growth < JUVENILE) base *= 1.3;
     base *= 1 + 0.35 * this.alert;
-    const tb = th.brain;
-    if (this._isUrgent(th)) base *= 1.25;
-    else if (tb && (tb.state === "rest" || tb.state === "eat")) base *= 0.45;
-    else base *= th.isHunter ? 0.8 : 0.45;
+    base *= this._isUrgent(th) ? 1.25 : 0.45;
     return clamp(base, 10, 95);
   }
 
@@ -844,14 +816,6 @@ export class Brain {
     return false;
   }
 
-  _rollCharge() {
-    if (this._now > this._chargeRollUntil) {
-      this._chargeRollUntil = this._now + 30;
-      this._chargeYes = this.rng() < 0.3 + this._aggr;
-    }
-    return this._chargeYes;
-  }
-
   /* --- Decisions ------------------------------------------------------ */
 
   _decide() {
@@ -894,15 +858,12 @@ export class Brain {
     const now = this._now;
     const adultish = c.growth >= JUVENILE;
 
-    // 1. Mid-fight (defending or charging): keep at it while it makes sense.
+    // 1. Mid-fight (defending): keep at it while it makes sense.
     if (this.state === "attack" && this._keepFighting()) return;
 
     // 2. Hurt by someone: turn and fight (defenders, cornered herds) or bolt.
     const atk = this._recentAttacker(6);
     if (atk) {
-      if (this._charger && atk.isHunter && c.growth >= 0.6 && this._rollCharge() && this._distTo(atk) < 25) {
-        return this._startFight(atk, "charge");
-      }
       if (this._willDefend(atk)) return this._startFight(atk, "defend");
       if (this.state !== "flee" || this._fleeFrom !== atk) {
         return this._startFlee(atk, atk.position.x, atk.position.z, rand(this.rng, 8, 12), true);
@@ -924,15 +885,12 @@ export class Brain {
       const d = this._threatD;
       const fd = this._fleeDist(th);
       const hpF = num(c.health, 1) / Math.max(1, num(c.maxHealth, 1));
-      if (this._defender && adultish && !th.isHunter && hpF > 0.25) {
+      if (this._defender && adultish && hpF > 0.25) {
         // Armour and tail spikes: stand ground, swing when it comes close.
         if (d < this._defendDist(th) && this._threatDanger > 0.15) return this._startFight(th, "defend");
         if (this.state === "flee" && this._keepFleeing()) return;
         // Otherwise carry on, heads up (see _watchLook) — no running.
       } else {
-        if (th.isHunter && this._charger && c.growth >= 0.6 && d < 15 && this.awareness >= 1 && this._rollCharge()) {
-          return this._startFight(th, "charge");
-        }
         if (d < fd) {
           if (this.state !== "flee" || this._fleeFrom !== th) {
             return this._startFlee(th, this._threatX, this._threatZ, rand(this.rng, 5, 9), d < fd * 0.7 || this._isUrgent(th));
@@ -947,7 +905,7 @@ export class Brain {
       }
     }
 
-    // 4. A timed flight (gunshot, close roar) runs its course.
+    // 4. A timed flight (a close roar, a bite) runs its course.
     if (this.state === "flee" && this._keepFleeing()) return;
 
     // 5. The herd panics together.
@@ -986,12 +944,6 @@ export class Brain {
       return this._enter("rest", null);
     }
     this._gatherT = 0;
-
-    // Curiosity: a lure call.
-    if (this._invActive) {
-      if (now < this._invUntil) return this._enter("investigate", this._invPt, this.mode === "search" ? "search" : "");
-      this._invActive = false;
-    }
 
     // Keep up with the herd.
     if (L) {
@@ -1067,14 +1019,14 @@ export class Brain {
     const c = this.creature;
     const now = this._now;
     const hpF = num(c.health, 1) / Math.max(1, num(c.maxHealth, 1));
-    // A carnivore that's been shot comes for the shooter from a long way off.
+    // A hurt carnivore comes for its attacker from a long way off.
     const atk = this._recentAttacker(8, 160);
 
     // 1. Badly hurt: retreat from whoever is around.
     if (hpF < 0.3) {
       const t = this.target && this.target.position && this.target.alive ? this.target : null;
       const src = atk || this._threat || (this.state === "attack" || this.state === "hunt" ? t : null);
-      // Whoever just hurt us is worth running from even at rifle range.
+      // Whoever just hurt us is worth running from at a much longer range.
       if (src && this._distTo(src) < (src === atk ? 160 : 70)) {
         if (this.state !== "flee") return this._startFlee(src, src.position.x, src.position.z, rand(this.rng, 15, 25), true, "retreat");
         return;
@@ -1093,7 +1045,7 @@ export class Brain {
 
     // 3. Retaliate (or bolt if it's far too big).
     if (atk && atk !== this.target) {
-      if (atk.isHunter || massOf(atk) < massOf(c) * 2.5 || (hpF > 0.75 && this.rng() < this._aggr)) {
+      if (massOf(atk) < massOf(c) * 2.5 || (hpF > 0.75 && this.rng() < this._aggr)) {
         return this._startHunt(atk, "chase", true);
       }
       return this._startFlee(atk, atk.position.x, atk.position.z, rand(this.rng, 8, 12), true, "retreat");
@@ -1145,7 +1097,7 @@ export class Brain {
       }
     }
 
-    // 11. Investigate a gunshot / lure.
+    // 11. Investigate a call (prey giving itself away, see _hearCall).
     if (this._invActive) {
       if (now < this._invUntil) return this._enter("investigate", this._invPt, this.mode === "search" ? "search" : "");
       this._invActive = false;
@@ -1189,7 +1141,7 @@ export class Brain {
     const c = this.creature;
     const now = this._now;
     if (c.stamina < 25) return false;
-    const investigating = this._invActive && this._invHunting && now < this._invUntil;
+    const investigating = this._invActive && now < this._invUntil;
     if (now < this._tiredUntil && !investigating) return false;
     if (investigating) return this._preyScore > 0.05;
     if (c.food < (this._night ? 78 : 65)) return this._preyScore >= 0.12;
@@ -1210,7 +1162,7 @@ export class Brain {
       return now < this._restUntil && this.alert < 0.5 && c.food > 20 && c.water > 20 && !this._prey;
     }
     if (now < this._restUntil && c.food > 30) return true; // sleeping off a meal
-    if (this._night || this._daylight < 0.5) return false; // the night belongs to the hunters
+    if (this._night || this._daylight < 0.5) return false; // the night belongs to the predators
     if (c.food > 60 && c.water > 45 && this.rng() < SENSE_INTERVAL / 150) {
       this._restUntil = now + rand(this.rng, 40, 110);
       return true;
@@ -1287,9 +1239,7 @@ export class Brain {
     this._enter("attack", t, mode);
     if (!fresh) return;
     this.alert = 1;
-    this._chargeUntil = this._now + rand(this.rng, 7, 10);
-    this._swung = false;
-    this._chargeSide = this.rng() < 0.5 ? -1 : 1;
+    this._side = this.rng() < 0.5 ? -1 : 1;
     // A bellow / hoot as a threat display.
     if (this.rng() < 0.5) this._queueCall(rand(this.rng, 0.1, 0.6), false);
   }
@@ -1301,14 +1251,6 @@ export class Brain {
     if (!t || !t.alive || !t.position) return false;
     const d = this._distTo(t);
     const hpF = num(c.health, 1) / Math.max(1, num(c.maxHealth, 1));
-    if (this.mode === "charge") {
-      if (now > this._chargeUntil || (this._swung && c.biteCooldown <= 0.2)) {
-        // Point made: lumber off.
-        this._startFlee(t, t.position.x, t.position.z, rand(this.rng, 6, 10), false, "retreat");
-        return true;
-      }
-      return true;
-    }
     if (hpF < 0.22) {
       this._startFlee(t, t.position.x, t.position.z, rand(this.rng, 12, 18), true);
       return true;
@@ -1508,10 +1450,9 @@ export class Brain {
     return p && this._plantOk(p) ? p : null;
   }
 
-  /** Go and look at (x, z). hunting: arrive ready to hunt (carnivores). */
-  _investigate(x, z, hunting, dur) {
+  /** Go and look at (x, z), arriving ready to hunt. */
+  _investigate(x, z, dur) {
     this._invActive = true;
-    this._invHunting = !!hunting;
     this._invUntil = this._now + dur;
     this._invPt.x = x;
     this._invPt.z = z;
@@ -1631,7 +1572,7 @@ export class Brain {
     if (osp.diet !== "carnivore") {
       // A hungry carnivore homes in on prey that gives itself away.
       if (this._carn && c.food < 75 && d2 < 220 * 220 && !this._invActive && (this.state === "idle" || this.state === "wander" || this.state === "follow" || this.state === "rest")) {
-        if (!this.group || !this._leader()) this._investigate(x, z, true, rand(this.rng, 35, 50));
+        if (!this.group || !this._leader()) this._investigate(x, z, rand(this.rng, 35, 50));
       }
       return;
     }
@@ -1661,51 +1602,6 @@ export class Brain {
     if (d2 < close * close && !stands && this.state !== "attack") {
       this._startFlee(caller, x, z, rand(this.rng, 6, 10), d2 < 25 * 25);
     }
-  }
-
-  _hearShot(e) {
-    const c = this.creature;
-    if (!c.alive || e.shooter === c) return;
-    const L = num(e.loudness, 300);
-    const x = num(e.x, 0);
-    const z = num(e.z, 0);
-    const d2 = dist2(c.position.x, c.position.z, x, z);
-    if (this._carn) {
-      if (d2 > L * L * 0.36) return;
-      if (this.state === "flee" || this.state === "attack" || (this.state === "eat" && c.food < 90)) return;
-      if (this.state === "hunt" && this.mode === "chase") return;
-      this.alert = Math.min(1, this.alert + 0.3);
-      // Gunfire means something wounded: come and see.
-      this._investigate(x, z, true, rand(this.rng, 25, 40));
-      return;
-    }
-    if (d2 > L * L) return;
-    this.alert = 1;
-    const shooter = e.shooter && e.shooter.alive && e.shooter.position ? e.shooter : null;
-    if (shooter && this._charger && c.growth >= 0.6 && this._distTo(shooter) < 15 && this._rollCharge()) {
-      this._startFight(shooter, "charge");
-      return;
-    }
-    if (this.state === "attack" && this.mode === "defend") return; // already fighting for its life
-    this._startFlee(null, x, z, rand(this.rng, 10, 16), true);
-    this._fleeSafe = Math.max(this._fleeSafe, Math.min(L * 0.6, 160));
-  }
-
-  _hearLure(e) {
-    const c = this.creature;
-    if (!c.alive) return;
-    const sid = typeof e.species === "string" ? e.species : e.species && e.species.id;
-    if (sid !== c.species.id) return;
-    const x = num(e.x, 0);
-    const z = num(e.z, 0);
-    if (dist2(c.position.x, c.position.z, x, z) > LURE_RANGE * LURE_RANGE) return;
-    if (this.state === "flee" || this.state === "attack" || (this.state === "hunt" && this.mode === "chase")) return;
-    if (this.state === "eat" && c.food < 90) return;
-    this.alert = Math.min(1, this.alert + 0.15);
-    // Long enough to actually get there (lures carry ~450 m), then nose about.
-    const d = Math.sqrt(dist2(c.position.x, c.position.z, x, z));
-    const v = lerp(this._walkSpeed, this._trotSpeed, 0.6) * 0.8;
-    this._investigate(x, z, this._carn, d / v + (this._carn ? rand(this.rng, 30, 45) : rand(this.rng, 20, 30)));
   }
 
   _onDamage(e) {
@@ -1938,13 +1834,13 @@ export class Brain {
           const upwind = clamp((ux * wv.x + uz * wv.z) * num(wind.strength, 0.5) * 1.6, 0, 1);
           if (upwind > 0.15) {
             const r = Math.min(d, 70) * 0.8;
-            ax = lerp(tx, tx + wv.x * r - uz * r * 0.5 * this._chargeSide, upwind);
-            az = lerp(tz, tz + wv.z * r + ux * r * 0.5 * this._chargeSide, upwind);
+            ax = lerp(tx, tx + wv.x * r - uz * r * 0.5 * this._side, upwind);
+            az = lerp(tz, tz + wv.z * r + ux * r * 0.5 * this._side, upwind);
           }
         }
       }
       // Creep once inside what the prey can see (its perception), or our own habit.
-      const preyEyes = t.isHunter ? 0 : num(t.species && t.species.perception, 0) * 0.95;
+      const preyEyes = num(t.species && t.species.perception, 0) * 0.95;
       const crouchD = Math.max(st.crouch, preyEyes * 0.8);
       const crouch = d < crouchD;
       let mag = d > crouchD + 40 ? (this._night ? TROT : JOG) : crouch ? 0.5 : WALK;
@@ -2021,22 +1917,16 @@ export class Brain {
     const d = Math.hypot(dx, dz) || 1e-3;
     const toT = Math.abs(angleDiff(c.heading, yawFromDir(dx, dz)));
     this._direct = true;
-    if (c.biteCooldown > 0.2) this._swung = true;
 
     if (this._tail) {
       const reach = sp.length * 0.5 * s + num(sp.biteRange, 1.5) * s + radiusOf(t);
-      if (this.mode === "charge" && (d > reach * 0.9 || toT < 1.2)) {
-        // Thunder past the target's flank so the swing lands without a full about-turn.
-        const side = this._chargeSide;
-        const off = Math.min(reach * 0.6, d * 0.5);
-        this._goTo(tx - (dz / d) * off * side, tz + (dx / d) * off * side, TROT, d < 16, false);
-      } else if (d > reach * 1.3) {
+      if (d > reach * 1.3) {
         // Close in on it (defending a mate, or it backed off a little).
         this._goTo(tx, tz, d > 20 ? TROT : WALK, false, false);
       } else {
         // Keep the threat in the rear quarter, swinging toward the side we already favour.
         const away = yawFromDir(-dx, -dz);
-        const side = Math.sign(angleDiff(away, c.heading)) || this._chargeSide;
+        const side = Math.sign(angleDiff(away, c.heading)) || this._side;
         const want = away + side * 0.75;
         const err = Math.abs(angleDiff(c.heading, want));
         if (err > 0.3) this._goDir(Math.sin(want), Math.cos(want), 0.14);
@@ -2240,8 +2130,8 @@ export class Brain {
     const stop = this._carn ? 6 : 14;
     if (this.mode !== "search") {
       if (d > stop) {
-        const crouch = this._carn && this._invHunting && d < 40 && this._style.ambush;
-        this._goTo(p.x, p.z, this._invHunting || d > 100 ? JOG : WALK, false, crouch, stop);
+        const crouch = this._carn && d < 40 && this._style.ambush;
+        this._goTo(p.x, p.z, JOG, false, crouch, stop);
         return null;
       }
       this.mode = "search";

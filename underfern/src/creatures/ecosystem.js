@@ -21,15 +21,12 @@ const MAX_SPAWNS_PER_TICK = 2; // spawn calls (single animals or whole groups) p
 const MAX_CARCASSES = 14; // beyond this the oldest start to rot away early
 const CARCASS_ANIM_TIME = 5; // seconds the death pose keeps animating before the model freezes
 const CARCASS_FADE_TIME = 4; // seconds a spent carcass takes to sink out of sight
-const CARNIVORE_SHARE = 0.4; // predators never exceed this share of the NPC cap…
-const BIASED_CARNIVORE_SHARE = 0.6; // …unless a hunt targets a carnivore
+const CARNIVORE_SHARE = 0.4; // predators never exceed this share of the NPC cap
 // Share of the cap herbivores may not take, so predators can still arrive once a
 // fresh player's safe minute is over (otherwise herds fill every slot first).
 const CARNIVORE_RESERVE = 0.2;
 const JUVENILE_SAFE_RADIUS = 150; // no big carnivores this close to a fresh juvenile player…
 const JUVENILE_SAFE_TIME = 60; // …during its first minute
-const HUNTER_SAFE_RADIUS = 110; // [hunter] a calmer landing zone
-const HUNTER_SAFE_TIME = 45;
 const PLAYER_CLEARANCE = 45; // NPCs never pop into existence closer than this to the player
 const POPULATE_MIN_R = 50; // the initial population may stand closer than the upkeep ring
 const OFF_BIOME_WEIGHT = 0.2; // spawn weight outside a species' preferred biomes
@@ -49,15 +46,13 @@ export class Ecosystem {
     this.seed = seed >>> 0;
     this.rng = makeRng(hash(this.seed, "ecosystem"));
     this.npcCap = Math.max(0, Math.round(npcCap ?? GAME.npcCap));
-    /** Alive creatures, including the player / [hunter] Hunter actor. */
+    /** Alive creatures, including the player. */
     this.creatures = [];
     /** { id, species, speciesId, x, y, z, heading, meat, maxMeat, age, scale, model, radius, … } */
     this.carcasses = [];
     /** Herds / packs: { id, species, members: Creature[], leader }. */
     this.groups = [];
     this.player = null;
-    /** [hunter] { speciesId: multiplier } applied to spawn weights. */
-    this.spawnBias = {};
     /** Largest creature radius present — lets collision queries stay tight. */
     this.maxRadius = 1;
     /** True once the area around the focus has been given its initial population. */
@@ -163,10 +158,6 @@ export class Ecosystem {
         console.error("[ecosystem] brain.dispose failed", err);
       }
     }
-    if (c.isHunter) {
-      if (this.player === c) this.player = null;
-      return; // the Hunter is owned by the hunt session; just detach it
-    }
     c.despawned = true;
     if (c.alive) c.alive = false;
     if (!c._carcass && c.model && c.model.object && c.model.object.parent) {
@@ -177,9 +168,8 @@ export class Ecosystem {
   }
 
   /**
-   * Make `actor` the player: a dinosaur Creature or a [hunter] Hunter actor
-   * (model null — added to `creatures` but never to the scene, never carcassed).
-   * A fresh juvenile (or hunter) gets predators cleared from around it.
+   * Make the dinosaur `actor` the player. A fresh juvenile gets predators
+   * cleared from around it.
    */
   setPlayer(actor) {
     if (!actor) {
@@ -205,19 +195,14 @@ export class Ecosystem {
   }
 
   /**
-   * Forget the player. A living dinosaur player is removed from the world; a
-   * dead one already lies there as a carcass; a Hunter is detached (not disposed).
+   * Forget the player. A living player is removed from the world; a dead one
+   * already lies there as a carcass.
    */
   clearPlayer() {
     const p = this.player;
     if (!p) return;
     this.player = null;
-    if (p.isHunter) {
-      const i = this.creatures.indexOf(p);
-      if (i >= 0) this.creatures.splice(i, 1);
-    } else if (p.alive) {
-      this.remove(p);
-    }
+    if (p.alive) this.remove(p);
   }
 
   /* --- Per-frame --------------------------------------------------------- */
@@ -274,7 +259,7 @@ export class Ecosystem {
       }
       c.update(dt);
     }
-    // Deaths this frame (from bites, shots, starvation, …) become carcasses.
+    // Deaths this frame (from bites, bleeding, starvation, …) become carcasses.
     for (let i = list.length - 1; i >= 0; i--) {
       const c = list[i];
       if (c.alive) continue;
@@ -310,7 +295,7 @@ export class Ecosystem {
   /* --- Queries ------------------------------------------------------------ */
 
   /**
-   * Alive creatures (player and Hunter included) within `radius` of (x, z).
+   * Alive creatures (player included) within `radius` of (x, z).
    * Clears and fills `out`.
    * @returns {Creature[]}
    */
@@ -366,16 +351,6 @@ export class Ecosystem {
     this.groups = this.groups.filter((g) => g.members.length > 0);
     this.populated = false;
     this._upkeepTimer = 0;
-  }
-
-  /** [hunter] Spawn-weight multipliers per species id; `{}` (or null) resets. */
-  setSpawnBias(map) {
-    this.spawnBias = {};
-    if (!map || typeof map !== "object") return;
-    for (const id in map) {
-      const v = +map[id];
-      if (Number.isFinite(v) && v >= 0) this.spawnBias[id] = v;
-    }
   }
 
   /* --- Population internals ------------------------------------------------ */
@@ -485,21 +460,16 @@ export class Ecosystem {
     return this.spawnGroup(species.id, pt.x, pt.z, size).length;
   }
 
-  // spawnWeight × biome preference × [hunter] bias, minus predators the
-  // balance rules don't allow right now.
+  // spawnWeight × biome preference, minus predators the balance rules don't
+  // allow right now.
   _pickSpecies(biome, distToPlayer, diet) {
     const list = this._spawnable;
     const w = this._weights;
     const p = this._livePlayer();
     const safeR = this._safeRadius();
-    let biasedCarnivore = false;
-    for (const id in this.spawnBias) {
-      if (this.spawnBias[id] > 1 && SPECIES[id] && SPECIES[id].diet === "carnivore") biasedCarnivore = true;
-    }
-    const share = biasedCarnivore ? BIASED_CARNIVORE_SHARE : CARNIVORE_SHARE;
     const carnivores = this._carnivoreCount();
     const herbivores = this._npcCount() - carnivores;
-    const carnFull = carnivores >= Math.max(1, Math.ceil(this.npcCap * share));
+    const carnFull = carnivores >= Math.max(1, Math.ceil(this.npcCap * CARNIVORE_SHARE));
     const reserve = this.npcCap >= 5 ? Math.round(this.npcCap * CARNIVORE_RESERVE) : 0;
     const herbFull = herbivores >= this.npcCap - reserve;
     let total = 0;
@@ -508,8 +478,6 @@ export class Ecosystem {
       let wgt = s.spawnWeight;
       if (diet && s.diet !== diet) wgt = 0;
       if (s.biomes && s.biomes.length && !s.biomes.includes(biome)) wgt *= OFF_BIOME_WEIGHT;
-      const bias = this.spawnBias[s.id];
-      if (bias !== undefined) wgt *= bias;
       if (s.diet !== "carnivore" && herbFull) wgt = 0;
       if (s.diet === "carnivore") {
         if (carnFull) wgt = 0;
@@ -568,7 +536,7 @@ export class Ecosystem {
   }
 
   _isPlayerActor(c) {
-    return c === this.player || !!c.isPlayer || !!c.isHunter;
+    return c === this.player || !!c.isPlayer;
   }
 
   _npcCount() {
@@ -595,7 +563,6 @@ export class Ecosystem {
   _safeRadius() {
     const p = this._livePlayer();
     if (!p) return 0;
-    if (p.isHunter) return this._playerTime < HUNTER_SAFE_TIME ? HUNTER_SAFE_RADIUS : 0;
     return p.growth < 0.4 && this._playerTime < JUVENILE_SAFE_TIME ? JUVENILE_SAFE_RADIUS : 0;
   }
 
@@ -605,7 +572,7 @@ export class Ecosystem {
     return species.mass > Math.max(60, 3 * (p.mass || 1));
   }
 
-  // A fresh juvenile / hunter appears: predators already standing nearby leave
+  // A fresh juvenile appears: predators already standing nearby leave
   // (this happens before the first frame of play is drawn).
   _clearThreatsNear(p) {
     const r = this._safeRadius();
@@ -621,7 +588,7 @@ export class Ecosystem {
   /* --- Carcasses --------------------------------------------------------- */
 
   _toCarcass(c) {
-    if (!c.model || c.isHunter || c._carcass) return null;
+    if (!c.model || c._carcass) return null;
     const s = c.scale;
     const meat = c.mass * 0.5;
     const carcass = {

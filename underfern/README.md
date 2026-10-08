@@ -7,15 +7,10 @@ by their own AI hunt, graze, herd and sleep around you. It leans on the moody
 naturalism of *The Isle*: ochre grasslands, dark conifer forests, golden dawn mist
 and deep blue moonlit nights, with the fog and light doing much of the work.
 
-There are **two ways to play on the same island**:
-
-- **Survival** (*The Isle*-style): play as one of seven dinosaurs, in third person.
-- **Hunter** (*Carnivores: Dinosaur Hunter*-style): drop in by helicopter as a
-  first-person human hunter, stalk trophies using wind, scent, camouflage and
-  calls, and get out before something bigger finds you.
+You play as one of seven dinosaurs, in third person.
 
 The default look is **Pixel**: the 3D scene is drawn at a few hundred pixels tall
-and scaled up with crisp nearest-neighbour edges (a '98 expedition), while the
+and scaled up with crisp nearest-neighbour edges (a late-'90s look), while the
 interface stays sharp. You can set the pixel size, or switch to **Detailed** for
 full resolution.
 
@@ -130,79 +125,34 @@ NPC-only: **Camptosaurus** (6 m, the common herding prey everything eats) and
 A Utah touch: Allosaurus is Utah's state fossil, and Utahraptor and Gastonia come
 from Utah's Cedar Mountain Formation. The rest roamed the Morrison Formation.
 
-## Hunter mode
-
-Choose **Hunter mode** on the title screen to plan an expedition:
-
-1. **Loadout:** pick two weapons from those you've unlocked.
-2. **Equipment:** each item is optional and lowers the hunt's score multiplier by 10%.
-   *Camouflage* (eyes spot you at 60% of the range), *Cover scent* (noses at a
-   third), *Radar locator* (pings your quarry within 600 m every ~10 s) and
-   *Call device* (mimics your quarry's call to draw it in).
-3. **Quarry:** 1–3 target species, which turn up more often and score ×1.5.
-4. **Time of day:** dawn, day, dusk or night.
-
-A helicopter flies you in and drops you at a landing zone. You can look around from
-the door seat, or skip the ride with E or X. Then it's slow, tense stalking in first
-person. **Wind** carries your scent downwind (check the arrow on the compass), so
-approach from downwind. Crouching is quiet and sprinting is loud. Gunshots send
-herbivores running and draw carnivores in, and the big carnivores will hunt you.
-
-| Weapon | Damage | Magazine | Notes | Unlock |
-| --- | --- | --- | --- | --- |
-| .44 Revolver | 45 | 6 | Quick in the hand, short range | free |
-| Double-Barrel 12ga | 16 × 9 pellets | 2 | Huge spread, devastating up close | free |
-| Bolt-Action Rifle | 140 | 5 | 2.5× scope, loud | free |
-| Crossbow | 110 | 1 | Near-silent bolts that drop with distance, slow reload | 150 pts |
-| .50 Sniper Rifle | 320 | 3 | 6× scope, very loud, heavy sway | 400 pts |
-
-Headshots deal ×2.5 damage, legs and tail ×0.6, and damage falls off past each
-weapon's effective range. Armour counts for half against bullets.
-
-**Scoring.** Every kill is a trophy. Its score is the species' trophy value ×
-√(its mass ÷ adult mass) × 1.5 for a headshot × 1.5 for a declared target × the
-equipment multiplier. **Binoculars** (B) give range and species with an estimated
-weight, which helps you choose your shot.
-
-**Extraction.** Press **X** to call the chopper. It arrives after a short flight and
-hovers low over the spot you called it to. Walk under it (within 8 m) to get out.
-Extracting banks the hunt's score as points, which unlock weapons, and adds every
-trophy to the **trophy room** (species, weight, distance, headshot, date). If you
-die, you lose that hunt's trophies.
-
 ## Controls
 
 The in-game **Field notes** (H, or from the pause menu) show the same list.
 
 **Keyboard & mouse**
 
-| Action | Survival | Hunter |
-| --- | --- | --- |
-| Move | WASD / arrows | WASD / arrows |
-| Look | Mouse (click the island to capture it) | Mouse |
-| Sprint · crouch | Shift · C (toggle) or hold Ctrl | Shift · C or hold Ctrl |
-| Attack | Left click or F (bite / kick / tail) | Left click or F (fire) |
-| Aim · scope | n/a | Right click |
-| Eat · drink | Hold E | n/a |
-| Call | Q | Q (lure, with the call device) |
-| Sniff · reload | R (sniff) | R (reload) |
-| Rest | Z | n/a |
-| Weapons · binoculars | n/a | 1 / 2 · B |
-| Call extraction | n/a | X |
-| Map · zoom | M · mouse wheel | M |
-| Pause · field notes | Esc or P · H | Esc or P · H |
+| Action | Keys |
+| --- | --- |
+| Move | WASD / arrows |
+| Look | Mouse (click the island to capture it) |
+| Sprint · crouch | Shift · C (toggle) or hold Ctrl |
+| Attack | Left click or F (bite / kick / tail) |
+| Eat · drink | Hold E |
+| Call | Q |
+| Sniff | R |
+| Rest | Z |
+| Map · zoom | M · mouse wheel |
+| Pause · field notes | Esc or P · H |
 
 **Touch** (phones and tablets, always landscape)
 
 - **Move:** put your thumb anywhere on the left half. The stick appears where you
   touch.
 - **Look:** drag across the right half.
-- **Survival buttons:** a big **Bite** button bottom right, ringed by **Eat/Drink**
+- **Buttons:** a big **Bite** button bottom right, ringed by **Eat/Drink**
   (hold near food or fresh water), **Sprint** (tap, then lift the stick to stop),
   **Crouch**, **Sniff**, **Call** and **Rest**. **Map** and **Pause** sit top
   right.
-- **Hunter buttons:** the ring swaps to **Fire**, **Aim**, **Reload**,
-  **Binoculars**, **Lure**, **Extract**, **Crouch** and **Sprint**.
 
 ## Graphics & settings
 
@@ -232,7 +182,6 @@ URL parameters, handy for sharing a moment or testing:
 | `?species=<id>` | skip the menu and hatch as that species (`dryosaurus`, `utahraptor`, `gastonia`, `ceratosaurus`, `stegosaurus`, `allosaurus`, `brontosaurus`) |
 | `?growth=0..1` | starting growth for `?species` |
 | `?pos=x,z` | spawn position in metres |
-| `?hunter=1` | open the Hunter-mode planner |
 | `?t=0..1` | time of day (0 midnight, 0.25 sunrise, 0.5 noon, 0.75 sunset); pauses the clock |
 | `?style=pixel\|detailed` · `?pixel=0..1` | render style · pixel size |
 | `?quality=low\|high` | force a quality profile |
@@ -250,7 +199,7 @@ cd underfern
 node tests/run-tests.mjs            # everything (a few minutes)
 node tests/run-tests.mjs --unit     # unit tests only (seconds)
 node tests/run-tests.mjs --smoke    # smoke tests only
-node tests/run-tests.mjs --only hunter
+node tests/run-tests.mjs --only touch
 ```
 
 It needs Node 18+ and Playwright with Chromium (`npm i -g playwright && npx
@@ -265,17 +214,16 @@ there is one and otherwise falls back to the global install.
     spawn points)
   - every species definition
   - wind/scent
-  - weapon falloff and hit multipliers
   - creature metabolism, damage, armour and death, and the ecosystem's carcass
     flow, on a real low-resolution world
 - **Smoke tests** play the real game:
+  - the title screen: Survival → choose a species → Hatch
   - survival in both render styles, keyboard movement, pause, and death → death
     screen → hatch again
   - an iPhone-sized touch run (joystick, pause button, Pixel-size slider)
   - an upright iPhone: the game turns sideways, the drawing buffer stays
     landscape, and pushing the stick toward the phone's right edge (the app's
     top) walks forward
-  - a hunt: planner → helicopter drop-off → hunting → fire → quit
 - Screenshots land in `tests/out/` (gitignored). The run prints a PASS/FAIL summary
   and exits non-zero on failure. Any console error counts as a failure.
 
@@ -286,9 +234,8 @@ time through the `window.__underfern` test hook instead of waiting on frames.
 
 Plain ES modules under `src/`, loaded by `index.html` through an import map:
 
-- `main.js`: boot, the game state machine (menu → playing ⇄ paused → dead, plus
-  hunter mode), the render-style pipeline, saves and the `window.__underfern` test
-  hook
+- `main.js`: boot, the game state machine (menu → playing ⇄ paused → dead), the
+  render-style pipeline, saves and the `window.__underfern` test hook
 - `core/screen.js`: the app frame (`#app`). On a phone held upright it lays the
   game out at landscape size and rotates it 90°; everything that reads pointer
   positions or the screen size goes through it
@@ -303,10 +250,8 @@ Plain ES modules under `src/`, loaded by `index.html` through an import map:
     carcasses
 - `player/`: input (keyboard, mouse, touch), the third-person camera, the player
   controller
-- `hunter/`: hunter mode (the first-person hunter, weapons and ballistics, gun
-  viewmodels, hunt session and scoring, helicopter)
-- `ui/`: HUD, title menu and settings, map, hunter HUD and planner. `audio/`
-  synthesises every sound with Web Audio.
+- `ui/`: HUD, title menu and settings, map. `audio/` synthesises every sound with
+  Web Audio.
 
 [`ARCHITECTURE.md`](ARCHITECTURE.md) is the full module map and the contract
 between modules: exported APIs, units, conventions, events and the game-design
@@ -318,5 +263,5 @@ numbers.
   `LICENSE`.
 - Fonts: Fraunces, Archivo and IBM Plex Mono via Google Fonts (SIL Open Font
   License).
-- Inspired by *The Isle* (Afterthought) and *Carnivores: Dinosaur Hunter* (Action
-  Forms, 1998). Underfern is an independent fan project, not affiliated with either.
+- Inspired by *The Isle* (Afterthought). Underfern is an independent fan project,
+  not affiliated with it.

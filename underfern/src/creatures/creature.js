@@ -42,7 +42,7 @@ const ATTACK_TIMING = {
   tail: { dur: 0.85, strike: 0.5, lunge: 0 },
 };
 
-// Noise by gait — the [hunter] hearing sense reads creature.noise.
+// Noise by gait — the AI hearing sense (ai.js _detect) reads creature.noise.
 const GAIT_NOISE = { idle: 0.05, walk: 0.25, trot: 0.5, sprint: 1, swim: 0.3 };
 
 const CAUSES = {
@@ -51,7 +51,6 @@ const CAUSES = {
   bleed: "Blood loss",
   drown: "Drowned",
   fall: "A fatal fall",
-  shot: "Shot",
 };
 
 /* --- Scratch (module-level so hot paths never allocate) ----------------- */
@@ -67,11 +66,10 @@ const _spheres = [];
 let nextId = 1;
 
 /**
- * Allocate a unique actor id. Creatures use it; creature-compatible actors
- * (e.g. the [hunter] Hunter) may call it too so ids never collide.
+ * Allocate a unique creature id.
  * @returns {number}
  */
-export function allocateActorId() {
+function allocateActorId() {
   return nextId++;
 }
 
@@ -91,7 +89,6 @@ export class Creature {
     this.species = typeof species === "string" ? getSpecies(species) : species;
     if (!this.species || !this.species.id) throw new Error("Creature: a species def or id is required");
     this.isPlayer = !!isPlayer;
-    this.isHunter = false;
     this.alive = true;
     this.brain = null;
     /** Herd / pack this creature belongs to ({ id, species, members, leader }) — set by the ecosystem. */
@@ -148,7 +145,7 @@ export class Creature {
       rest: false,
     };
 
-    // [hunter] stealth signals read by the AI senses for any target.
+    // Stealth signals read by the AI senses (ai.js _detect) for any target.
     this.scent = 1;
     this.noise = GAIT_NOISE.idle;
     this.visibility = 1;
@@ -915,8 +912,7 @@ export class Creature {
         return best;
       }
     }
-    // Circle fallback (actors without a model, e.g. the [hunter] Hunter):
-    // aim at the middle of the body.
+    // Circle fallback (no model / no hit spheres): aim at the middle of the body.
     const op = o.position;
     const mid = (o.species?.height ?? 1) * (o.scale ?? 1) * 0.8;
     const d = this._sweepDist(op.x, op.y + mid, op.z) - (o.radius ?? 0.4);
@@ -967,16 +963,9 @@ export class Creature {
     const m = this.mass;
     const vm = victim.mass ?? 80;
     const kb = clamp((3.2 * m) / (m + vm), 0.15, 3.2) * (kind === "tail" ? 1.5 : 1);
-    if (victim instanceof Creature) {
-      victim._kx += dx * kb;
-      victim._kz += dz * kb;
-      victim._restLock = Math.max(victim._restLock, REST_LOCK);
-    } else {
-      // Foreign actors (the Hunter) get a small direct shove; their own
-      // update re-seats them on the ground and resolves collisions.
-      vp.x += dx * kb * 0.12;
-      vp.z += dz * kb * 0.12;
-    }
+    victim._kx += dx * kb;
+    victim._kz += dz * kb;
+    victim._restLock = Math.max(victim._restLock, REST_LOCK);
   }
 
   /* --- Feeding ---------------------------------------------------------- */
@@ -1121,12 +1110,11 @@ export class Creature {
     this._dotAcc[type] += dealt;
     if (this.health > 1e-6) return;
     this._flushDot();
-    // Bleeding out after a fight credits the attacker (kills, [hunter] trophies).
+    // Bleeding out after a fight credits the attacker (kills).
     const recent = this.lastAttacker && this.age - this.lastDamageTime < 120;
     if (type === "bleed" && recent && this.lastAttacker.species) {
       const name = this.lastAttacker.species.name;
-      const by = this.lastAttacker.isHunter ? "a hunter" : `${article(name)} ${name}`;
-      this.die(`Bled out after ${by} attack`, this.lastAttacker);
+      this.die(`Bled out after ${article(name)} ${name} attack`, this.lastAttacker);
     } else {
       this.die(CAUSES[type] || "Unknown causes", null);
     }
@@ -1143,7 +1131,7 @@ export class Creature {
     }
   }
 
-  /* --- Stealth signals ([hunter]) --------------------------------------- */
+  /* --- Stealth signals -------------------------------------------------- */
 
   _stealth(dt) {
     let n = GAIT_NOISE[this.gait] ?? 0.25;
@@ -1256,22 +1244,22 @@ export class Creature {
 
   /**
    * Apply damage. Attack types ("bite" | "tail" | "kick") are reduced by the
-   * species' armor, [hunter] "shot" by half the armor, everything else
-   * ("starve", "dehydrate", "drown", "bleed", "fall") ignores it.
+   * species' armor; everything else ("starve", "dehydrate", "drown", "bleed",
+   * "fall") ignores it.
    * Emits "damage"; kills at 0 HP.
    * @returns {number} damage actually dealt
    */
   takeDamage(amount, source = null, type = "bite") {
     if (!this.alive || !(amount > 0)) return 0;
     const armor = this._t.armor;
-    const mul = ATTACK_TYPES[type] ? 1 - armor : type === "shot" ? 1 - armor * 0.5 : 1;
+    const mul = ATTACK_TYPES[type] ? 1 - armor : 1;
     const dealt = Math.min(this.health, amount * mul);
     this.health -= dealt;
     const maxH = this.maxHealth;
     this.hurt = Math.max(this.hurt, clamp(0.35 + dealt / (maxH * 0.25), 0.35, 1));
     this.lastDamageTime = this.age;
     if (source && source !== this) this.lastAttacker = source;
-    if (ATTACK_TYPES[type] || type === "shot") this._restLock = Math.max(this._restLock, REST_LOCK);
+    if (ATTACK_TYPES[type]) this._restLock = Math.max(this._restLock, REST_LOCK);
     this.world.events?.emit("damage", { target: this, source, amount: dealt, type });
     if (this.health <= 1e-6) {
       const killer = source && source !== this ? source : null;
@@ -1281,7 +1269,6 @@ export class Creature {
   }
 
   _causeFor(type, killer) {
-    if (killer && (killer.isHunter || type === "shot")) return "Shot by a hunter";
     if (killer && killer.species && killer.species.name) {
       return `Killed by ${article(killer.species.name)} ${killer.species.name}`;
     }
@@ -1296,7 +1283,7 @@ export class Creature {
 
   /**
    * Kill the creature: alive = false, death pose, emits "death". The killer
-   * (any actor with a numeric `kills`, including the Hunter) is credited.
+   * (any actor with a numeric `kills`) is credited.
    * @param {string} cause human-readable cause, e.g. "Starvation", "Killed by an Allosaurus"
    * @param {object|null} killer
    */

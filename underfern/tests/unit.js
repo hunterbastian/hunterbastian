@@ -1,5 +1,5 @@
 // Underfern — browser-side unit tests for the pure-ish modules (rng, noise,
-// terrain, species, wind, weapons, the touch layer of input) plus the creature /
+// terrain, species, wind, the touch layer of input) plus the creature /
 // ecosystem simulation on a real low-resolution World. No rendering: everything
 // here is plain JS, so it runs at full speed even under SwiftShader.
 //
@@ -14,7 +14,6 @@ import { EventBus } from "../src/core/events.js";
 import { Terrain, BIOMES } from "../src/world/terrain.js";
 import { SPECIES, PLAYABLE, getSpecies, growthScale, growthStage } from "../src/creatures/species.js";
 import { Wind } from "../src/world/wind.js";
-import { WEAPONS, WEAPON_ORDER, HEADSHOT_MULTIPLIER, LIMB_MULTIPLIER, damageFalloff, partMultiplier } from "../src/hunter/weapons.js";
 import { World } from "../src/world/world.js";
 import { isRotated, appSize, toApp, onAppResize } from "../src/core/screen.js";
 import { Input } from "../src/player/input.js";
@@ -113,7 +112,7 @@ test("screen: a desktop window isn't turned; the app frame is the viewport", () 
 
 /* --- player/input.js (touch layer) ---------------------------------------- */
 
-test("input: Bite / Fire double as a look pad past the slop; Aim/Sprint/Binoculars latches", () => {
+test("input: Bite doubles as a look pad past the slop; Sprint latches", () => {
   // A desktop window, so toApp is the identity and client px are app px.
   const host = document.createElement("div");
   host.style.cssText = "position:fixed;inset:0";
@@ -169,34 +168,24 @@ test("input: Bite / Fire double as a look pad past the slop; Aim/Sprint/Binocula
     const sniff = slide("sniff", 3);
     assert(sniff.dx === 0 && sniff.dy === 0, `dragging Sniff must not turn, got ${fmt(sniff.dx)}`);
     ev(sniff.el, "pointerup", 3, sniff.x, sniff.y);
-
-    input.setMode("hunter");
-    const fire = slide("bite", 4);
-    assert(fire.dx < -200 && input.isDown("bite"), `sliding from Fire should turn, got dx ${fmt(fire.dx)}`);
-    ev(fire.el, "pointerup", 4, fire.x, fire.y);
     input.endFrame();
 
-    // Aim walks, so the newer of Aim / Sprint wins.
-    tap("aim");
+    // Sprint is a latch: a tap holds it, a second tap lets go…
     tap("sprint");
-    assert(!input.isDown("aim") && input.isDown("sprint"), "Sprint after Aim drops Aim");
-    assert.equal(btn("aim").getAttribute("aria-pressed"), "false", "Aim unlit:");
-    tap("aim");
-    assert(input.isDown("aim") && !input.isDown("sprint"), "Aim after Sprint drops Sprint");
-    input.endFrame();
-    // Glassing keeps the Aim latch, so lowering the binoculars returns to the aim…
-    tap("binoculars");
-    assert(input.isDown("aim") && input.pressed("binoculars"), "raising the binoculars keeps the Aim latch");
-    input.setActive("binoculars", true); // what HunterController reports while glassing
-    input.endFrame();
-    // …and Aim tapped behind them lowers them into the aim instead of unlatching.
-    tap("aim");
-    assert(input.isDown("aim") && input.pressed("aim"), "Aim behind the binoculars aims (latch held, edge sent)");
-    assert.equal(btn("aim").getAttribute("aria-pressed"), "true", "Aim lit:");
-    input.setActive("binoculars", false);
-    input.endFrame();
-    tap("aim");
-    assert(!input.isDown("aim"), "with the binoculars down, Aim toggles off as usual");
+    assert(input.isDown("sprint"), "tapping Sprint latches it");
+    assert.equal(btn("sprint").getAttribute("aria-pressed"), "true", "Sprint lit:");
+    tap("sprint");
+    assert(!input.isDown("sprint"), "a second tap releases Sprint");
+    assert.equal(btn("sprint").getAttribute("aria-pressed"), "false", "Sprint unlit:");
+    // …and so does lifting the thumb off the stick.
+    tap("sprint");
+    const stick = host.querySelector(".touch-zone--move");
+    const [sx, sy] = centre(stick);
+    ev(stick, "pointerdown", 4, sx, sy);
+    assert(input.isDown("sprint"), "the latch holds while the stick is down");
+    ev(stick, "pointerup", 4, sx, sy);
+    assert(!input.isDown("sprint"), "lifting the stick ends the sprint");
+    assert.equal(btn("sprint").getAttribute("aria-pressed"), "false", "Sprint unlit after the stick:");
   } finally {
     input.dispose();
     host.remove();
@@ -502,42 +491,6 @@ test("wind: deterministic per seed; strength stays in [0, 1], vector stays unit"
   assert.equal(a.strength, b.strength, "same seed strength:");
 });
 
-/* --- hunter/weapons.js ---------------------------------------------------- */
-
-test("weapons: definitions, damageFalloff and partMultiplier", () => {
-  assert.equal(WEAPON_ORDER.length, 5, "five weapons:");
-  for (const id of WEAPON_ORDER) {
-    const d = WEAPONS[id];
-    assert(d && d.id === id, `WEAPONS.${id}`);
-    assert(str(d.name), `${id}.name`);
-    for (const f of ["damage", "pellets", "range", "maxRange", "magazine", "fireInterval", "reloadTime", "loudness"]) {
-      assert(posNum(d[f]), `${id}.${f} must be > 0 (got ${d[f]})`);
-    }
-    assert(d.maxRange > d.range, `${id}: maxRange > range`);
-    assert.range(d.falloff, 0, 1, `${id}.falloff`);
-    assert(typeof d.unlockPoints === "number" && d.unlockPoints >= 0, `${id}.unlockPoints`);
-    assert.equal(damageFalloff(d, 0), 1, `${id} falloff at 0 m:`);
-    assert.equal(damageFalloff(d, d.range), 1, `${id} falloff at range:`);
-    assert.near(damageFalloff(d, d.maxRange), d.falloff, 1e-9, `${id} falloff at maxRange:`);
-    let prev = 1;
-    for (let r = d.range; r <= d.maxRange * 1.5; r += (d.maxRange - d.range) / 20) {
-      const f = damageFalloff(d, r);
-      assert(f <= prev + 1e-12, `${id} falloff must not increase with distance (at ${r.toFixed(1)} m)`);
-      assert(f >= d.falloff - 1e-9, `${id} falloff never drops below the floor`);
-      prev = f;
-    }
-  }
-  // The crossbow is the quiet one; the sniper the loudest.
-  assert(WEAPONS.crossbow.loudness < WEAPONS.revolver.loudness, "crossbow quieter than the revolver");
-  assert(WEAPONS.sniper.loudness >= Math.max(...WEAPON_ORDER.map((id) => WEAPONS[id].loudness)), "sniper is the loudest");
-  assert.equal(partMultiplier("head"), HEADSHOT_MULTIPLIER, "head:");
-  assert.equal(HEADSHOT_MULTIPLIER, 2.5, "headshot ×2.5:");
-  assert.equal(partMultiplier("leg"), LIMB_MULTIPLIER, "leg:");
-  assert.equal(partMultiplier("tail"), LIMB_MULTIPLIER, "tail:");
-  assert.equal(partMultiplier("body"), 1, "body:");
-  assert.equal(partMultiplier("neck"), 1, "neck:");
-});
-
 /* --- core/events.js ------------------------------------------------------- */
 
 test("events: on / emit / unsubscribe", () => {
@@ -654,7 +607,7 @@ test("creature: starvation damages ~1% maxHealth/s; growth advances when fed", (
   }
 });
 
-test("creature: armor reduces bites fully, shots by half, ignores starvation", () => {
+test("creature: armor reduces attacks fully, ignores starvation", () => {
   const w = getWorld();
   const eco = w.ecosystem;
   const p = landSpot(5);
@@ -664,11 +617,11 @@ test("creature: armor reduces bites fully, shots by half, ignores starvation", (
     assert(armor >= 0.5, "gastonia is armoured");
     const events = capture("damage", () => {
       assert.near(g.takeDamage(100, null, "bite"), 100 * (1 - armor), 1e-6, "bite after armor:");
-      assert.near(g.takeDamage(100, null, "shot"), 100 * (1 - armor * 0.5), 1e-6, "shot after half armor:");
+      assert.near(g.takeDamage(100, null, "tail"), 100 * (1 - armor), 1e-6, "tail after armor:");
       assert.near(g.takeDamage(20, null, "starve"), 20, 1e-6, "starve ignores armor:");
     });
     assert.equal(events.length, 3, "one damage event per hit:");
-    assert.near(g.health, g.maxHealth - 100 * (1 - armor) - 100 * (1 - armor * 0.5) - 20, 1e-6, "health bookkeeping:");
+    assert.near(g.health, g.maxHealth - 200 * (1 - armor) - 20, 1e-6, "health bookkeeping:");
     assert.equal(g.takeDamage(-5, null, "bite"), 0, "negative damage is ignored:");
     const hp = g.health;
     g.heal(1e9);

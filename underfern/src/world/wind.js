@@ -1,11 +1,11 @@
 // Wind — a slowly veering, gusty island breeze.
 //
-// Scent drifts downwind, so every brain's sense of smell (both modes) asks
-// `scentFactor()` how well a smell carries from one point to another; the
-// hunter HUD shows the arrow; the helicopter leans into gusts. The direction
-// wanders over minutes (two slow oscillators plus an occasional real shift),
-// the strength breathes over seconds (flutter plus discrete gusts). Seeded
-// and allocation-free: `update` and `scentFactor` only touch numbers.
+// Scent drifts downwind, so every brain's sense of smell asks `scentFactor()`
+// how well a smell carries from one point to another; the vegetation sways
+// and the audio wind bed swells with it. The direction wanders over minutes
+// (two slow oscillators plus an occasional real shift), the strength breathes
+// over seconds (flutter plus discrete gusts). Seeded and allocation-free:
+// `update` and `scentFactor` only touch numbers.
 
 import * as THREE from "three";
 import { makeRng, rand } from "../core/rng.js";

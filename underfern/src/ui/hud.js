@@ -112,11 +112,10 @@ function describeCause(cause) {
     [/^(bleed|bled|bleeding|bled out|blood loss)$/, "Bled out", "bled"],
     [/^(fall|fell|falling)$/, "Fell", "fall"],
     [/^(bite|tail|kick|attack|killed)$/, "Killed in a fight", "killed"],
-    [/^(shot|gunshot)$/, "Shot by a hunter", "killed"],
   ];
   for (const [re, title, kind] of table) if (re.test(key)) return { title, kind };
   // Already a sentence, e.g. "Killed by an adult Allosaurus".
-  const kind = /kill|bit|maul|eaten|shot/.test(key)
+  const kind = /kill|bit|maul|eaten/.test(key)
     ? "killed"
     : /drown/.test(key)
       ? "drowned"
@@ -184,7 +183,6 @@ export class Hud {
     this._pause = { open: false, onResume: null, onQuit: null, onSettings: null };
     this._death = { open: false, onRespawn: null, onMenu: null };
     this._helpOpen = false;
-    this._helpMode = "survival"; // which field notes the help panel shows ([hunter] pause swaps them)
     this._vw = 1;
     this._vh = 1;
     this._compassW = 360;
@@ -209,7 +207,6 @@ export class Hud {
   show() {
     if (this.visible) return;
     this.visible = true;
-    this._setHelpMode(false);
     this.el.classList.add("is-open");
     this.el.setAttribute("aria-hidden", "false");
     this._measure();
@@ -311,7 +308,7 @@ export class Hud {
     for (const t of this._toasts.slice()) this._dropToast(t);
     this._deathEl.querySelector(".death__inner").innerHTML = `
       <p class="eyebrow death__eyebrow">${brandMark("death__mark")}Field record · end of a life</p>
-      ${def ? `<div class="death__fig">${speciesSilhouette(def, { human: false })}</div>` : ""}
+      ${def ? `<div class="death__fig">${speciesSilhouette(def, { scale: false })}</div>` : ""}
       <p class="death__species">${escapeHtml(s.speciesName || def?.name || "Unknown")}<span> · ${stage}</span></p>
       <h2 class="death__cause" id="hud-death-title">${escapeHtml(cause.title)}</h2>
       <p class="death__epitaph">${EPITAPH[cause.kind] || EPITAPH.unknown}</p>
@@ -342,15 +339,11 @@ export class Hud {
    * @param {() => void} onResume
    * @param {() => void} onQuit back to the title screen
    * @param {() => void} [onSettings] shows a Settings item when given (main → menu.showSettings())
-   * @param {{ hunter?: boolean, notes?: string, quitNote?: string }} [opts] [hunter] the overlay is
-   *   shared with Hunter mode: its own field-notes line, quit caveat and help sheet
    */
-  showPause(onResume = null, onQuit = null, onSettings = null, { hunter = false, notes = null, quitNote = null } = {}) {
+  showPause(onResume = null, onQuit = null, onSettings = null) {
     this._pause = { open: true, onResume, onQuit, onSettings };
     this._pauseEl.querySelector("[data-act='settings']").hidden = typeof onSettings !== "function";
-    this._pauseNotes.textContent = notes ?? (hunter ? "" : this._fieldNotes());
-    this._quitNote.textContent = quitNote ?? (hunter ? "This hunt's trophies are lost" : "Progress is saved");
-    this._setHelpMode(hunter);
+    this._pauseNotes.textContent = this._fieldNotes();
     this._openOverlay(this._pauseEl);
     this._focusLater(this._pauseEl.querySelector("[data-act='resume']"));
   }
@@ -366,10 +359,8 @@ export class Hud {
   /**
    * Show / hide the field-notes help panel (controls + survival tips).
    * @param {boolean} [force] open (true) or close (false); toggles when omitted
-   * @param {{ hunter?: boolean }} [opts] [hunter] show the hunting notes instead of survival's
    */
-  toggleHelp(force, { hunter } = {}) {
-    if (typeof hunter === "boolean") this._setHelpMode(hunter);
+  toggleHelp(force) {
     const open = typeof force === "boolean" ? force : !this._helpOpen;
     if (open === this._helpOpen) return;
     this._helpOpen = open;
@@ -527,7 +518,7 @@ export class Hud {
             <div><p class="eyebrow">Field notes</p><h2 class="help__title" id="hud-help-title">How to stay alive</h2></div>
             <button type="button" class="icon-btn" data-act="close-help" aria-label="Close field notes">${icon("close")}</button>
           </header>
-          <div class="help__body" data-help="survival">
+          <div class="help__body">
             <ol class="tips">
               <li><b>Drink fresh water.</b> Lakes and rivers only — the sea is salt and makes it worse.</li>
               <li><b>Growth needs both.</b> Keep food and water above a quarter or you stop growing.</li>
@@ -535,17 +526,7 @@ export class Hud {
               <li><b>Crouch in cover.</b> Forests and night hide you; open plains and sprinting don't.</li>
               <li><b>Rest to heal.</b> Lying down mends wounds and slows bleeding — but you are exposed.</li>
             </ol>
-            ${controlsSheetHTML({ isTouch: this.isTouch, hunter: false })}
-          </div>
-          <div class="help__body" data-help="hunter" hidden>
-            <ol class="tips">
-              <li><b>Mind the wind.</b> Your scent drifts downwind — stalk with the wind in your face.</li>
-              <li><b>Move slowly.</b> Crouching is quiet; sprinting carries a long way.</li>
-              <li><b>Shots carry too.</b> Herbivores bolt from gunfire, carnivores come to look.</li>
-              <li><b>Aim for the head.</b> Headshots and target species score the most.</li>
-              <li><b>Get out alive.</b> Call the chopper and stand under it — dying loses this hunt's trophies.</li>
-            </ol>
-            ${controlsSheetHTML({ isTouch: this.isTouch, hunter: true })}
+            ${controlsSheetHTML({ isTouch: this.isTouch })}
           </div>
         </aside>
       </div>
@@ -557,9 +538,7 @@ export class Hud {
     this._layer = layer;
     this._pauseEl = layer.querySelector(".ovl--pause");
     this._pauseNotes = layer.querySelector(".pause__notes");
-    this._quitNote = layer.querySelector(".pause__quit-note");
     this._helpEl = layer.querySelector(".ovl--help");
-    this._helpBodies = [...layer.querySelectorAll("[data-help]")];
     this._deathEl = layer.querySelector(".ovl--death");
     for (const o of [this._pauseEl, this._helpEl, this._deathEl]) this._closeOverlay(o);
 
@@ -1064,15 +1043,6 @@ export class Hud {
   }
 
   /* --- Overlay plumbing --- */
-
-  /** Survival or [hunter] field notes in the help panel. */
-  _setHelpMode(hunter) {
-    const mode = hunter ? "hunter" : "survival";
-    if (this._helpMode === mode) return;
-    this._helpMode = mode;
-    for (const b of this._helpBodies) b.hidden = b.dataset.help !== mode;
-    this._helpEl.querySelector(".help__title").textContent = hunter ? "How to hunt" : "How to stay alive";
-  }
 
   _resume() {
     const fn = this._pause.onResume;

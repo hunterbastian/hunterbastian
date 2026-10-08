@@ -28,7 +28,7 @@ const HINT_KEY = "underfern.hints.v1";
 const FLASH_TIME = 1.6; // s a transient prompt ("Sniff ready in 4 s") stays
 
 // Damage types that are impacts (worth a camera shake), not slow attrition.
-const IMPACT_TYPES = new Set(["bite", "tail", "kick", "fall", "shot"]);
+const IMPACT_TYPES = new Set(["bite", "tail", "kick", "fall"]);
 
 const PLANT_LABELS = { fern: "Ferns", cycad: "Cycad", horsetail: "Horsetails", shrub: "Shrub" };
 
@@ -89,14 +89,12 @@ function saveHints(seen) {
 }
 
 /**
- * Would `other` be dangerous to `me`? Bigger carnivores (and a hunter with a
- * gun) always; same-species adults only when much larger (cannibalism);
- * armoured or tail-swinging giants only matter to a carnivore that might
- * provoke them.
+ * Would `other` be dangerous to `me`? Bigger carnivores always; same-species
+ * adults only when much larger (cannibalism); armoured or tail-swinging giants
+ * only matter to a carnivore that might provoke them.
  */
 function isThreat(me, other) {
   if (!other || other.alive === false) return false;
-  if (other.isHunter) return true;
   const myMass = massOf(me);
   const theirMass = massOf(other);
   const theirSp = speciesOf(other);
@@ -436,7 +434,7 @@ export class PlayerController {
       this._sortByDistance(found, x, z, true);
       for (let i = 0; i < found.length && i < SNIFF_MAX_CREATURES; i++) {
         const o = found[i];
-        const label = o.isHunter ? "Hunter" : speciesName(speciesOf(o) || o.species);
+        const label = speciesName(speciesOf(o) || o.species);
         const m = this._addMarker(o.position.x, o.position.y, o.position.z, "creature", isThreat(c, o), label, o);
         this._trackCreature(m);
       }

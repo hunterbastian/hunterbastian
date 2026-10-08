@@ -16,7 +16,6 @@
 
 import { clamp, lerp, smoothstep, damp, TAU } from "../core/math.js";
 import { makeRng, hash } from "../core/rng.js";
-import { SPECIES } from "../creatures/species.js";
 
 /* --- Tuning ------------------------------------------------------------ */
 
@@ -29,51 +28,6 @@ const MIN_GAIN = 0.0001; // exponential ramps can't reach 0
 const LOOKAHEAD = 0.012; // s — schedule a hair ahead so ramps never start in the past
 const PROBE_RADII = [8, 20, 40, 70, 110, 160, 230]; // m — rings sampled around the listener
 const PROBE_POINTS = 12;
-
-// Gunshot recipes: levels of the four layers (supersonic crack, muzzle body,
-// chest thump, low tail), their filters/decays, and how hard they drive the
-// hill echo and duck the ambience.
-const SHOTS = {
-  revolver: { crack: 0.9, crackHp: 1400, crackDecay: 0.05, body: 0.8, bodyLp: 2600, bodyDecay: 0.2, thump: 0.75, thumpHz: 150, thumpDecay: 0.12, tail: 0.3, tailLp: 520, tailDecay: 0.6, echo: 0.45, duck: 0.45, wet: 0.16, level: 1.0 },
-  shotgun: { crack: 0.6, crackHp: 900, crackDecay: 0.06, body: 1.0, bodyLp: 1700, bodyDecay: 0.34, thump: 0.95, thumpHz: 95, thumpDecay: 0.22, tail: 0.45, tailLp: 380, tailDecay: 0.95, echo: 0.6, duck: 0.6, wet: 0.18, level: 1.0 },
-  rifle: { crack: 1.0, crackHp: 2400, crackDecay: 0.035, body: 0.85, bodyLp: 2000, bodyDecay: 0.28, thump: 0.85, thumpHz: 115, thumpDecay: 0.18, tail: 0.5, tailLp: 340, tailDecay: 1.3, echo: 0.9, duck: 0.6, wet: 0.2, level: 1.0 },
-  sniper: { crack: 1.0, crackHp: 2000, crackDecay: 0.045, body: 1.0, bodyLp: 1500, bodyDecay: 0.42, thump: 1.0, thumpHz: 80, thumpDecay: 0.26, tail: 0.65, tailLp: 280, tailDecay: 1.7, echo: 1.1, duck: 0.75, wet: 0.24, level: 1.05 },
-};
-
-// Mechanical foley, timed to roughly match each weapon's reloadTime in weapons.js.
-// [time s, kind, level, a, b, c] — click: a = Hz · slide: a = duration, b → c Hz ·
-// clack/thunk: body knocks.
-const RELOADS = {
-  revolver: [
-    [0.12, "click", 0.5, 3200], [0.3, "clack", 0.55], [0.52, "slide", 0.22, 0.16, 2600, 1400],
-    [0.62, "click", 0.18, 5600], [0.69, "click", 0.14, 6100], [0.77, "click", 0.16, 5200], [0.86, "click", 0.12, 5900],
-    [1.1, "thunk", 0.28], [1.14, "click", 0.18, 2400], [1.4, "thunk", 0.26], [1.44, "click", 0.16, 2300],
-    [1.7, "thunk", 0.28], [1.74, "click", 0.18, 2500], [2.0, "thunk", 0.25], [2.04, "click", 0.16, 2400],
-    [2.28, "clack", 0.7], [2.42, "click", 0.4, 3600],
-  ],
-  shotgun: [
-    [0.15, "clack", 0.85], [0.24, "slide", 0.25, 0.14, 1800, 1100], [0.5, "thunk", 0.3], [0.56, "click", 0.18, 1900],
-    [0.64, "thunk", 0.24], [1.12, "slide", 0.16, 0.1, 2400, 1500], [1.24, "thunk", 0.36], [1.58, "slide", 0.16, 0.1, 2400, 1500],
-    [1.7, "thunk", 0.36], [2.12, "clack", 1.0], [2.2, "click", 0.3, 3000],
-  ],
-  crossbow: [
-    [0.2, "thunk", 0.4], [0.5, "slide", 0.22, 1.7, 320, 950], [0.58, "click", 0.2, 2200], [0.8, "click", 0.2, 2250],
-    [1.02, "click", 0.21, 2300], [1.24, "click", 0.22, 2350], [1.46, "click", 0.22, 2400], [1.68, "click", 0.23, 2450],
-    [1.9, "click", 0.24, 2500], [2.12, "click", 0.25, 2550], [2.32, "clack", 0.7], [2.8, "slide", 0.3, 0.22, 3000, 2000], [3.12, "click", 0.4, 2800],
-  ],
-  rifle: [
-    [0.15, "click", 0.5, 2600], [0.28, "slide", 0.4, 0.16, 2200, 1500], [0.33, "click", 0.2, 4800],
-    [0.75, "click", 0.3, 2000], [0.78, "thunk", 0.25], [1.25, "click", 0.3, 2050], [1.28, "thunk", 0.25],
-    [1.75, "click", 0.3, 2100], [1.78, "thunk", 0.25], [2.4, "slide", 0.4, 0.14, 1500, 2300], [2.6, "clack", 0.7],
-  ],
-  sniper: [
-    [0.2, "click", 0.6, 2300], [0.36, "slide", 0.5, 0.2, 1900, 1200], [0.42, "click", 0.25, 4200],
-    [1.0, "click", 0.35, 1800], [1.04, "thunk", 0.32], [1.7, "click", 0.35, 1850], [1.74, "thunk", 0.32],
-    [2.4, "click", 0.35, 1900], [2.44, "thunk", 0.32], [3.3, "slide", 0.5, 0.18, 1300, 2100], [3.55, "clack", 0.85],
-  ],
-};
-const BOLT_CYCLE = [[0, "click", 0.4, 2500], [0.07, "slide", 0.35, 0.13, 2200, 1500], [0.1, "click", 0.18, 5000], [0.32, "slide", 0.35, 0.11, 1500, 2300], [0.46, "clack", 0.55]];
-const DRYFIRE = [[0, "click", 1.5, 2600], [0.004, "thunk", 0.4]];
 
 // Pitch contours (fraction of the call, multiplier of the base pitch).
 const SHAPE_ROAR = [[0, 0.82], [0.2, 1.12], [0.6, 0.98], [1, 0.7]];
@@ -92,7 +46,6 @@ const SONGS = ["whistle", "trill", "twoTone", "warble", "coo", "chip", "whistle"
   level: { whistle: 0.5, trill: 0.32, twoTone: 0.45, warble: 0.36, coo: 0.6, chip: 0.38 }[type],
 }));
 const SEABIRD = { type: "kraa", seed: hash("sauria-kraa"), level: 0.42 };
-const ALARM = { type: "chip", seed: hash("sauria-alarm"), level: 0.55 };
 const RATIOS = [1, 1.122, 1.26, 1.335, 1.5, 0.89, 0.75];
 const GLIDES = [1, 1.15, 0.87, 1.3, 0.92];
 
@@ -202,7 +155,7 @@ function noiseBuffer(ctx, seconds, channels, color) {
   return buf;
 }
 
-/** Sparse crackle grains — the raw material of crunches, twigs, chewing and radio static. */
+/** Sparse crackle grains — the raw material of crunches, twigs and chewing. */
 function crackleBuffer(ctx, seconds = 1.5) {
   const len = Math.floor(seconds * ctx.sampleRate);
   const buf = ctx.createBuffer(1, len, ctx.sampleRate);
@@ -253,7 +206,7 @@ function softClipCurve(drive, n = 1024) {
 }
 
 /**
- * Band-limited pulse for amplitude modulation (cricket chirps, rotor chop).
+ * Band-limited pulse for amplitude modulation (cricket chirps).
  * Returns the wave plus the base/depth that map its range onto gain 0..1:
  * `gain.value = base; lfo → depth → gain.gain`.
  */
@@ -540,9 +493,6 @@ export class AudioEngine {
     this._plipT = 3;
     this._waveT = 0;
     this._lapT = 0;
-    this._hush = 0;
-    this._alarmT = 0;
-    this._alarms = 0;
     this._stepPhase = 0.6;
     this._swimPhase = 0.5;
     this._chewT = 0;
@@ -556,7 +506,6 @@ export class AudioEngine {
     this._lastHurt = -Infinity;
     this._lastGurgle = -Infinity;
     this._dawnPending = false;
-    this._echoAmount = 1;
     this._npcSteps = new WeakMap();
 
     this._unsub = [];
@@ -648,7 +597,6 @@ export class AudioEngine {
     this._lifecycleOff = null;
     clearTimeout(this._suspendTimer);
     for (const v of this.voices.slice()) v.release();
-    this._destroyRotor();
     for (const n of this._persist) {
       try {
         if (typeof n.stop === "function") n.stop();
@@ -832,7 +780,7 @@ export class AudioEngine {
       crackle: crackleBuffer(ctx),
     };
     this.curve = softClipCurve(2.4);
-    this.pulse = { cricket: pulseWave(ctx, 0.42), group: pulseWave(ctx, 0.34), rotor: pulseWave(ctx, 0.2), radio: pulseWave(ctx, 0.5) };
+    this.pulse = { cricket: pulseWave(ctx, 0.42), group: pulseWave(ctx, 0.34) };
 
     // Shared reverb send.
     this.reverbIn = this._g(1);
@@ -859,7 +807,7 @@ export class AudioEngine {
   /**
    * Hill echo: two cross-fed delay lines with lowpass in the loop, panned apart,
    * plus a long single "far ridge" tap. Each pass comes back duller and softer,
-   * which reads as a shot rolling around the valleys.
+   * which reads as a roar rolling around the valleys.
    */
   _buildEcho() {
     const ctx = this.ctx;
@@ -1012,14 +960,6 @@ export class AudioEngine {
     on("newDay", this._onNewDay);
     on("sniff", this._onSniff);
     on("legBreak", this._onLegBreak);
-    on("shot", this._onShot);
-    on("hit", this._onHit);
-    on("reload", this._onReload);
-    on("dryfire", this._onDryfire);
-    on("lure", this._onLure);
-    on("radar", this._onRadar);
-    on("trophy", this._onTrophy);
-    on("extraction", this._onExtraction);
   }
 
   _count(name) {
@@ -1117,7 +1057,7 @@ export class AudioEngine {
     }
     // A last weak cry from dinosaurs (pitch falls away).
     const call = c.species?.call;
-    if (call && !c.isHunter) {
+    if (call) {
       const scale = clamp(num(c.scale, 1), 0.1, 2);
       const f = (num(call.pitch, 200) / Math.sqrt(scale)) * 0.88;
       const y = num(pos?.y, 0) + num(c.species.height, 1.5) * scale * 0.6;
@@ -1196,172 +1136,6 @@ export class AudioEngine {
     this._thud(v, t, w, 0.5);
     this._grunt(v, t + 0.06, p, w);
     this._count("legBreak");
-  }
-
-  _onShot(e) {
-    const id = typeof e.weapon === "string" ? e.weapon : "rifle";
-    const own = !e.shooter || this._isPlayer(e.shooter);
-    const recipe = SHOTS[id] || (id === "crossbow" ? null : SHOTS.rifle);
-    let v;
-    let t = this.ctx.currentTime + LOOKAHEAD;
-    if (own) {
-      v = this._voice(1);
-      if (!v) return;
-      if (recipe) {
-        this._routeDirect(v, this.sfxBus, recipe.wet, recipe.echo * this._echoAmount);
-        v.out.gain.value = recipe.level;
-      } else {
-        this._routeDirect(v, this.sfxBus, 0.06);
-        v.out.gain.value = 1;
-      }
-    } else {
-      v = this._spatialVoice(num(e.x, this.L.x), num(e.y, this.L.y), num(e.z, this.L.z), recipe ? 150 : 10, null, 1);
-      if (!v) return;
-      t += Math.min(0.9, this._S.dist / SOUND_SPEED);
-    }
-    if (recipe) {
-      this._gunshot(v, t, recipe);
-      this._duck(recipe.duck);
-      // Birds fall silent after a gunshot, a few scold first.
-      this._hush = Math.max(this._hush, clamp(num(e.loudness, 300) / 25, 4, 22));
-      if (this._day > 0.35 && this.env.agl < 60) {
-        this._alarms = Math.random() < 0.6 ? 2 : 1;
-        this._alarmT = rnd(0.3, 0.8);
-      }
-      if (own && (id === "rifle" || id === "sniper")) this._mech(BOLT_CYCLE, t + (id === "sniper" ? 0.75 : 0.55), 0.8);
-    } else this._crossbow(v, t);
-    this._count(`shot:${id}`);
-  }
-
-  _onHit(e) {
-    let x = num(e.x, NaN);
-    let y = num(e.y, NaN);
-    let z = num(e.z, NaN);
-    if (!Number.isFinite(x) || !Number.isFinite(z)) {
-      const p = e.target?.position;
-      if (!p) return;
-      x = p.x;
-      y = p.y + 1;
-      z = p.z;
-    }
-    if (!Number.isFinite(y)) y = this.L.y;
-    const v = this._spatialVoice(x, y, z, 45, null, 0.85);
-    if (!v) return;
-    const t = this.ctx.currentTime + LOOKAHEAD + Math.min(0.8, this._S.dist / SOUND_SPEED);
-    const tg = v.gain(0, v.out);
-    const o = v.osc("sine", 110, t, t + 0.25, tg);
-    sweep(o.frequency, t, 150, 48, 0.16);
-    pluck(tg.gain, t, 0.002, 0.9, 0.17);
-    const sg = v.gain(0, v.out);
-    v.noise(this.buf.pink, t, t + 0.14, v.filter("bandpass", 650, 1.1, sg));
-    pluck(sg.gain, t, 0.002, 0.8, 0.09);
-    const wg = v.gain(0, v.out);
-    v.noise(this.buf.crackle, t, t + 0.1, v.filter("bandpass", 1700, 1, wg));
-    pluck(wg.gain, t + 0.01, 0.003, 0.35, 0.06);
-    if (e.headshot) {
-      const hg = v.gain(0, v.out);
-      const k = v.osc("sine", 420, t, t + 0.1, hg);
-      sweep(k.frequency, t, 520, 190, 0.05);
-      pluck(hg.gain, t, 0.001, 0.6, 0.06);
-      const cg = v.gain(0, v.out);
-      v.noise(this.buf.white, t, t + 0.05, v.filter("highpass", 2500, 0.7, cg));
-      pluck(cg.gain, t, 0.0005, 0.45, 0.025);
-    }
-    this._count("hit");
-  }
-
-  _onReload(e) {
-    this._mech(RELOADS[e.weapon] || RELOADS.rifle, this.ctx.currentTime + LOOKAHEAD, 0.85);
-    this._count("reload");
-  }
-
-  _onDryfire() {
-    this._mech(DRYFIRE, this.ctx.currentTime + LOOKAHEAD, 0.9);
-    this._count("dryfire");
-  }
-
-  _onLure(e) {
-    const sp = SPECIES?.[e.species];
-    const call = sp?.call;
-    if (!call) return;
-    const own = !e.shooter || this._isPlayer(e.shooter);
-    // A hand-held call device: the species' call, a touch high, short and reedy.
-    const f = num(call.pitch, 200) * 1.12 * rnd(0.98, 1.02);
-    const d = num(call.duration, 1) * 0.8;
-    const x = num(e.x, this.L.x);
-    const z = num(e.z, this.L.z);
-    this._playCall(call.kind, f, d, 0.35, { own, x, y: this.L.y, z, follow: null, level: 0.6, reedy: true });
-    this._count("lure");
-  }
-
-  _onRadar(e) {
-    const v = this._voice(0.35);
-    if (!v) return;
-    this._routeDirect(v, this.uiBus, 0.35);
-    v.out.gain.value = 0.32;
-    const t = this.ctx.currentTime + LOOKAHEAD;
-    const n = Array.isArray(e.blips) ? e.blips.length : 0;
-    const f = n > 0 ? 1250 : 990; // nothing nearby: a lower, emptier ping
-    const g1 = v.gain(0, v.out);
-    v.osc("sine", f, t, t + 0.9, g1);
-    pluck(g1.gain, t, 0.004, 0.8, 0.8);
-    const g2 = v.gain(0, v.out);
-    v.osc("sine", f * 2.01, t, t + 0.4, g2);
-    pluck(g2.gain, t, 0.002, 0.18, 0.3);
-    const g3 = v.gain(0, v.out);
-    v.osc("sine", f, t + 0.24, t + 0.85, g3);
-    pluck(g3.gain, t + 0.24, 0.004, 0.25, 0.55);
-    this._count("radar");
-  }
-
-  _onTrophy() {
-    const v = this._voice(0.7);
-    if (!v) return;
-    this._routeDirect(v, this.uiBus, 0.45);
-    v.out.gain.value = 0.5;
-    const t = this.ctx.currentTime + LOOKAHEAD;
-    // Understated: a low swell and three soft mallet notes (G3 D4 G4).
-    const pad = v.gain(0, v.out);
-    v.osc("sine", 98, t, t + 3.2, v.filter("lowpass", 400, 0.7, pad));
-    swell(pad.gain, t, 0.6, 0.35, 0.5, 1.8);
-    const notes = [[0.05, 196], [0.22, 293.66], [0.4, 392]];
-    for (const [s, f] of notes) {
-      const g = v.gain(0, v.out);
-      v.osc("sine", f, t + s, t + s + 2.6, g);
-      const h = v.gain(0.22, g);
-      v.osc("triangle", f * 2, t + s, t + s + 2.6, h);
-      pluck(g.gain, t + s, 0.006, 0.42, 2.4);
-    }
-    this._count("trophy");
-  }
-
-  _onExtraction(e) {
-    if (e.state !== "called" && e.state !== "inbound") return;
-    const v = this._voice(0.6);
-    if (!v) return;
-    this._routeDirect(v, this.uiBus, 0.05);
-    v.out.gain.value = 0.45;
-    const t = this.ctx.currentTime + LOOKAHEAD;
-    const len = e.state === "called" ? 0.55 : 0.3;
-    // Radio: key-up click, gated band-limited static, roger beep.
-    const click = (tc) => {
-      const g = v.gain(0, v.out);
-      v.noise(this.buf.white, tc, tc + 0.03, v.filter("highpass", 3000, 0.7, g));
-      pluck(g.gain, tc, 0.0005, 0.5, 0.015);
-    };
-    click(t);
-    const st = v.gain(0, v.out);
-    const gate = v.gain(0.6, st);
-    v.noise(this.buf.crackle, t, t + len + 0.1, v.filter("bandpass", 1900, 1.2, gate));
-    const lfo = v.osc("square", 9, t, t + len + 0.1);
-    const depth = v.gain(0.4, gate.gain);
-    lfo.connect(depth);
-    swell(st.gain, t + 0.01, 0.02, 0.55, len, 0.06);
-    const bg = v.gain(0, v.out);
-    v.osc("sine", 1600, t + len, t + len + 0.12, bg);
-    pluck(bg.gain, t + len, 0.004, 0.25, 0.08);
-    click(t + len + 0.1);
-    this._count("radio");
   }
 
   /* --- Voices & routing ------------------------------------------------------ */
@@ -1512,7 +1286,7 @@ export class AudioEngine {
 
   /**
    * Per-frame: listener pose, polled player sounds, ambience scheduling; at
-   * CONTROL_DT also bed levels, environment probes, spatial follow and rotor.
+   * CONTROL_DT also bed levels, environment probes and spatial follow.
    * Cheap: AudioParam ramps only; no node churn for continuous sounds.
    * @param {number} dt seconds
    * @param {{ listener?: object, player?: object|null, world?: object|null }} state
@@ -1537,7 +1311,6 @@ export class AudioEngine {
       this._probeEnvironment(world?.terrain);
       this._updateBeds(world, now);
       this._updateSpatialVoices(now);
-      this._updateHelicopter(world?.helicopter, now);
       this._dawnCheck(world?.sky);
     }
     this._reap(now);
@@ -1730,26 +1503,14 @@ export class AudioEngine {
     this._birdRate = Math.pow(smoothstep(0.15, 0.7, day), 1.4) * grounded * (0.3 + 0.7 * env.forest) * dawn * (1 - 0.45 * env.oceanNear) * 0.5;
     this._frogRate = (0.2 + 0.8 * night) * grounded * Math.max(env.lakeNear, env.swamp * 1.5) * 0.85;
     this._plipRate = env.lakeNear * grounded * 0.45;
-    // The hills throw shots back harder than forest does.
-    this._echoAmount = clamp(0.75 + 0.5 * env.alt - 0.3 * env.forest + 0.2 * env.oceanNear, 0.45, 1.25);
   }
 
   _scheduleAmbience(dt, now) {
-    this._hush = Math.max(0, this._hush - dt);
-    if (this._alarms > 0) {
-      this._alarmT -= dt;
-      if (this._alarmT <= 0) {
-        this._alarms--;
-        this._alarmT = rnd(0.25, 0.7);
-        this._bird(ALARM);
-      }
-    }
-
     this._birdT -= dt;
     if (this._birdT <= 0) {
       const r = this._birdRate;
       this._birdT = r > 0.01 ? rnd(0.4, 1.6) / r : 1.5;
-      if (r > 0.01 && this._hush <= 0) {
+      if (r > 0.01) {
         const coastal = this.env.oceanNear > 0.35 && Math.random() < 0.3;
         this._bird(coastal ? SEABIRD : anyOf(SONGS));
       }
@@ -1816,8 +1577,7 @@ export class AudioEngine {
   _bird(song) {
     const ph = songNotes(song.type, makeRng(song.seed));
     if (!ph.notes.length) return;
-    const dist = song === ALARM ? rnd(10, 40) : rnd(14, 75);
-    const v = this._ambientVoice(0.05 + 0.12 * song.level, rnd(-0.9, 0.9), dist, 0.35);
+    const v = this._ambientVoice(0.05 + 0.12 * song.level, rnd(-0.9, 0.9), rnd(14, 75), 0.35);
     if (!v) return;
     v.out.gain.value = song.level;
     const t = this.ctx.currentTime + LOOKAHEAD + rnd(0, 0.04);
@@ -1931,7 +1691,6 @@ export class AudioEngine {
       return;
     }
     const sp = p.species || {};
-    const isHunter = !!p.isHunter;
     const w = massWeight(num(p.mass, num(sp.mass, 85)));
     const speed = num(p.speed, 0);
     const gait = p.gait;
@@ -1948,18 +1707,14 @@ export class AudioEngine {
       }
       this._stepPhase = 0.6;
     } else if (speed > 0.2) {
-      let stride;
-      if (isHunter) stride = lerp(0.72, 1.55, smoothstep(1.6, 6.2, speed));
-      else {
-        const h = num(sp.height, 1.2) * clamp(num(p.scale, 1), 0.05, 2);
-        stride = h * (gait === "sprint" ? 1.45 : gait === "trot" ? 1.1 : 0.8);
-      }
+      const h = num(sp.height, 1.2) * clamp(num(p.scale, 1), 0.05, 2);
+      let stride = h * (gait === "sprint" ? 1.45 : gait === "trot" ? 1.1 : 0.8);
       stride = Math.max(stride, speed * 0.14); // never more than ~7 footfalls a second
       this._stepPhase += (speed * dt) / stride;
       if (this._stepPhase >= 1) {
         this._stepPhase -= Math.floor(this._stepPhase);
         const loud = (gait === "sprint" ? 1 : gait === "trot" ? 0.8 : 0.6) * (p.crouching ? 0.5 : 1);
-        this._footstep(p.position, w, loud, terrain, true, isHunter, sp.body?.plan === "quadruped");
+        this._footstep(p.position, w, loud, terrain, true, sp.body?.plan === "quadruped");
       }
     } else this._stepPhase = Math.min(this._stepPhase, 0.6); // first step after a stop lands promptly
 
@@ -1992,7 +1747,7 @@ export class AudioEngine {
         const tired = clamp(1 - stamina / 45, 0, 1);
         const period = lerp(1.5, 0.72, tired) * lerp(0.75, 1.5, w);
         this._breathT = period;
-        this._breath(now + LOOKAHEAD, period, tired, w, isHunter);
+        this._breath(now + LOOKAHEAD, period, tired, w);
       }
     }
 
@@ -2015,7 +1770,7 @@ export class AudioEngine {
     const L = this.L;
     for (let i = 0; i < list.length; i++) {
       const c = list[i];
-      if (!c || c === this._player || c.isPlayer || c.isHunter || c.alive === false || !c.position) continue;
+      if (!c || c === this._player || c.isPlayer || c.alive === false || !c.position) continue;
       const mass = num(c.mass, 0);
       if (mass < 350 || c.swimming) continue;
       const dx = c.position.x - L.x;
@@ -2032,7 +1787,7 @@ export class AudioEngine {
       if (ph >= 1) {
         ph -= Math.floor(ph);
         const loud = c.gait === "sprint" ? 1 : c.gait === "trot" ? 0.8 : 0.6;
-        this._footstep(c.position, massWeight(mass), loud, world.terrain, false, false, sp.body?.plan === "quadruped");
+        this._footstep(c.position, massWeight(mass), loud, world.terrain, false, sp.body?.plan === "quadruped");
       }
       this._npcSteps.set(c, ph);
     }
@@ -2059,36 +1814,36 @@ export class AudioEngine {
     return s;
   }
 
-  _footstep(pos, w, loud, terrain, own, hunter, quad) {
+  _footstep(pos, w, loud, terrain, own, quad) {
     const surf = this._surface(terrain, pos.x, pos.z);
     let v;
     if (own) {
       v = this._voice(0.4 + 0.25 * w);
       if (!v) return;
       this._routeDirect(v, this.sfxBus, 0.04 + 0.1 * w);
-      v.out.gain.value = loud * (hunter ? 0.55 : lerp(0.45, 1, w));
+      v.out.gain.value = loud * lerp(0.45, 1, w);
     } else {
       v = this._spatialVoice(pos.x, pos.y, pos.z, 6 + 22 * w, null, 0.45);
       if (!v) return;
       v.out.gain.value = loud;
     }
     const t = this.ctx.currentTime + LOOKAHEAD;
-    this._stepLayers(v, t, w, surf, hunter);
+    this._stepLayers(v, t, w, surf);
     // Quadrupeds: hind then lighter fore footfall.
-    if (quad) this._stepLayers(v, t + lerp(0.07, 0.15, w), w * 0.85, surf, false, 0.6);
+    if (quad) this._stepLayers(v, t + lerp(0.07, 0.15, w), w * 0.85, surf, 0.6);
     this._count("step");
   }
 
-  _stepLayers(v, t, w, surf, hunter, k = 1) {
+  _stepLayers(v, t, w, surf, k = 1) {
     // Impact thud — pitch and length scale with weight.
-    const thudHz = hunter ? 110 : lerp(240, 38, w);
-    const thudLen = hunter ? 0.07 : lerp(0.04, 0.42, w);
-    const thudAmp = (hunter ? 0.35 : lerp(0.08, 0.9, Math.pow(w, 1.2))) * k;
+    const thudHz = lerp(240, 38, w);
+    const thudLen = lerp(0.04, 0.42, w);
+    const thudAmp = lerp(0.08, 0.9, Math.pow(w, 1.2)) * k;
     const tg = v.gain(0, v.out);
     const o = v.osc("sine", thudHz, t, t + thudLen + 0.05, tg);
     sweep(o.frequency, t, thudHz * 1.35, thudHz * 0.62, thudLen);
     pluck(tg.gain, t, 0.004, thudAmp, thudLen);
-    if (w > 0.5 && !hunter) {
+    if (w > 0.5) {
       // An overtone so heavy steps still read on small speakers.
       const og = v.gain(0, v.out);
       v.osc("triangle", thudHz * 2.6, t, t + thudLen * 0.6 + 0.05, og);
@@ -2107,15 +1862,9 @@ export class AudioEngine {
       v.noise(this.buf.pink, t, t + 0.3, v.filter("lowpass", 450, 0.8, pg));
       pluck(pg.gain, t + 0.01, 0.01, 0.4 * k, 0.22);
     } else if (kind === "rock") {
-      const bp = v.filter("bandpass", hunter ? 3200 : lerp(3800, 1600, w), 2.5, ng);
+      const bp = v.filter("bandpass", lerp(3800, 1600, w), 2.5, ng);
       v.noise(this.buf.white, t, t + 0.1, bp);
-      pluck(ng.gain, t, 0.001, (hunter ? 0.85 : 0.55) * k, hunter ? 0.03 : 0.045);
-      if (hunter) {
-        // Boots: heel then toe.
-        ng.gain.setValueAtTime(MIN_GAIN, t + 0.045);
-        ng.gain.linearRampToValueAtTime(0.3 * k, t + 0.046);
-        ng.gain.exponentialRampToValueAtTime(MIN_GAIN, t + 0.075);
-      }
+      pluck(ng.gain, t, 0.001, 0.55 * k, 0.045);
     } else if (kind === "sand") {
       v.noise(this.buf.white, t, t + 0.2, v.filter("highpass", 2600, 0.6, ng));
       pluck(ng.gain, t, 0.012, 0.28 * k, lerp(0.1, 0.18, w));
@@ -2135,7 +1884,7 @@ export class AudioEngine {
       pluck(ng.gain, t, 0.006, lerp(0.3, 0.45, w) * k, lerp(0.07, 0.16, w));
     }
     // Heavy animals: a sub rumble you feel through the ground.
-    if (w > 0.55 && !hunter) this._rumble(v, t, w, k);
+    if (w > 0.55) this._rumble(v, t, w, k);
   }
 
   _splash(w, k) {
@@ -2228,12 +1977,12 @@ export class AudioEngine {
     pluck(ng.gain, t, 0.01, 0.3, 0.12);
   }
 
-  _breath(t, period, tired, w, hunter) {
+  _breath(t, period, tired, w) {
     const b = this.breath;
-    const f = hunter ? 1150 : lerp(1500, 360, w);
+    const f = lerp(1500, 360, w);
     const inLen = period * 0.38;
     const outLen = period * 0.5;
-    const peak = lerp(0.3, 0.8, tired) * (hunter ? 0.8 : lerp(0.8, 1.2, w));
+    const peak = lerp(0.3, 0.8, tired) * lerp(0.8, 1.2, w);
     const g = b.shape.gain;
     g.cancelScheduledValues(t);
     g.setValueAtTime(MIN_GAIN, t);
@@ -2278,156 +2027,12 @@ export class AudioEngine {
     f.exponentialRampToValueAtTime(44, t2 + 0.09);
   }
 
-  /* --- Helicopter --------------------------------------------------------------- */
-
-  _buildRotor() {
-    const ctx = this.ctx;
-    const r = { nodes: [], sources: [], idle: 0, lastD: -1, lastT: 0, vr: 0 };
-    const keep = (n) => {
-      r.nodes.push(n);
-      this.stats.persistent++;
-      return n;
-    };
-    const G = (v, dest) => {
-      const g = keep(ctx.createGain());
-      g.gain.value = v;
-      if (dest) g.connect(dest);
-      return g;
-    };
-    const F = (type, f, q, dest) => {
-      const n = keep(ctx.createBiquadFilter());
-      n.type = type;
-      n.frequency.value = f;
-      n.Q.value = q;
-      if (dest) n.connect(dest);
-      return n;
-    };
-    const src = (node) => {
-      keep(node);
-      r.sources.push(node);
-      return node;
-    };
-    r.pan = keep(this._makePanner());
-    r.pan.connect(this.sfxBus);
-    r.lp = F("lowpass", 18000, 0.6, r.pan);
-    r.level = G(0, r.lp);
-    r.level.connect(G(0.15, this.reverbIn));
-    r.level.connect(G(0.08, this.echoIn));
-    // Blade slap: low noise + a thump tone, both chopped by a sharp pulse at the blade-pass rate.
-    const chop = G(1, r.level);
-    const slap = G(1, r.level);
-    r.chopLfo = src(ctx.createOscillator());
-    r.chopLfo.setPeriodicWave(this.pulse.rotor.wave);
-    r.chopLfo.frequency.value = 20;
-    const amA = G(this.pulse.rotor.base, chop);
-    const amB = G(this.pulse.rotor.base, slap);
-    r.chopLfo.connect(G(this.pulse.rotor.depth, amA.gain));
-    r.chopLfo.connect(G(this.pulse.rotor.depth, amB.gain));
-    r.noise = src(ctx.createBufferSource());
-    r.noise.buffer = this.buf.brown;
-    r.noise.loop = true;
-    r.noise.connect(F("lowpass", 420, 0.8, G(1.6, amA)));
-    r.thump = src(ctx.createOscillator());
-    r.thump.frequency.value = 42;
-    r.thump.connect(G(0.5, amA));
-    r.slapNoise = src(ctx.createBufferSource());
-    r.slapNoise.buffer = this.buf.white;
-    r.slapNoise.loop = true;
-    r.slapNoise.connect(F("bandpass", 1100, 0.8, G(0.35, amB)));
-    // Turbine whine and gearbox tone.
-    r.whine = src(ctx.createOscillator());
-    r.whine.type = "sawtooth";
-    r.whine.frequency.value = 1650;
-    r.whine.connect(F("bandpass", 1650, 6, G(0.06, r.level)));
-    r.gear = src(ctx.createOscillator());
-    r.gear.frequency.value = 2475;
-    r.gear.connect(G(0.012, r.level));
-    // Rotor wash when it's right overhead.
-    r.wash = G(0, r.pan);
-    r.washNoise = src(ctx.createBufferSource());
-    r.washNoise.buffer = this.buf.pink;
-    r.washNoise.loop = true;
-    r.washNoise.connect(F("highpass", 400, 0.6, r.wash));
-    const t = ctx.currentTime;
-    for (const s of r.sources) s.start(t, s.buffer ? Math.random() * 2 : 0);
-    return r;
-  }
-
-  _destroyRotor() {
-    const r = this.heli;
-    if (!r) return;
-    this.heli = null;
-    const t = this.ctx ? this.ctx.currentTime : 0;
-    r.level.gain.cancelScheduledValues(t);
-    r.level.gain.setValueAtTime(0, t);
-    r.wash.gain.cancelScheduledValues(t);
-    r.wash.gain.setValueAtTime(0, t);
-    for (const s of r.sources) {
-      try {
-        s.stop(t + 0.05);
-      } catch {
-        /* not started */
-      }
-    }
-    for (const n of r.nodes) {
-      try {
-        n.disconnect();
-      } catch {
-        /* gone */
-      }
-    }
-    this.stats.persistent -= r.nodes.length;
-  }
-
-  /** Rotor loop polled from world.helicopter ({ active, position, rotorSpeed? }). */
-  _updateHelicopter(heli, now) {
-    const pos = heli?.position;
-    const active = !!(heli && heli.active && pos && Number.isFinite(pos.x));
-    let r = this.heli;
-    if (active && !r && !this.muted) r = this.heli = this._buildRotor();
-    if (!r) return;
-    const elapsed = r.lastT > 0 ? Math.max(0.02, now - r.lastT) : CONTROL_DT;
-    r.lastT = now;
-    if (!active) {
-      glide(r.level.gain, 0, now, 0.5);
-      glide(r.wash.gain, 0, now, 0.3);
-      r.lastD = -1;
-      r.idle += elapsed;
-      if (r.idle > 4) this._destroyRotor(); // tear down; rebuilt next time it flies
-      return;
-    }
-    r.idle = 0;
-    const L = this.L;
-    const dx = pos.x - L.x;
-    const dy = num(pos.y, L.y) - L.y;
-    const dz = pos.z - L.z;
-    const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
-    // Doppler-ish: radial speed from the change in distance.
-    const vr = r.lastD >= 0 ? clamp((d - r.lastD) / elapsed, -90, 90) : 0;
-    r.lastD = d;
-    r.vr = damp(r.vr, vr, 3, elapsed);
-    const doppler = SOUND_SPEED / (SOUND_SPEED + r.vr);
-    const rpm = clamp(num(heli.rotorSpeed, 1), 0, 1);
-    const spin = 0.3 + 0.7 * rpm;
-    glide(r.chopLfo.frequency, 20 * spin * doppler, now, 0.12);
-    glide(r.thump.frequency, 42 * spin * doppler, now, 0.12);
-    glide(r.whine.frequency, 1650 * (0.35 + 0.65 * rpm) * doppler, now, 0.25);
-    glide(r.gear.frequency, 2475 * (0.35 + 0.65 * rpm) * doppler, now, 0.25);
-    glide(r.noise.playbackRate, doppler * (0.75 + 0.25 * rpm), now, 0.15);
-    const g = Math.pow(45 / Math.max(45, d), 0.95) * (1 - smoothstep(1000, 1700, d)) * (0.1 + 0.9 * rpm);
-    glide(r.level.gain, 0.85 * g, now, 0.12);
-    glide(r.lp.frequency, clamp(20000 * Math.exp(-d / 260), 450, 18000), now, 0.15);
-    const h = Math.sqrt(dx * dx + dz * dz) || 1;
-    glide(r.pan.pan, clamp(((dx * L.rx + dz * L.rz) / h) * 0.8 * smoothstep(2, 15, h), -1, 1), now, 0.1);
-    glide(r.wash.gain, 0.22 * smoothstep(70, 12, d) * rpm, now, 0.3);
-  }
-
   /* --- Call synthesis ------------------------------------------------------------- */
 
   /**
    * Play a species call. `f` base pitch (already scaled for size), `d` seconds,
    * `w` size weight 0..1. Own calls are loud and centred; others are placed in
-   * the world. `reedy` colours it like a hand-held call device.
+   * the world.
    */
   _playCall(kind, f, d, w, o) {
     const synth = this._callSynth(kind);
@@ -2447,9 +2052,8 @@ export class AudioEngine {
     }
     const t = this.ctx.currentTime + LOOKAHEAD;
     const level = v.gain(CALL_LEVEL[kind] ?? 0.8, v.out);
-    const dest = o.reedy ? this._reed(v, level) : level;
-    synth.call(this, v, dest, t, f, d, w, !!o.dying);
-    this._count(`call:${kind}${o.reedy ? ":lure" : ""}`);
+    synth.call(this, v, level, t, f, d, w, !!o.dying);
+    this._count(`call:${kind}`);
   }
 
   _callSynth(kind) {
@@ -2467,19 +2071,6 @@ export class AudioEngine {
       default:
         return this._hoot;
     }
-  }
-
-  /** Call-device colouring: no chest, a pinched nasal peak, a little buzz. */
-  _reed(v, dest) {
-    const hp = v.filter("highpass", 260, 0.7);
-    const pk = v.filter("peaking", 1500, 1.4);
-    pk.gain.value = 9;
-    const sh = v.shaper(this.curve);
-    const lp = v.filter("lowpass", 4800, 0.7, v.gain(0.75, dest));
-    hp.connect(pk);
-    pk.connect(sh);
-    sh.connect(lp);
-    return hp;
   }
 
   /** Roar: detuned saws + breath noise, growl tremolo, saturation, formant bands, pitch rise-then-drop. */
@@ -2713,16 +2304,15 @@ export class AudioEngine {
     pluck(g.gain, t, 0.02, 0.35 * k, 0.3);
   }
 
-  /** A pained grunt in the player's own voice (species call pitch, or a human one). */
+  /** A pained grunt in the player's own voice (its species' call pitch). */
   _grunt(v, t, p, w) {
-    const hunter = !!p?.isHunter;
     const scale = clamp(num(p?.scale, 1), 0.1, 2);
-    const f = hunter ? rnd(105, 130) : clamp((num(p?.species?.call?.pitch, 200) * 0.8) / Math.sqrt(scale), 50, 900);
-    const len = hunter ? 0.22 : lerp(0.18, 0.4, w);
+    const f = clamp((num(p?.species?.call?.pitch, 200) * 0.8) / Math.sqrt(scale), 50, 900);
+    const len = lerp(0.18, 0.4, w);
     const amp = v.gain(0, v.out);
     const mix = v.gain(0.5);
-    const f1 = hunter ? 620 : lerp(900, 380, w);
-    const f2 = hunter ? 1250 : lerp(1900, 900, w);
+    const f1 = lerp(900, 380, w);
+    const f2 = lerp(1900, 900, w);
     mix.connect(v.filter("bandpass", f1, 3, v.gain(1.4, amp)));
     mix.connect(v.filter("bandpass", f2, 5, v.gain(0.7, amp)));
     mix.connect(v.filter("lowpass", f * 2, 0.7, v.gain(0.4, amp)));
@@ -2750,95 +2340,6 @@ export class AudioEngine {
     }
     swell(g.gain, t, 0.05, 3, 0.4, 0.2);
     this._count("drown");
-  }
-
-  /* --- Weapons --------------------------------------------------------------------- */
-
-  _gunshot(v, t, r) {
-    const pre = v.gain(0.8, v.shaper(this.curve, v.out));
-    const cg = v.gain(0, pre);
-    v.noise(this.buf.white, t, t + r.crackDecay + 0.05, v.filter("highpass", r.crackHp, 0.7, cg));
-    pluck(cg.gain, t, 0.0008, r.crack, r.crackDecay);
-    const bg = v.gain(0, pre);
-    const blp = v.filter("lowpass", r.bodyLp, 0.8, bg);
-    v.noise(this.buf.pink, t, t + r.bodyDecay + 0.05, blp);
-    sweep(blp.frequency, t, r.bodyLp, r.bodyLp * 0.25, r.bodyDecay);
-    pluck(bg.gain, t, 0.002, r.body, r.bodyDecay);
-    const tg = v.gain(0, pre);
-    const th = v.osc("sine", r.thumpHz, t, t + r.thumpDecay + 0.05, tg);
-    sweep(th.frequency, t, r.thumpHz * 1.4, r.thumpHz * 0.45, r.thumpDecay);
-    pluck(tg.gain, t, 0.002, r.thump, r.thumpDecay);
-    const lg = v.gain(0, pre);
-    v.noise(this.buf.brown, t, t + r.tailDecay + 0.1, v.filter("lowpass", r.tailLp, 0.7, lg));
-    pluck(lg.gain, t, 0.01, r.tail, r.tailDecay);
-  }
-
-  /** Crossbow: string twang, stock knock and the bolt's fading "fwip". Near-silent by design. */
-  _crossbow(v, t) {
-    const sg = v.gain(0, v.out);
-    const s = v.osc("triangle", 190, t, t + 0.3, sg);
-    sweep(s.frequency, t, 230, 120, 0.18);
-    pluck(sg.gain, t, 0.002, 1.1, 0.2);
-    const kg = v.gain(0, v.out);
-    v.noise(this.buf.crackle, t, t + 0.08, v.filter("bandpass", 900, 2, kg));
-    pluck(kg.gain, t, 0.001, 1.4, 0.05);
-    const fg = v.gain(0, v.out);
-    const fb = v.filter("bandpass", 4200, 1.6, fg);
-    v.noise(this.buf.white, t, t + 0.22, fb);
-    sweep(fb.frequency, t + 0.01, 4200, 1100, 0.16);
-    pluck(fg.gain, t + 0.005, 0.02, 0.8, 0.14);
-  }
-
-  /**
-   * Mechanical foley sequence on ONE voice: a single noise source feeds bright
-   * (clicks), ringing (metal), body (knocks) and slide (bolt/hinge) paths whose
-   * gains/filters are automated per event — dozens of clicks for ~10 nodes.
-   */
-  _mech(script, t0, level) {
-    const v = this._voice(0.55);
-    if (!v) return;
-    this._routeDirect(v, this.sfxBus, 0.05);
-    v.out.gain.value = level;
-    const last = script[script.length - 1];
-    const end = t0 + last[0] + (last[1] === "slide" ? last[3] : 0.25) + 0.1;
-    const src = v.noise(this.buf.white, t0, end);
-    const gB = v.gain(0, v.out);
-    const bpB = v.filter("bandpass", 2800, 2.5, gB);
-    const gR = v.gain(0, v.out);
-    const bpR = v.filter("bandpass", 3400, 22, gR);
-    const gC = v.gain(0, v.out);
-    const lpC = v.filter("lowpass", 700, 0.9, gC);
-    const gS = v.gain(0, v.out);
-    const bpS = v.filter("bandpass", 1800, 3, gS);
-    src.connect(bpB);
-    src.connect(bpR);
-    src.connect(lpC);
-    src.connect(bpS);
-    for (const [s, kind, g, a, b, c] of script) {
-      const t = t0 + s;
-      if (kind === "click") {
-        bpB.frequency.setValueAtTime(hz(a), t);
-        bpR.frequency.setValueAtTime(hz(a * 1.13), t);
-        pluck(gB.gain, t, 0.001, g * 4, 0.025);
-        pluck(gR.gain, t, 0.001, g * 6, 0.07);
-      } else if (kind === "clack") {
-        lpC.frequency.setValueAtTime(900, t);
-        bpB.frequency.setValueAtTime(2000, t);
-        bpR.frequency.setValueAtTime(2900, t);
-        pluck(gC.gain, t, 0.002, g * 3.5, 0.07);
-        pluck(gB.gain, t, 0.001, g * 2.4, 0.04);
-        pluck(gR.gain, t, 0.001, g * 4, 0.15);
-      } else if (kind === "thunk") {
-        lpC.frequency.setValueAtTime(420, t);
-        pluck(gC.gain, t, 0.003, g * 4, 0.12);
-      } else if (kind === "slide") {
-        sweep(bpS.frequency, t, b, c, a);
-        gS.gain.setValueAtTime(MIN_GAIN, t);
-        gS.gain.linearRampToValueAtTime(g * 3, t + Math.min(0.02, a * 0.3));
-        gS.gain.setValueAtTime(g * 3, t + a * 0.7);
-        gS.gain.exponentialRampToValueAtTime(MIN_GAIN, t + a);
-      }
-    }
   }
 
   /* --- Stingers ------------------------------------------------------------------- */

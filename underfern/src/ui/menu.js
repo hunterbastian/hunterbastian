@@ -74,13 +74,9 @@ const ICON_PATHS = {
   sound: '<path d="M3.5 9.5v5h3.2l4.8 4V5.5l-4.8 4H3.5z"/><path d="M15.2 9.2a4 4 0 0 1 0 5.6M17.8 6.6a7.6 7.6 0 0 1 0 10.8"/>',
   mute: '<path d="M3.5 9.5v5h3.2l4.8 4V5.5l-4.8 4H3.5z"/><path d="M15.5 9.5l5 5M20.5 9.5l-5 5"/>',
   compass: '<circle cx="12" cy="12" r="8.8"/><path d="M14.8 9.2 13 13l-3.8 1.8L11 11z"/>',
-  flag: '<path d="M5.5 21V3.8"/><path d="M5.5 4.5h11.2l-2.2 3.6 2.2 3.6H5.5"/>',
   stick: '<circle cx="12" cy="12" r="8.6"/><circle class="f" cx="13.6" cy="10.4" r="3.4"/>',
   rotate:
     '<rect x="7.5" y="2.8" width="9" height="15.4" rx="1.8"/><path d="M11 15.4h2"/><path d="M3.5 13.5a8.6 8.6 0 0 0 7 7.7"/><path d="M8.6 20l1.9 1.2-1.1 1.9"/>',
-  skull:
-    '<path d="M12 3.2c-4.6 0-8 3.2-8 7.5 0 2.4 1.1 4.2 2.8 5.4v2.6c0 .9.7 1.6 1.6 1.6h7.2c.9 0 1.6-.7 1.6-1.6v-2.6c1.7-1.2 2.8-3 2.8-5.4 0-4.3-3.4-7.5-8-7.5z"/>' +
-    '<circle cx="9" cy="11.4" r="1.7"/><circle cx="15" cy="11.4" r="1.7"/><path d="M10.4 20.3v-2.2M13.6 20.3v-2.2"/>',
 };
 
 /**
@@ -159,34 +155,21 @@ const TOUCH_SURVIVAL = [
   ["Map · pause", "map", "Top right"],
 ];
 
-const KEYS_HUNTER = [
-  ["Fire", ["LMB"], "or F"],
-  ["Aim · scope", ["RMB"]],
-  ["Reload", ["R"]],
-  ["Weapons", ["1", "2"]],
-  ["Binoculars", ["B"]],
-  ["Lure call", ["Q"]],
-  ["Call extraction", ["X"]],
-];
-
 const kbd = (k) => `<kbd class="kbd">${escapeHtml(k)}</kbd>`;
 
 /**
  * Controls reference as markup: keyboard & mouse and touch columns, the
  * device in use first. Shared by the title screen and the in-game help.
- * @param {{ isTouch?: boolean, hunter?: boolean }} [opts] include the Hunter-mode keys
+ * @param {{ isTouch?: boolean }} [opts]
  * @returns {string}
  */
-export function controlsSheetHTML({ isTouch = false, hunter = true } = {}) {
-  const keyRows = (rows) =>
-    rows
-      .map(
-        ([label, keys, note]) =>
-          `<li class="ctl"><span class="ctl__label">${escapeHtml(label)}</span><span class="ctl__keys">${keys
-            .map(kbd)
-            .join("")}</span>${note ? `<span class="ctl__note">${escapeHtml(note)}</span>` : ""}</li>`,
-      )
-      .join("");
+export function controlsSheetHTML({ isTouch = false } = {}) {
+  const keyRows = KEYS_SURVIVAL.map(
+    ([label, keys, note]) =>
+      `<li class="ctl"><span class="ctl__label">${escapeHtml(label)}</span><span class="ctl__keys">${keys
+        .map(kbd)
+        .join("")}</span>${note ? `<span class="ctl__note">${escapeHtml(note)}</span>` : ""}</li>`,
+  ).join("");
   const touchRows = TOUCH_SURVIVAL.map(
     ([label, ico, note]) =>
       `<li class="ctl"><span class="ctl__label">${escapeHtml(label)}</span><span class="ctl__keys"><span class="tglyph">${icon(
@@ -195,16 +178,10 @@ export function controlsSheetHTML({ isTouch = false, hunter = true } = {}) {
   ).join("");
   const desktop =
     `<section class="ctl-col"><h3 class="ctl-col__title">${icon("keyboard")}Keyboard &amp; mouse</h3>` +
-    `<ul class="ctl-list">${keyRows(KEYS_SURVIVAL)}</ul></section>`;
-  // Hunter keys sit under the touch column so the two columns balance.
+    `<ul class="ctl-list">${keyRows}</ul></section>`;
   const touch =
     `<section class="ctl-col"><h3 class="ctl-col__title">${icon("hand")}Touch</h3>` +
-    `<ul class="ctl-list">${touchRows}</ul>` +
-    `<p class="ctl-col__foot">Hunter mode swaps the ring for fire, aim, reload, binoculars and lure.</p>` +
-    (hunter
-      ? `<h4 class="ctl-col__sub">${icon("keyboard")}Hunter mode · keyboard</h4><ul class="ctl-list ctl-list--compact">${keyRows(KEYS_HUNTER)}</ul>`
-      : "") +
-    `</section>`;
+    `<ul class="ctl-list">${touchRows}</ul></section>`;
   return `<div class="ctl-grid">${isTouch ? touch + desktop : desktop + touch}</div>`;
 }
 
@@ -212,7 +189,7 @@ export function controlsSheetHTML({ isTouch = false, hunter = true } = {}) {
 
 // Field-guide plates: each species is a smooth loft along a spine (x 0 = tail
 // tip … ~100 = snout, y up is negative, ground at 0) plus limbs and features.
-// Far-side limbs are drawn dimmer for depth; a 1.8 m person stands for scale.
+// Far-side limbs are drawn dimmer for depth; a banded 2 m bar stands for scale.
 
 const f1 = (v) => String(Math.round(v * 10) / 10);
 
@@ -463,16 +440,16 @@ const PLANS = {
   },
 };
 
-/** Standing person, `h` units tall, feet on the baseline — the field-guide scale figure. */
-function scaleFigure(x, h) {
-  const u = h / 10;
+/**
+ * The field-guide scale bar: `h` units tall (2 m) and `w` wide, standing on the
+ * baseline at `x`, banded every half metre — solid, open, solid, open.
+ */
+function scaleBar(x, h, w) {
+  const band = (i) => `<rect x="${f1(x)}" y="${f1((-h * (i + 1)) / 4)}" width="${f1(w)}" height="${f1(h / 4)}" stroke="none"/>`;
   return (
-    `<circle cx="${f1(x)}" cy="${f1(-h + u * 0.75)}" r="${f1(u * 0.72)}"/>` +
-    limb([[x, -h + u * 1.9], [x, -h + u * 5.4]], [u * 1.7]) +
-    limb([[x - u * 0.45, -h + u * 5.2], [x - u * 0.6, -0.4]], [u * 0.8]) +
-    limb([[x + u * 0.45, -h + u * 5.2], [x + u * 0.6, -0.4]], [u * 0.8]) +
-    limb([[x - u * 0.6, -h + u * 2.2], [x - u * 0.95, -h + u * 5.4]], [u * 0.55]) +
-    limb([[x + u * 0.6, -h + u * 2.2], [x + u * 0.95, -h + u * 5.4]], [u * 0.55])
+    band(0) +
+    band(2) +
+    `<rect class="sil-line" x="${f1(x)}" y="${f1(-h)}" width="${f1(w)}" height="${f1(h)}" stroke-width="1" vector-effect="non-scaling-stroke"/>`
   );
 }
 
@@ -484,25 +461,27 @@ function fallbackPlan(def) {
 }
 
 /**
- * Field-guide silhouette of a species, with an optional 1.8 m person for scale.
+ * Field-guide silhouette of a species, with an optional 2 m scale bar.
  * @param {object|string} species SpeciesDef or id
- * @param {{ human?: boolean }} [opts]
- * @returns {string} SVG markup (class "sil"; style via .sil-body / .sil-far / .sil-human / .sil-ground / .sil-eye)
+ * @param {{ scale?: boolean }} [opts]
+ * @returns {string} SVG markup (class "sil"; style via .sil-body / .sil-far / .sil-scale / .sil-ground / .sil-eye)
  */
-export function speciesSilhouette(species, { human = true } = {}) {
+export function speciesSilhouette(species, { scale = true } = {}) {
   const def = typeof species === "string" ? { id: species } : species || {};
   const plan = PLANS[def.id] || PLANS[fallbackPlan(def)];
   const g = { far: "", body: "", near: "", top: 48 };
   plan(g);
   const length = Math.max(0.5, Number(def.length) || 6);
-  const hu = human ? (1.8 / length) * 100 : 0;
-  const hx = -6 - hu * 0.12;
-  const minX = human ? Math.min(-6, hx - hu * 0.2) - 2 : -6;
+  // The drawing spans 100 units nose to tail, so 2 m is a different height on every plate.
+  const hu = scale ? (2 / length) * 100 : 0;
+  const bw = clamp(hu * 0.07, 1.2, 2.2);
+  const bx = -5 - bw;
+  const minX = scale ? bx - 3 : -6;
   const top = Math.max(g.top, hu + 3);
   return (
     `<svg class="sil" viewBox="${f1(minX)} ${f1(-top)} ${f1(104 - minX)} ${f1(top + 2)}" preserveAspectRatio="xMidYMax meet" aria-hidden="true" focusable="false">` +
     `<g class="sil-far">${g.far}</g><g class="sil-body">${g.body}${g.near}</g>` +
-    (human ? `<g class="sil-human">${scaleFigure(hx, hu)}</g>` : "") +
+    (scale ? `<g class="sil-scale">${scaleBar(bx, hu, bw)}</g>` : "") +
     `<path class="sil-ground" d="M${f1(minX)},0.5H104"/></svg>`
   );
 }
@@ -736,6 +715,7 @@ function contourSVG(seed) {
 /* --- Species stats -------------------------------------------------------------------- */
 
 const SWIM_WORDS = ["Sinks", "Poor", "Fair", "Good", "Superb"];
+const COUNT_WORDS = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve"];
 
 /** Card stats normalised across the playable list so bars compare species fairly. */
 function computeStats(list) {
@@ -818,8 +798,6 @@ export class Menu {
     this.onStart = () => {};
     /** Called when the player resumes their saved life. */
     this.onContinue = () => {};
-    /** [hunter] Called from the title screen's Hunter entry; main opens HunterMenu. */
-    this.onHunter = () => {};
     /** Called with a fresh copy of the settings after every change. */
     this.onSettingsChange = () => {};
     /** Called when the settings panel closes (e.g. to return focus to pause). */
@@ -1000,13 +978,7 @@ export class Menu {
         <div class="title__actions">
           <div class="continue" hidden></div>
           <button type="button" class="mode mode--survival" data-act="survival">
-            <span class="mode__num" aria-hidden="true">I</span>
             <span class="mode__body"><span class="mode__name">Survival</span><span class="mode__desc">Live as a dinosaur — feed, hide, fight, grow up.</span></span>
-            <span class="mode__go" aria-hidden="true">${icon("arrowRight")}</span>
-          </button>
-          <button type="button" class="mode mode--hunter" data-act="hunter">
-            <span class="mode__num" aria-hidden="true">II</span>
-            <span class="mode__body"><span class="mode__name">Hunter</span><span class="mode__desc">A Carnivores-style expedition — stalk, shoot, extract.</span></span>
             <span class="mode__go" aria-hidden="true">${icon("arrowRight")}</span>
           </button>
         </div>
@@ -1019,7 +991,7 @@ export class Menu {
             <p class="eyebrow">Survival · choose a species</p>
             <h2 class="species__title" id="${id}-sp-title">Who will you be?</h2>
           </div>
-          <p class="species__intro">Six animals of the Morrison and Cedar Mountain formations. You start as a hatchling — the island decides the rest.</p>
+          <p class="species__intro">${COUNT_WORDS[this.species.length] ?? this.species.length} animals of the Morrison and Cedar Mountain formations. You start as a hatchling — the island decides the rest.</p>
         </header>
         <div class="species__list" role="listbox" aria-labelledby="${id}-sp-title" aria-orientation="horizontal"></div>
         <footer class="species__foot">
@@ -1110,7 +1082,7 @@ export class Menu {
                 <input type="radio" name="${id}-style" value="pixel" />
                 <span class="style-opt__img style-opt__img--pixel"><canvas width="64" height="34" aria-hidden="true"></canvas></span>
                 <span class="style-opt__name">Pixel <em>retro</em></span>
-                <span class="style-opt__desc">Low-res render, crisp nearest-neighbour upscale — a '98 expedition.</span>
+                <span class="style-opt__desc">Low-res render, crisp nearest-neighbour upscale — a late-'90s look.</span>
               </label>
             </div>
           </fieldset>
@@ -1192,9 +1164,6 @@ export class Menu {
       switch (t.dataset.act) {
         case "survival":
           this._setScreen("species", true);
-          break;
-        case "hunter":
-          this.onHunter();
           break;
         case "continue":
           this.onContinue();
@@ -1380,7 +1349,7 @@ export class Menu {
     const name = s.speciesName || def.name || s.speciesId;
     this._continue.innerHTML = `
       <button type="button" class="continue__btn" data-act="continue">
-        <span class="continue__fig">${speciesSilhouette(def, { human: false })}</span>
+        <span class="continue__fig">${speciesSilhouette(def, { scale: false })}</span>
         <span class="continue__text">
           <span class="eyebrow">Continue your life</span>
           <span class="continue__name">${escapeHtml(name)}</span>

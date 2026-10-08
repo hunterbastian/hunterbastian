@@ -4,17 +4,15 @@
 // 1. Serves underfern/ from a tiny static server on a free port.
 // 2. Launches headless Chromium (Playwright) with SwiftShader WebGL.
 // 3. Runs tests/unit.html (browser-side unit tests, results on window.__unit).
-// 4. Runs smoke tests against the real game: survival in both render styles,
-//    movement, death → death screen, a phone-sized touch run, an upright phone
-//    (the game turned sideways), and a hunter expedition (planner → drop-off →
-//    hunting → shot).
+// 4. Runs smoke tests against the real game: the title screen into a new life,
+//    survival in both render styles, movement, death → death screen, a
+//    phone-sized touch run and an upright phone (the game turned sideways).
 // Screenshots land in tests/out/ (gitignored). Exits non-zero on any failure.
 //
 // Headless WebGL is software-rendered and very slow (a frame can take a
 // second), and main.js clamps dt to 0.05 s, so game time crawls. The smoke
-// tests therefore fast-forward the simulation with `__underfern.advance()` /
-// `hunterMode.update()` (no drawing) and only wait on real frames for
-// screenshots.
+// tests therefore fast-forward the simulation with `__underfern.advance()` (no
+// drawing) and only wait on real frames for screenshots.
 //
 // Flags: --unit (unit only) · --smoke (smoke only) · --only <text> (tests whose
 // name contains text) · --headed (show the browser) · --keep-going is implied.
@@ -198,6 +196,51 @@ async function driveWithKeys(page, keys, seconds) {
 // Each suite opens one page; its steps share it and report individually.
 
 const SUITES = [
+  {
+    name: "title",
+    query: "?quality=low&mute=1&debug=1",
+    steps: [
+      {
+        name: "title: a single way in — Survival",
+        async run({ page, errors }) {
+          await waitState(page, "menu");
+          // The actions unlock a beat after loading completes.
+          await page.waitForSelector(".menu .mode--survival:not([disabled])", { timeout: 30_000 });
+          const t = await page.evaluate(() => ({
+            modes: [...document.querySelectorAll(".menu .mode")].map((b) => b.dataset.act),
+            numerals: document.querySelectorAll(".menu .mode__num").length,
+          }));
+          expect(t.modes.length === 1 && t.modes[0] === "survival", `the title should offer Survival alone, got ${JSON.stringify(t.modes)}`);
+          expect(t.numerals === 0, "a lone mode card needs no numeral");
+          await frames(page, 2);
+          await shot(page, "title");
+          await expectClean(page, errors);
+        },
+      },
+      {
+        name: "title: Survival → choose a species → Hatch starts a life",
+        async run({ page, errors }) {
+          await page.click(".menu .mode--survival");
+          await page.waitForFunction(() => document.querySelector(".menu")?.dataset.screen === "species", null, { timeout: 30_000 });
+          const s = await page.evaluate(() => ({
+            cards: document.querySelectorAll(".menu .sp-card").length,
+            intro: document.querySelector(".menu .species__intro").textContent.trim(),
+          }));
+          const WORDS = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve"];
+          expect(s.cards >= 5, `expected the playable species as cards, found ${s.cards}`);
+          expect(s.intro.startsWith(`${WORDS[s.cards] ?? s.cards} animals`), `the intro should count the ${s.cards} cards: "${s.intro}"`);
+          await frames(page, 2);
+          await shot(page, "title-species");
+          await page.click(".menu .hatch");
+          await waitState(page, "playing", 60_000);
+          const p = await page.evaluate(() => ({ id: __underfern.player?.species.id, alive: __underfern.player?.alive, growth: __underfern.player?.growth }));
+          expect(p.alive && p.growth === 0, `Hatch should start a fresh juvenile, got ${JSON.stringify(p)}`);
+          await expectClean(page, errors);
+          return `${s.cards} species on the cards; Hatch → ${p.id}`;
+        },
+      },
+    ],
+  },
   {
     name: "survival · pixel",
     query: "?species=dryosaurus&growth=0.3&t=0.42&style=pixel&pixel=0.5&quality=low&mute=1&debug=1",
@@ -588,103 +631,6 @@ const SUITES = [
           await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
           await page.evaluate(() => __underfern.advance(0.1));
           expect((await page.evaluate(() => __underfern.state)) === "paused", "the pause button should pause the game");
-          await expectClean(page, errors);
-        },
-      },
-    ],
-  },
-  {
-    name: "hunter",
-    query: "?hunter=1&quality=low&mute=1&debug=1",
-    steps: [
-      {
-        name: "hunter: ?hunter=1 opens the expedition planner",
-        async run({ page, errors }) {
-          await waitState(page, "hunter-menu");
-          await page.waitForFunction(() => !!window.__underfern.hunterMode, null, { timeout: 60_000 });
-          await frames(page, 2);
-          await shot(page, "hunter-planner");
-          await expectClean(page, errors);
-        },
-      },
-      {
-        name: "hunter: begin → drop-off flight (fast-forwarded) → hunting",
-        async run({ page, errors }) {
-          await page.evaluate(() =>
-            __underfern.hunterMode.begin({ weapons: ["rifle", "revolver"], equipment: { radar: true, lure: true }, targets: ["camptosaurus"], phase: 0.45 }),
-          );
-          await waitState(page, "hunter", 60_000);
-          const ff = await page.evaluate(() => {
-            const hm = __underfern.hunterMode;
-            const first = hm.session.state;
-            let i = 0;
-            while (hm.session.state !== "hunting" && i < 2400) {
-              hm.update(0.05);
-              __underfern.input.endFrame();
-              i++;
-            }
-            const h = hm.hunter;
-            return { first, steps: i, state: hm.session.state, alive: h.alive, onGround: h.position.y - __underfern.world.terrain.heightAt(h.position.x, h.position.z), player: __underfern.world.player === h };
-          });
-          expect(ff.first === "dropoff", `a hunt should open with the drop-off flight, got "${ff.first}"`);
-          expect(ff.state === "hunting", `drop-off didn't finish within 120 s of game time (state ${ff.state}, ${ff.steps} steps)`);
-          expect(ff.alive && ff.player, `hunter should be alive and the ecosystem's player: ${JSON.stringify(ff)}`);
-          expect(Math.abs(ff.onGround) < 2.5, `hunter should stand on the ground after the drop-off (Δy ${ff.onGround.toFixed(2)})`);
-          await frames(page, 2);
-          await shot(page, "hunter-ground");
-          await expectClean(page, errors);
-        },
-      },
-      {
-        name: "hunter: fire → shot event, ammo spent",
-        async run({ page, errors }) {
-          // Let the weapon finish raising before pulling the trigger.
-          await page.evaluate(() => {
-            for (let i = 0; i < 30; i++) {
-              __underfern.hunterMode.update(0.05);
-              __underfern.input.endFrame();
-            }
-          });
-          const before = await page.evaluate(() => {
-            const w = __underfern.hunterMode.weapons;
-            window.__shots = [];
-            window.__offShot = __underfern.world.events.on("shot", (e) => window.__shots.push({ weapon: e.weapon, loudness: e.loudness }));
-            return { weapon: w.current, mag: w.ammo[w.current].mag };
-          });
-          await page.keyboard.down("KeyF");
-          await page.evaluate(() => {
-            for (let i = 0; i < 6; i++) {
-              __underfern.hunterMode.update(0.05);
-              __underfern.input.endFrame();
-            }
-          });
-          await page.keyboard.up("KeyF");
-          const after = await page.evaluate(() => {
-            for (let i = 0; i < 4; i++) {
-              __underfern.hunterMode.update(0.05);
-              __underfern.input.endFrame();
-            }
-            window.__offShot();
-            const w = __underfern.hunterMode.weapons;
-            return { shots: window.__shots, mag: w.ammo[w.current].mag };
-          });
-          expect(after.shots.length >= 1, `holding F should fire (${JSON.stringify(before)})`);
-          expect(after.shots[0].weapon === before.weapon, `shot event names the weapon (${after.shots[0].weapon})`);
-          expect(after.mag === before.mag - after.shots.length, `magazine ${before.mag} → ${after.mag} after ${after.shots.length} shot(s)`);
-          await frames(page, 2);
-          await shot(page, "hunter-shot");
-          await expectClean(page, errors);
-        },
-      },
-      {
-        name: "hunter: quit returns to the title menu",
-        async run({ page, errors }) {
-          await page.evaluate(() => __underfern.hunterMode.quit());
-          await waitState(page, "menu", 30_000);
-          const p = await page.evaluate(() => ({ player: __underfern.world.player, mode: __underfern.world.mode }));
-          expect(p.player === null && p.mode === "survival", `quitting should clear the hunter (${JSON.stringify(p)})`);
-          await frames(page, 2);
-          await shot(page, "menu-after-hunt");
           await expectClean(page, errors);
         },
       },
