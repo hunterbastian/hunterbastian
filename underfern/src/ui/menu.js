@@ -320,34 +320,10 @@ const PLANS = {
     g.near += hindLeg(52, -27, 1, 5);
     g.near += '<path class="sil-line" d="M54.6,-3.4q2.6,-2.6 4,0.2" stroke-width="1.15"/>';
   },
-  gastonia(g) {
-    g.top = 40;
-    g.far += columnLeg(46, -21, 6.2, 1.5) + columnLeg(70, -19, 4.8, -0.8);
-    g.body += loft([
-      [0, -14, 0.4, 0.4], [12, -16.6, 1.5, 1.6], [26, -20, 3.2, 3.6], [38, -23.6, 5.6, 6.8],
-      [50, -25, 6.8, 10.2], [62, -24.2, 6.4, 10], [72, -20.8, 4.4, 6.6], [80, -16.4, 3.1, 3.6],
-      [86.5, -15, 2.8, 2.9], [91.5, -14, 1.5, 1.6], [93.5, -13.8, 0.2, 0.2],
-    ]);
-    // Dorsal spikes and flank spines — the defining read for an armoured tank.
-    const spikes = [
-      [76, -21, -0.2, 4.4], [70, -26, -0.3, 6.2], [63, -29, -0.15, 6.6], [55, -30.6, 0, 6.6],
-      [47, -30.5, 0.12, 6.4], [39.5, -28.6, 0.3, 5.8], [32, -25.4, 0.45, 5], [24, -22, 0.55, 4.2],
-      [16, -18.6, 0.6, 3.4], [8, -15.8, 0.7, 2.6],
-    ];
-    for (const [x, y, lean, h] of spikes) {
-      g.body += poly([[x - h * 0.32, y + 1], [x - Math.sin(lean) * h - h * 0.25, y - Math.cos(lean) * h], [x + h * 0.32, y + 1]]);
-    }
-    for (let i = 0; i < 5; i++) {
-      const x = 42 + i * 7.5;
-      g.body += poly([[x - 1.4, -15.6], [x - 5.2, -12.4], [x + 1.2, -14.4]]);
-    }
-    g.body += eye(88, -16.4, 0.55);
-    g.near += columnLeg(50, -20, 6.6, 1.5) + columnLeg(73, -18, 5, -0.8);
-  },
   ceratosaurus(g) {
     g.top = 46;
     g.far += hindLeg(45, -28, 1.04, 6, -3.5) + limb([[66.5, -25.6], [67.6, -21], [70, -20]], [1.9, 1.4]);
-    // A deep, crocodile-like tail: it is the swimmer of the group.
+    // A deep, crocodile-like tail: a swimmer's tail.
     const spine = [
       [0, -22.5, 0.4, 0.5], [12, -24.8, 1.9, 2.3], [25, -27.2, 3.1, 4.2], [36, -29.2, 4, 6],
       [46, -29.6, 4.4, 10], [56, -28.8, 4, 11], [64, -28.4, 3.3, 7.8], [70, -31.2, 2.6, 4.3],
@@ -399,6 +375,57 @@ const PLANS = {
     ]);
     g.body += poly([[80.8, -40.4], [82.6, -43.6], [84.8, -40.6]]) + eye(84, -39.3);
     g.near += hindLeg(48, -29, 1.06, 6.4) + limb([[67, -25.5], [69.2, -20], [72.2, -18.8]], [2.4, 1.7]);
+  },
+  tyrannosaurus(g) {
+    // A deep, boxy skull on a short, thick neck; a barrel chest over long,
+    // heavily muscled legs; a level counterweight tail, and the famous arms.
+    g.top = 48;
+    g.far += hindLeg(45.5, -30, 1.08, 7.2, -3.5) + limb([[69.2, -23.6], [68.4, -19.8], [70.8, -18.6], [72.2, -18.2]], [1.5, 1.1, 0.8]);
+    g.body += loft([
+      [0, -27.8, 0.3, 0.3], [6, -28.5, 0.8, 0.8], [14.6, -29.6, 1.8, 1.9], [25, -30.7, 3, 3.2],
+      [35.4, -31.6, 3.8, 4.6], [45, -32.2, 4.3, 6.8], [52.5, -32.3, 4.5, 9.2], [59.2, -32.2, 4.4, 11.6],
+      [65.8, -31.8, 4.3, 12.4], [72, -32, 4.1, 10.2], [76.6, -33.2, 3.9, 7.2], [80.5, -34.6, 4, 5.4],
+      [84.4, -35.8, 4.4, 4.4], [87.4, -36.2, 4.2, 4.2],
+    ]);
+    // The skull, its own squared outline: a blunt muzzle, a straight deep jaw, the eye high and far back under a boss.
+    g.body += smoothClosed([
+      [85.4, -39.8], [88.6, -41.2], [92, -40.9], [95.6, -39.9], [98.8, -38.9], [100.3, -37.9], [100.7, -36.2],
+      [100.3, -34.6], [99.6, -33.2], [97, -32.4], [93, -32], [89.4, -31.2], [86.8, -31.6], [85, -34],
+    ]);
+    g.body += smoothClosed([[87.6, -40.7], [89, -41.7], [91.4, -41.6], [93, -40.3]]) + eye(91.2, -39.2, 0.75);
+    g.near += hindLeg(49.5, -30, 1.08, 7.4) + limb([[70.4, -23.4], [69.6, -19.6], [72.2, -18.2], [73.8, -17.8]], [1.7, 1.25, 0.9]);
+  },
+  spinosaurus(g) {
+    // Long and low: short legs, a croc snout held level, a deep oar of a tail,
+    // and the sail — a membrane drawn dim, like the far limbs, over bone-coloured spines.
+    g.top = 37;
+    g.far += hindLeg(49.5, -16.4, 0.6, 4.6, -3) + limb([[67.4, -16.6], [66, -12.6], [69, -11.4], [70.8, -9.4]], [2, 1.5, 1]);
+    const spine = [
+      [0, -11.1, 0.2, 0.2], [9.6, -12.9, 2.4, 1.9], [18.2, -14.6, 3.6, 2.9], [27.1, -16.4, 4, 3.4],
+      [35.7, -17.9, 3.9, 3.6], [43.6, -18.8, 3.6, 4], [52.5, -19.4, 3.1, 6], [57.9, -19.4, 3, 7.1],
+      [63.2, -19.1, 2.9, 7.4], [68.2, -19, 2.6, 6.1], [72.1, -19.6, 2.1, 3.9], [76.1, -21, 1.6, 2.4],
+      [80, -22.1, 1.3, 1.8], [83.9, -22.9, 1.1, 1.4], [88.5, -22.9, 2.1, 1.9], [89.6, -22.75, 2.2, 2.3],
+      [90.8, -22.6, 1.9, 1.4], [92.5, -22.35, 1.75, 0.95], [94.2, -22.1, 1.15, 0.8], [96.8, -21.75, 0.75, 0.62],
+      [98.3, -21.55, 0.85, 1], [99.3, -21.4, 0.55, 0.6], [100, -21.3, 0.2, 0.2],
+    ];
+    // Sail: [x, height above the back] — a rounded "M", tallest over the hips, raked back a little.
+    const sail = [[35.1, 0], [37.9, 0.9], [41.4, 3.2], [45.4, 6.8], [49.6, 10.1], [53.4, 11.4], [56.4, 10.7], [60.4, 9.3], [63.9, 10.1], [66.5, 8.4], [69.7, 3.9], [72.9, 0]];
+    const top = sail.map(([x, h]) => [x - h * 0.1, backAt(spine, x) - h]);
+    const root = sail.slice().reverse().map(([x]) => [x, backAt(spine, x) + 1.6]);
+    g.far += smoothClosed(top.concat(root));
+    // Spines first, so the back covers their roots.
+    for (let i = 1; i < 16; i++) {
+      const x = lerp(36.5, 71.5, i / 16);
+      let h = 0;
+      for (let k = 0; k < sail.length - 1; k++) {
+        if (x >= sail[k][0] && x <= sail[k + 1][0]) h = lerp(sail[k][1], sail[k + 1][1], (x - sail[k][0]) / (sail[k + 1][0] - sail[k][0]));
+      }
+      const y0 = backAt(spine, x);
+      g.body += `<path class="sil-line" d="M${f1(x)},${f1(y0 + 0.5)}L${f1(x - h * 0.1)},${f1(y0 - h + 0.6)}" stroke-width="0.55"/>`;
+    }
+    g.body += loft(spine) + eye(90.4, -24.1, 0.5);
+    g.near += hindLeg(52.5, -16.4, 0.6, 4.8) + limb([[68.2, -16.8], [66.9, -12.7], [69.8, -11.6], [71.6, -9.5]], [2.2, 1.6, 1.1]);
+    g.near += '<path class="sil-line" d="M71.2,-10.2q2.2,0.4 2.3,2.7" stroke-width="0.9"/>'; // the hooked thumb claw
   },
   camptosaurus(g) {
     g.top = 40;
@@ -938,6 +965,7 @@ export class Menu {
   /** Remove the menu's DOM and listeners. */
   dispose() {
     this._ac.abort();
+    this._ro?.disconnect();
     clearTimeout(this._loadTimer);
     cancelAnimationFrame(this._scrollRaf);
     this.el.remove();
@@ -968,7 +996,7 @@ export class Menu {
       </header>
 
       <div class="screen screen--title" data-screen="title">
-        <p class="eyebrow title__eyebrow">Late Jurassic · Utah · 150 million years ago</p>
+        <p class="eyebrow title__eyebrow">An island out of time · 150–&#8288;66&nbsp;million&nbsp;years&nbsp;ago</p>
         <h1 class="wordmark">Underfern</h1>
         <p class="tagline">Hatch small. Stay hidden. Grow into something the island fears.</p>
         <div class="loading" role="progressbar" aria-label="Preparing the island" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
@@ -991,9 +1019,13 @@ export class Menu {
             <p class="eyebrow">Survival · choose a species</p>
             <h2 class="species__title" id="${id}-sp-title">Who will you be?</h2>
           </div>
-          <p class="species__intro">${COUNT_WORDS[this.species.length] ?? this.species.length} animals of the Morrison and Cedar Mountain formations. You start as a hatchling — the island decides the rest.</p>
+          <p class="species__intro">${COUNT_WORDS[this.species.length] ?? this.species.length} animals, some eighty million years apart, on one island. You start as a hatchling — the island decides the rest.</p>
         </header>
-        <div class="species__list" role="listbox" aria-labelledby="${id}-sp-title" aria-orientation="horizontal"></div>
+        <div class="species__strip">
+          <div class="species__list" role="listbox" aria-labelledby="${id}-sp-title" aria-orientation="horizontal"></div>
+          <button type="button" class="strip-nav strip-nav--prev" data-act="strip-prev" tabindex="-1" aria-hidden="true">${icon("arrowLeft")}</button>
+          <button type="button" class="strip-nav strip-nav--next" data-act="strip-next" tabindex="-1" aria-hidden="true">${icon("arrowRight")}</button>
+        </div>
         <footer class="species__foot">
           <div class="species__detail" aria-live="polite">
             <p class="species__detail-name"></p>
@@ -1006,7 +1038,7 @@ export class Menu {
       </div>
 
       <footer class="menu__foot">
-        <p class="plate"><span class="plate__no">Pl. I</span> The island at the edge of the Morrison floodplain, from the air.</p>
+        <p class="plate"><span class="plate__no">Pl. I</span> The island, from the air.<br />No map of any age shows it.</p>
       </footer>`;
 
     this.el = el;
@@ -1018,6 +1050,7 @@ export class Menu {
     this._loadPct = el.querySelector(".loading__pct");
     this._loadLabel = el.querySelector(".loading__label");
     this._continue = el.querySelector(".continue");
+    this._strip = el.querySelector(".species__strip");
     this._list = el.querySelector(".species__list");
     this._detailName = el.querySelector(".species__detail-name");
     this._detailDesc = el.querySelector(".species__detail-desc");
@@ -1186,6 +1219,10 @@ export class Menu {
         case "close-controls":
           this._closeLayer(this.controlsLayer);
           break;
+        case "strip-prev":
+        case "strip-next":
+          this._pageStrip(t.dataset.act === "strip-next" ? 1 : -1);
+          break;
         case "sound":
           this._change({ muted: !this._settings.muted });
           break;
@@ -1210,6 +1247,17 @@ export class Menu {
       sig,
     );
     this._list.addEventListener("keydown", (e) => this._onListKey(e), sig);
+    // A mouse wheel pans the strip sideways (the screen itself never scrolls).
+    this._list.addEventListener(
+      "wheel",
+      (e) => {
+        const list = this._list;
+        if (e.ctrlKey || Math.abs(e.deltaX) >= Math.abs(e.deltaY) || list.scrollWidth <= list.clientWidth + 4) return;
+        e.preventDefault();
+        list.scrollLeft += e.deltaY * (e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? list.clientWidth : 1);
+      },
+      { passive: false, signal: this._ac.signal },
+    );
     // Phones: the carousel's centred card is the selection.
     this._list.addEventListener(
       "scroll",
@@ -1217,10 +1265,23 @@ export class Menu {
         if (this._scrollRaf) return;
         this._scrollRaf = requestAnimationFrame(() => {
           this._scrollRaf = 0;
+          this._syncStrip();
           this._selectFromScroll();
         });
       },
       { passive: true, signal: this._ac.signal },
+    );
+    if (typeof ResizeObserver === "function") {
+      this._ro = new ResizeObserver(() => this._syncStrip());
+      this._ro.observe(this._list);
+    }
+    // The paging arrows never take focus from the cards (arrow keys keep working).
+    this._strip.addEventListener(
+      "mousedown",
+      (e) => {
+        if (e.target.closest(".strip-nav")) e.preventDefault();
+      },
+      sig,
     );
 
     // Settings form.
@@ -1318,6 +1379,7 @@ export class Menu {
       s.toggleAttribute("inert", !on);
       s.setAttribute("aria-hidden", on ? "false" : "true");
     }
+    if (name === "species") this._syncStrip();
     if (!focus) return;
     if (name === "species") {
       this._select(this._selected, { focus: true, instant: true });
@@ -1384,23 +1446,54 @@ export class Menu {
     this._hatchText.innerHTML = `Hatch <em>${escapeHtml(s.name || s.id)}</em>`;
     this._hatchBtn.disabled = false;
     const card = this._cards[i];
-    if (scroll && this._list.scrollWidth > this._list.clientWidth + 4) {
+    const list = this._list;
+    if (scroll && list.scrollWidth > list.clientWidth + 4) {
       this._scrollLockUntil = performance.now() + 700;
       const reduce = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
-      const left = card.offsetLeft - (this._list.clientWidth - card.offsetWidth) / 2;
-      this._list.scrollTo({ left, behavior: instant || reduce ? "auto" : "smooth" });
+      // The card's left edge in the strip's scrolled content.
+      const x = card.getBoundingClientRect().left - list.getBoundingClientRect().left + list.scrollLeft;
+      let left = x - (list.clientWidth - card.offsetWidth) / 2;
+      if (!this.isTouch) {
+        // Mouse and keyboard: only as far as it takes to bring the card out
+        // from under the faded edges, so the strip doesn't slide under the pointer.
+        const edge = parseFloat(getComputedStyle(list).paddingLeft) || 0;
+        left = clamp(list.scrollLeft, x + card.offsetWidth + edge - list.clientWidth, x - edge);
+      }
+      if (Math.abs(left - list.scrollLeft) > 1) list.scrollTo({ left, behavior: instant || reduce ? "auto" : "smooth" });
     }
     if (focus) card.focus({ preventScroll: true });
   }
 
+  /** Mouse affordance: arrows over the faded edges while there's more strip that way. */
+  _syncStrip() {
+    const list = this._list;
+    const max = list.scrollWidth - list.clientWidth;
+    this._strip.classList.toggle("can-prev", max > 4 && list.scrollLeft > 2);
+    this._strip.classList.toggle("can-next", max > 4 && list.scrollLeft < max - 2);
+  }
+
+  /** Page the strip sideways by what's in view, less a card. */
+  _pageStrip(dir) {
+    const list = this._list;
+    const card = this._cards?.[0];
+    if (!card) return;
+    const step = card.offsetWidth + 12;
+    const edge = parseFloat(getComputedStyle(list).paddingLeft) || 0;
+    const reduce = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    list.scrollBy({ left: dir * Math.max(step, list.clientWidth - 2 * edge - step), behavior: reduce ? "auto" : "smooth" });
+  }
+
   _selectFromScroll() {
     const list = this._list;
-    if (performance.now() < this._scrollLockUntil || list.scrollWidth <= list.clientWidth + 4) return;
-    const mid = list.scrollLeft + list.clientWidth / 2;
+    // A mouse or trackpad just pans the strip; only a thumb's swipe picks.
+    if (!this.isTouch || performance.now() < this._scrollLockUntil || list.scrollWidth <= list.clientWidth + 4) return;
+    const lr = list.getBoundingClientRect();
+    const mid = lr.left + lr.width / 2;
     let best = this._selected;
     let bestD = Infinity;
     this._cards.forEach((c, i) => {
-      const d = Math.abs(c.offsetLeft + c.offsetWidth / 2 - mid);
+      const r = c.getBoundingClientRect();
+      const d = Math.abs(r.left + r.width / 2 - mid);
       if (d < bestD) {
         bestD = d;
         best = i;

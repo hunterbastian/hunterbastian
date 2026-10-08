@@ -378,6 +378,10 @@ export class PlayerController {
     const world = this.world;
     const x = c.position.x;
     const z = c.position.z;
+    // A keen nose (SpeciesDef.smell) reaches further for food and other animals.
+    const nose = Number(c.species?.smell) > 0 ? Number(c.species.smell) : 1;
+    const foodR = SNIFF_FOOD_RADIUS * nose;
+    const creatureR = SNIFF_CREATURE_RADIUS * nose;
     this._clearSniff();
     s.cooldown = SNIFF_COOLDOWN;
     s.timeLeft = SNIFF_DURATION;
@@ -400,7 +404,7 @@ export class PlayerController {
     if (dietOf(c) === "carnivore") {
       const list = world?.ecosystem?.carcasses;
       if (Array.isArray(list)) {
-        const r2 = SNIFF_FOOD_RADIUS * SNIFF_FOOD_RADIUS;
+        const r2 = foodR * foodR;
         for (const k of list) {
           if ((k.meat ?? 1) >= 0.5 && dist2(x, z, k.x, k.z) <= r2) scratch.push(k);
         }
@@ -413,7 +417,7 @@ export class PlayerController {
     } else {
       const veg = world?.vegetation;
       if (veg && typeof veg.plantsNear === "function") {
-        const plants = adopt(veg.plantsNear(x, z, SNIFF_FOOD_RADIUS, scratch), scratch);
+        const plants = adopt(veg.plantsNear(x, z, foodR, scratch), scratch);
         for (let i = plants.length - 1; i >= 0; i--) if ((plants[i].food ?? 1) < 1) plants.splice(i, 1);
         this._sortByDistance(plants, x, z);
         for (let i = 0; i < plants.length && i < SNIFF_MAX_PLANTS; i++) {
@@ -427,7 +431,7 @@ export class PlayerController {
     scratch.length = 0;
     const eco = world?.ecosystem;
     if (eco && typeof eco.query === "function") {
-      const found = adopt(eco.query(x, z, SNIFF_CREATURE_RADIUS, null, scratch), scratch);
+      const found = adopt(eco.query(x, z, creatureR, null, scratch), scratch);
       for (let i = found.length - 1; i >= 0; i--) {
         if (found[i] === c || found[i].alive === false || !found[i].position) found.splice(i, 1);
       }

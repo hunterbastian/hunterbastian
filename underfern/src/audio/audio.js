@@ -33,10 +33,12 @@ const PROBE_POINTS = 12;
 const SHAPE_ROAR = [[0, 0.82], [0.2, 1.12], [0.6, 0.98], [1, 0.7]];
 const SHAPE_BELLOW = [[0, 0.92], [0.3, 1.04], [0.75, 1], [1, 0.86]];
 const SHAPE_SHRIEK = [[0, 0.75], [0.3, 1.55], [0.6, 1.2], [1, 0.7]];
+const SHAPE_RUMBLE = [[0, 0.86], [0.18, 1.06], [0.7, 0.98], [1, 0.78]];
+const SHAPE_RATTLE = [[0, 0.94], [0.25, 1.06], [0.7, 0.9], [1, 0.74]];
 const SHAPE_DYING = [[0, 1], [0.25, 1.04], [1, 0.5]];
 
 // Output trims so every call kind lands at a similar loudness (measured offline).
-const CALL_LEVEL = { roar: 0.85, bellow: 1.0, honk: 2.4, chirp: 0.6, shriek: 1.25, hoot: 0.95 };
+const CALL_LEVEL = { roar: 0.85, bellow: 1.0, honk: 2.4, chirp: 0.6, shriek: 1.25, hoot: 0.95, rumble: 1.0, rattle: 1.15 };
 
 // Bird repertoire: a handful of fixed "songs" so the same birds are heard
 // repeating themselves, as real ones do.
@@ -2068,6 +2070,10 @@ export class AudioEngine {
         return this._chirp;
       case "shriek":
         return this._shriek;
+      case "rumble":
+        return this._rumbleCall; // (_rumble is the footfall sub)
+      case "rattle":
+        return this._rattle;
       default:
         return this._hoot;
     }
@@ -2243,6 +2249,84 @@ export class AudioEngine {
       amp.gain.linearRampToValueAtTime(1, th + Math.min(0.09, l * 0.3));
       amp.gain.exponentialRampToValueAtTime(0.5, th + l * 0.7);
       amp.gain.exponentialRampToValueAtTime(MIN_GAIN, th + l);
+    }
+  }
+
+  /**
+   * Rumble: a closed-mouth boom under a growl (Tyrannosaurus). Laptop speakers
+   * can't play a 30 Hz fundamental, so the 2nd–4th harmonics carry it and a
+   * slow amplitude flutter stands in for the infrasound you'd feel.
+   */
+  _rumbleCall(v, dest, t, f, d, w, dying) {
+    const end = t + d;
+    const shape = dying ? SHAPE_DYING : SHAPE_RUMBLE;
+    const amp = v.gain(0, dest);
+    const lp = v.filter("lowpass", Math.max(180, f * 4), 0.9, amp);
+    const flutter = v.gain(0.65, lp);
+    v.osc("sine", rnd(6, 8), t, end + 0.05, v.gain(0.35, flutter.gain));
+    for (const [type, k, g] of [["sine", 1, 0.7], ["triangle", 2, 0.55], ["sine", 3, 0.3], ["sawtooth", 4, 0.12]]) {
+      contour(v.osc(type, f * k, t, end + 0.05, v.gain(g, flutter)).frequency, t, f * k, d, shape);
+    }
+    // The growl: two rough saws through a saturating throat band, with a fast tremolo.
+    const sh = v.shaper(this.curve);
+    sh.connect(v.filter("bandpass", lerp(420, 260, w), 2.4, v.gain(0.45, amp)));
+    const growl = v.gain(0.3, sh);
+    v.osc("sine", rnd(16, 22), t, end + 0.05, v.gain(0.15, growl.gain));
+    for (const k of [3, 3.02]) contour(v.osc("sawtooth", f * k, t, end + 0.05, growl).frequency, t, f * k, d, shape);
+    v.noise(this.buf.pink, t, end + 0.05, v.filter("lowpass", 380, 0.7, v.gain(0.12, amp)));
+    sweep(lp.frequency, t, Math.max(160, f * 3), Math.max(320, f * 8), d * 0.3);
+    lp.frequency.exponentialRampToValueAtTime(Math.max(160, f * 3), end);
+    amp.gain.setValueAtTime(MIN_GAIN, t);
+    amp.gain.linearRampToValueAtTime(1, t + d * 0.22);
+    amp.gain.setValueAtTime(1, t + d * 0.6);
+    amp.gain.exponentialRampToValueAtTime(MIN_GAIN, end);
+  }
+
+  /**
+   * Rattle: a hiss on the intake, a pulsed hollow croak through a long snout's
+   * narrow formants, then two dry jaw-claps (Spinosaurus).
+   */
+  _rattle(v, dest, t, f, d, w, dying) {
+    const end = t + d;
+    const amp = v.gain(1, dest);
+    // Intake hiss through the retracted nostrils.
+    const hg = v.gain(0, amp);
+    const hf = v.filter("bandpass", 3600, 1.3, hg);
+    v.noise(this.buf.white, t, t + d * 0.34, hf);
+    sweep(hf.frequency, t, 3800, 1700, d * 0.3);
+    hg.gain.setValueAtTime(MIN_GAIN, t);
+    hg.gain.linearRampToValueAtTime(0.28, t + d * 0.07);
+    hg.gain.exponentialRampToValueAtTime(MIN_GAIN, t + d * 0.32);
+    // The croak: saw + square, gated by a slowing pulse train (the rattle).
+    const t0 = t + d * 0.16;
+    const t1 = dying ? end : t + d * 0.8;
+    const body = v.gain(0, amp);
+    const gate = v.gain(0.45, body);
+    const lfo = v.osc("square", lerp(16, 11, w), t0, t1 + 0.05, v.gain(0.45, gate.gain));
+    lfo.frequency.setValueAtTime(lerp(16, 11, w), t0);
+    lfo.frequency.exponentialRampToValueAtTime(lerp(9, 6, w), t1);
+    const sh = v.shaper(this.curve);
+    sh.connect(v.filter("bandpass", clamp(f * 6, 420, 1100), 5, v.gain(1.1, gate)));
+    sh.connect(v.filter("bandpass", lerp(1800, 1250, w), 6, v.gain(0.55, gate)));
+    sh.connect(v.filter("lowpass", f * 2.2, 0.7, v.gain(0.55, gate)));
+    const pre = v.gain(0.55, sh);
+    for (const [type, k] of [["sawtooth", 1], ["square", 1.012]]) {
+      contour(v.osc(type, f * k, t0, t1 + 0.05, pre).frequency, t0, f * k, t1 - t0, dying ? SHAPE_DYING : SHAPE_RATTLE);
+    }
+    v.noise(this.buf.pink, t0, t1 + 0.05, v.filter("bandpass", f * 4, 1.2, v.gain(0.35, pre)));
+    body.gain.setValueAtTime(MIN_GAIN, t0);
+    body.gain.linearRampToValueAtTime(1, t0 + 0.08);
+    body.gain.setValueAtTime(1, lerp(t0, t1, 0.6));
+    body.gain.exponentialRampToValueAtTime(MIN_GAIN, t1 + 0.04);
+    if (dying) return;
+    // Two hard jaw-claps to finish.
+    for (const tc of [t1 + 0.06, t1 + 0.06 + lerp(0.15, 0.22, w)]) {
+      const k = v.gain(0, amp);
+      v.noise(this.buf.white, tc, tc + 0.1, v.filter("bandpass", lerp(1900, 1150, w), 1.3, k));
+      v.osc("triangle", lerp(460, 280, w), tc, tc + 0.1, v.gain(0.7, k));
+      k.gain.setValueAtTime(MIN_GAIN, tc);
+      k.gain.linearRampToValueAtTime(1.1, tc + 0.004);
+      k.gain.exponentialRampToValueAtTime(MIN_GAIN, tc + 0.09);
     }
   }
 

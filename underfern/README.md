@@ -1,13 +1,14 @@
 # Underfern
 
 **Underfern** is a 3D dinosaur survival game that runs in your browser. You hatch
-on a misty Late Jurassic island and have to eat, drink, hide, fight and grow from
-a fragile juvenile into a full-grown adult, while carnivores and herbivores driven
-by their own AI hunt, graze, herd and sleep around you. It leans on the moody
+on a misty island out of time, where animals some eighty million years apart share
+one coast, and have to eat, drink, hide, fight and grow from a fragile juvenile
+into a full-grown adult, while carnivores and herbivores driven by their own AI
+hunt, graze, herd and sleep around you. It leans on the moody
 naturalism of *The Isle*: ochre grasslands, dark conifer forests, golden dawn mist
 and deep blue moonlit nights, with the fog and light doing much of the work.
 
-You play as one of seven dinosaurs, in third person.
+You play as one of eight dinosaurs, in third person.
 
 The default look is **Pixel**: the 3D scene is drawn at a few hundred pixels tall
 and scaled up with crisp nearest-neighbour edges (a late-'90s look), while the
@@ -84,15 +85,15 @@ usually near a freshwater lake. Then:
   your head at the food or at the water's edge. Lakes and rivers are fresh. The
   sea is salt and doesn't help.
 - **Grow.** You grow only while food and water stay above 25%. Juvenile → sub-adult
-  (40%) → adult takes 20–45 real minutes depending on the species. Bigger means
+  (40%) → adult takes 20–50 real minutes depending on the species. Bigger means
   more health, harder bites and fewer things that see you as lunch.
 - **Stay alive.** At 0 food you starve, at 0 water you dehydrate, and in deep water
   with no stamina you drown. Bites cause **bleeding** that slowly clots. Resting
   clots it faster and triples health regeneration (regeneration needs food and water
   above 30%). Big falls can break a leg.
 - **Fight or flee.** Each species attacks its own way: a bite, a kick or a tail
-  swipe, softened by the target's armour. Gastonia's spikes even hurt whoever bites
-  it.
+  swipe, softened by the target's armour. A Tyrannosaurus bite crushes through
+  half of it.
 - **Use your senses.** **Sniff** marks nearby food, the nearest fresh water and
   other creatures for a few seconds. **Call** lets others of your species answer
   from the distance. Herbivores get nervous when they hear a carnivore. **Crouch**
@@ -113,17 +114,24 @@ Playable, in menu order:
 | --- | --- | --- | --- |
 | **Dryosaurus** | herbivore | 3.5 m · 90 kg | Tiny and fragile but the fastest thing on the island. Stay with the herd. |
 | **Utahraptor** | carnivore | 6 m · 500 kg | Agile pack hunter; feathered, with a sickle claw and bleeding bites. |
-| **Gastonia** | herbivore | 5 m · 1.5 t | A walking fortress: heavy armour, spikes that bite back, tail swipe. |
 | **Ceratosaurus** | carnivore | 7 m · 900 kg | Horned ambusher of swamps and riverbanks, and an excellent swimmer. |
 | **Stegosaurus** | herbivore | 9 m · 4.5 t | Slow and steady; its tail spikes cause terrible bleeding. |
-| **Allosaurus** | carnivore | 9.5 m · 2.3 t | Utah's state fossil, and the island's apex predator. |
-| **Brontosaurus** | herbivore | 22 m · 15 t | Hatches the size of a dog and grows into a mountain (the slowest to grow up). |
+| **Allosaurus** | carnivore | 9.5 m · 2.3 t | Utah's state fossil, and the Jurassic's apex predator. |
+| **Brontosaurus** | herbivore | 22 m · 15 t | Hatches the size of a dog and grows into a mountain. |
+| **Tyrannosaurus rex** | carnivore | 12 m · 8 t | The hardest bite on the island, crushing through armour, and a nose for carrion at a distance. A fleet hatchling that grows into a slow, quickly tiring crusher (the slowest to grow up). |
+| **Spinosaurus** | carnivore | 14 m · 7 t | The longest hunter: sail-backed, short-legged and slow on land, the best swimmer on the island. Ambushes at the water's edge. |
 
 NPC-only: **Camptosaurus** (6 m, the common herding prey everything eats) and
-**Diplodocus** (a rare, gentle 26 m giant with a whip of a tail).
+**Diplodocus** (a rare, gentle 26 m giant with a whip of a tail). Tyrannosaurus
+and Spinosaurus also roam wild, rarely and almost always alone.
 
-A Utah touch: Allosaurus is Utah's state fossil, and Utahraptor and Gastonia come
-from Utah's Cedar Mountain Formation. The rest roamed the Morrison Formation.
+An island out of time: its animals never shared a coast. Allosaurus, Stegosaurus,
+Dryosaurus, Ceratosaurus, Camptosaurus and the two sauropods roamed the Late
+Jurassic Morrison Formation, about 150 million years ago. Utahraptor hunted Utah's
+Cedar Mountain Formation early in the Cretaceous. Spinosaurus waded the rivers of
+North Africa (Kem Kem and Bahariya) 99–93 million years ago, and Tyrannosaurus rex
+was among the very last dinosaurs, in the Hell Creek Formation 68–66 million years
+ago. Allosaurus is still Utah's state fossil.
 
 ## Controls
 
@@ -179,7 +187,7 @@ URL parameters, handy for sharing a moment or testing:
 
 | Param | Effect |
 | --- | --- |
-| `?species=<id>` | skip the menu and hatch as that species (`dryosaurus`, `utahraptor`, `gastonia`, `ceratosaurus`, `stegosaurus`, `allosaurus`, `brontosaurus`) |
+| `?species=<id>` | skip the menu and hatch as that species (`dryosaurus`, `utahraptor`, `ceratosaurus`, `stegosaurus`, `allosaurus`, `brontosaurus`, `tyrannosaurus`, `spinosaurus`) |
 | `?growth=0..1` | starting growth for `?species` |
 | `?pos=x,z` | spawn position in metres |
 | `?t=0..1` | time of day (0 midnight, 0.25 sunrise, 0.5 noon, 0.75 sunset); pauses the clock |
@@ -214,10 +222,11 @@ there is one and otherwise falls back to the global install.
     spawn points)
   - every species definition
   - wind/scent
-  - creature metabolism, damage, armour and death, and the ecosystem's carcass
-    flow, on a real low-resolution world
+  - creature metabolism, damage, armour and death, the ecosystem's carcass flow
+    and its caps on rare species, on a real low-resolution world
 - **Smoke tests** play the real game:
-  - the title screen: Survival → choose a species → Hatch
+  - the title screen: Survival → choose a species → Hatch, and a saved life
+    (Continue) whose species has left the island
   - survival in both render styles, keyboard movement, pause, and death → death
     screen → hatch again
   - an iPhone-sized touch run (joystick, pause button, Pixel-size slider)

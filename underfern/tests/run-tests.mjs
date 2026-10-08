@@ -239,6 +239,36 @@ const SUITES = [
           return `${s.cards} species on the cards; Hatch → ${p.id}`;
         },
       },
+      {
+        name: "title: a saved life of a species that has left the island is let go; a valid one continues",
+        async run({ page, errors }) {
+          const KEY = "underfern.save.v1";
+          const save = (speciesId) => ({ v: 1, speciesId, growth: 0.5, day: 2, x: 0, z: 0, heading: 0 });
+          const gone = await page.evaluate(
+            ([key, s]) => {
+              localStorage.setItem(key, JSON.stringify(s));
+              __underfern.menu();
+              const c = document.querySelector(".menu .continue");
+              return { hidden: c.hidden, hasSave: document.querySelector(".menu").classList.contains("has-save"), stored: localStorage.getItem(key) };
+            },
+            [KEY, save("gastonia")],
+          );
+          expect(gone.hidden && !gone.hasSave, `a Gastonia save must not offer Continue, got ${JSON.stringify(gone)}`);
+          expect(gone.stored === null, `the stale save should be removed from storage, still there: ${gone.stored}`);
+          const kept = await page.evaluate(
+            ([key, s]) => {
+              localStorage.setItem(key, JSON.stringify(s));
+              __underfern.menu();
+              const c = document.querySelector(".menu .continue");
+              return { hidden: c.hidden, name: c.querySelector(".continue__name")?.textContent, sil: !!c.querySelector("svg.sil") };
+            },
+            [KEY, save("tyrannosaurus")],
+          );
+          expect(!kept.hidden && kept.name === "Tyrannosaurus rex" && kept.sil, `a T. rex save should offer Continue, got ${JSON.stringify(kept)}`);
+          await page.evaluate((key) => localStorage.removeItem(key), KEY);
+          await expectClean(page, errors);
+        },
+      },
     ],
   },
   {

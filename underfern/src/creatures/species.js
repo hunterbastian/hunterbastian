@@ -18,6 +18,14 @@
 //           lengths, radii as [halfWidth, front, back] at the joints.
 //   arms:   biped forelimbs (shoulder position, lengths, fingers).
 //   features: species ornaments (plates, spikes, horns, feathers …).
+//
+// Optional gameplay knobs, [default]: pierce [0] share of the victim's armour
+// an attack ignores · attackStamina [8] stamina per attack · juvenileSpeed
+// [0.85] hatchling speed multiplier · smell [1] scent-range multiplier ·
+// swimDepth hip depth while floating, in hip heights · waterAffinity [0] 0..1
+// pull toward rivers, lakes and shore (spawning, patrols, prey choice) ·
+// maxAlive [none] wild ones at once · pairChance [0] odds a "solo" species
+// turns up as a pair.
 
 /* --- Shared limb / head building blocks ---------------------------------- */
 
@@ -31,6 +39,18 @@ const THEROPOD_FOOT = {
   ],
   hallux: true,
   claw: 0.3, // claw length as a fraction of the middle toe
+};
+
+// Spinosaurid foot: long, widely splayed toes with low, flat claws
+// (a broad footprint for soft river margins).
+const WADER_FOOT = {
+  ...THEROPOD_FOOT,
+  toes: [
+    { yaw: -0.38, len: 0.88, r: 1.0 },
+    { yaw: 0.02, len: 1.0, r: 1.05 },
+    { yaw: 0.42, len: 0.86, r: 1.0 },
+  ],
+  claw: 0.22,
 };
 
 const RAPTOR_FOOT = {
@@ -110,7 +130,7 @@ export const SPECIES = {
     tagline: "Fleet-footed and fragile: speed is your only armour.",
     description:
       "A slender, big-eyed ornithopod that browses ferns along the forest edge, always a heartbeat from bolting. " +
-      "Nothing on the island can catch you at full sprint, but one bite can end you, so stay with the herd and keep your ears open.",
+      "Few predators can catch you at full sprint, but one bite can end you, so stay with the herd and keep your ears open.",
     era: "Late Jurassic · Morrison Formation",
     length: 3.5,
     height: 0.95,
@@ -297,100 +317,6 @@ export const SPECIES = {
     },
   },
 
-  gastonia: {
-    id: "gastonia",
-    name: "Gastonia",
-    diet: "herbivore",
-    playable: true,
-    tagline: "A walking fortress of bone, spikes and stubbornness.",
-    description:
-      "A low-slung ankylosaur sheathed in bony armour and fringed with blade-like spikes. " +
-      "Too slow to run and it doesn't need to: plant your feet, turn your flank and punish attackers with the spiked tail.",
-    era: "Early Cretaceous · Cedar Mountain Formation, Utah",
-    length: 5,
-    height: 0.95,
-    mass: 1500,
-    health: 900,
-    bite: 46,
-    biteCooldown: 1.6,
-    biteRange: 1.6,
-    attack: "tail",
-    armor: 0.55,
-    bleed: 1.5,
-    speed: { walk: 1.4, trot: 3.2, sprint: 5.6, crouch: 1.0, swim: 1.2 },
-    turnRate: 1.9,
-    stamina: { regen: 8, sprintDrain: 10 },
-    metabolism: { hunger: 3.6, thirst: 3.8 },
-    growthMinutes: 28,
-    juvenileScale: 0.3,
-    swim: 0.2,
-    social: "pair",
-    groupSize: [1, 2],
-    aggression: 0.35,
-    perception: 70,
-    spawnWeight: 0.6,
-    biomes: ["plains", "forest", "highland"],
-    call: { kind: "hoot", pitch: 120, duration: 1.4 },
-    colors: {
-      eye: "#3a2414",
-      morphs: [
-        { base: "#7c6648", dorsal: "#53432f", belly: "#c2ab86", pattern: "#3b2f22", light: "#d9c7a2", accent: "#c4ae86" },
-        { base: "#6f6a4c", dorsal: "#4a4632", belly: "#bdb48c", pattern: "#33301f", light: "#d6cfa9", accent: "#c8b98e" },
-        { base: "#86593c", dorsal: "#5a3a26", belly: "#cfae88", pattern: "#3e281a", light: "#e0c7a3", accent: "#d0b48c" },
-      ],
-      pattern: { bands: [1.8, 0.55, 2], spots: [0.35, 0.6], stripe: [0, 0, 0], dorsal: 0.75, mottle: 0.35 },
-    },
-    body: {
-      plan: "quadruped",
-      scaleTile: 0.4,
-      trunk: [
-        [-2.45, 0.82, 0.016, 0.02, 0.02],
-        [-2.05, 0.86, 0.05, 0.045, 0.05, 2.4, 0.1],
-        [-1.5, 0.93, 0.11, 0.08, 0.09, 2.4, 0.1],
-        [-0.9, 1.02, 0.22, 0.14, 0.15, 2.5, 0.12],
-        [-0.35, 1.1, 0.42, 0.22, 0.27, 2.6, 0.1],
-        [0.1, 1.14, 0.6, 0.28, 0.38, 2.7, 0.08],
-        [0.65, 1.12, 0.7, 0.3, 0.47, 2.7, 0.06],
-        [1.15, 1.05, 0.64, 0.28, 0.44, 2.6, 0.06],
-        [1.55, 0.97, 0.47, 0.24, 0.33, 2.5, 0.06],
-        [1.85, 0.94, 0.3, 0.18, 0.2, 2.3],
-        [2.06, 0.93, 0.23, 0.15, 0.15, 2.2],
-      ],
-      head: {
-        at: [2.18, 0.87],
-        length: 0.44,
-        pitch: -0.24,
-        stations: [
-          [0.0, 0.14, 0.085, 0.17, 0.12],
-          [0.14, 0.14, 0.08, 0.185, 0.08],
-          [0.32, 0.125, 0.04, 0.16, 0.04],
-          [0.55, 0.1, 0.03, 0.125, 0],
-          [0.76, 0.08, 0.028, 0.095, 0],
-          [0.92, 0.06, 0.024, 0.072, 0],
-          [1.0, 0.024, 0.012, 0.036, 0],
-        ],
-        square: 2.6,
-        jaw: { hinge: 0.1, depth: [[0, 0.06], [0.2, 0.07], [0.6, 0.05], [0.9, 0.035], [1, 0.015]], width: 0.84 },
-        eye: { u: 0.3, v: 0.06, r: 0.022 },
-        nostril: { u: 0.9, v: 0.035, r: 0.014 },
-        beak: 0.18,
-        teeth: null,
-      },
-      bones: { tail: 7, neck: 2, spineZ: 0.6, chestZ: 1.2, neckZ: 1.72, tailZ: -0.45 },
-      hind: {
-        x: 0.36, footX: 0.38, footZ: 0.0, thigh: 0.44, shin: 0.36, meta: 0.14, toe: 0.12, metaAngle: 0.15,
-        radii: { top: [0.26, 0.325, 0.325], hip: [0.234, 0.286, 0.273], thigh: [0.203, 0.23, 0.216], knee: [0.108, 0.108, 0.108], calf: [0.106, 0.1, 0.125], ankle: [0.072, 0.072, 0.072], meta: [0.066, 0.066, 0.066], ball: [0.074, 0.074, 0.068] },
-        foot: STUMPY_FOOT,
-      },
-      fore: {
-        x: 0.36, y: 0.72, z: 1.5, footX: 0.42, footZ: 1.58, upper: 0.37, fore: 0.3, meta: 0.11, toe: 0.08, metaAngle: -0.1,
-        radii: { top: [0.213, 0.263, 0.263], hip: [0.188, 0.213, 0.213], thigh: [0.156, 0.169, 0.169], knee: [0.1, 0.1, 0.1], calf: [0.094, 0.1, 0.094], ankle: [0.067, 0.069, 0.069], meta: [0.062, 0.063, 0.063], ball: [0.067, 0.067, 0.065] },
-        foot: STUMPY_HAND,
-      },
-      features: { beak: true, armor: "gastonia" },
-    },
-  },
-
   ceratosaurus: {
     id: "ceratosaurus",
     name: "Ceratosaurus",
@@ -399,7 +325,7 @@ export const SPECIES = {
     tagline: "Horned ambusher of the swamps and riverbanks.",
     description:
       "A deep-tailed, horn-nosed predator with a ridge of bony scutes down its back and long bladed teeth. " +
-      "It swims better than anything else on the island: stalk the shallows, strike from the water and drag prey in after you.",
+      "It swims better than any hunter its size: stalk the shallows, strike from the water and drag prey in after you.",
     era: "Late Jurassic · Morrison Formation",
     length: 7,
     height: 1.9,
@@ -588,10 +514,10 @@ export const SPECIES = {
     name: "Allosaurus",
     diet: "carnivore",
     playable: true,
-    tagline: "Utah's state fossil, and the island's apex predator.",
+    tagline: "Utah's state fossil, and the Jurassic's apex predator.",
     description:
       "The Morrison's top hunter: a crested, heavy-jawed killer that strikes with its upper jaw like a hatchet. " +
-      "Grow slowly, eat often, and once you're full-grown nothing on the island will dare contest your kill.",
+      "Grow slowly, eat often, and once you're full-grown only giants from later ages will dare contest your kill.",
     era: "Late Jurassic · Morrison Formation",
     length: 9.5,
     height: 2.6,
@@ -678,6 +604,256 @@ export const SPECIES = {
         claw: 0.38,
       },
       features: { teeth: true, browHorns: true, nasalRidge: true },
+    },
+  },
+
+  tyrannosaurus: {
+    id: "tyrannosaurus",
+    name: "Tyrannosaurus rex",
+    diet: "carnivore",
+    playable: true,
+    tagline: "The last tyrant, with the hardest bite of any land animal.",
+    description:
+      "A deep-skulled giant from the very end of the Cretaceous, with forward-facing eyes, a nose for carrion at a distance and jaws that crush bone. " +
+      "You hatch fleet and leggy and grow into a slow, heavy-footed crusher: hunt by scent, close the gap before you tire, and let one bite do the work.",
+    era: "Late Cretaceous · Hell Creek Formation, 68–66 Ma",
+    length: 12,
+    height: 3.5,
+    mass: 8000,
+    health: 3200,
+    bite: 175, // the hardest in the game
+    biteCooldown: 1.8,
+    biteRange: 2.2,
+    attack: "bite",
+    armor: 0.15,
+    bleed: 2, // crushing punctures: less slicing than Allosaurus or Utahraptor
+    pierce: 0.5, // bone-crushing: armour counts half
+    speed: { walk: 2.4, trot: 5.2, sprint: 8.5, crouch: 1.6, swim: 2.0 },
+    turnRate: 1.35,
+    stamina: { regen: 6, sprintDrain: 12.5 },
+    attackStamina: 14,
+    metabolism: { hunger: 3.6, thirst: 3.4 },
+    growthMinutes: 50,
+    juvenileScale: 0.16,
+    juvenileSpeed: 1.12, // young tyrannosaurs were the fast ones
+    swim: 0.35,
+    social: "solo",
+    groupSize: [1, 2],
+    pairChance: 0.15, // now and then a pair, sometimes a parent with its young
+    maxAlive: 2,
+    aggression: 0.8,
+    perception: 115,
+    smell: 1.5, // huge olfactory bulbs
+    spawnWeight: 0.07,
+    biomes: ["forest", "plains", "highland"],
+    // A closed-mouth boom under a growl; open / lift / swell shape the call pose (defaults 1 / 1 / 0).
+    call: { kind: "rumble", pitch: 30, duration: 3.4, open: 0.65, lift: 0.3, swell: 0.06 },
+    colors: {
+      eye: "#b8862e",
+      pupil: "round", // big predators have round pupils; other carnivores keep slits
+      morphs: [
+        { base: "#735a45", dorsal: "#3f2e24", belly: "#c4ae8c", pattern: "#2d2119", light: "#d6c2a0", accent: "#93492f" }, // umber
+        { base: "#6e6d66", dorsal: "#3a3b37", belly: "#c9c5b5", pattern: "#2a2b28", light: "#d8d3c2", accent: "#81503c" }, // slate
+        { base: "#8c7350", dorsal: "#57432d", belly: "#d4c096", pattern: "#3a2c1f", light: "#e2d0a8", accent: "#a45c30" }, // tawny
+      ],
+      // Drab and countershaded: broad, faint saddles over back and tail, light mottling, no stripe.
+      pattern: { bands: [0.5, 0.4, 2.8], spots: [0.22, 0.64], stripe: [0, 0, 0], dorsal: 0.82, mottle: 0.36 },
+    },
+    body: {
+      plan: "biped",
+      scaleTile: 0.6,
+      trunk: [
+        // Heavy tail held near level, deep and wide at the base (the caudofemoralis).
+        [-6.3, 3.34, 0.02, 0.028, 0.028],
+        [-5.6, 3.42, 0.055, 0.085, 0.085, 2, -0.2],
+        [-4.55, 3.55, 0.15, 0.22, 0.22, 2, -0.24],
+        [-3.3, 3.68, 0.27, 0.36, 0.38, 2, -0.2],
+        [-2.05, 3.79, 0.4, 0.46, 0.54, 2, -0.12],
+        [-0.9, 3.86, 0.68, 0.52, 0.8, 2, -0.02],
+        // Broad hips (the thighs blend in) and a deep barrel chest.
+        [0.0, 3.88, 0.88, 0.54, 1.08, 2, 0.06],
+        [0.8, 3.86, 0.9, 0.53, 1.38, 2, 0.12],
+        [1.6, 3.82, 0.86, 0.52, 1.48, 2, 0.14],
+        [2.35, 3.84, 0.72, 0.5, 1.24, 2, 0.1],
+        // Short, bull neck that runs level into the skull (no dip, so no crease at the occiput).
+        [2.9, 3.98, 0.56, 0.47, 0.88],
+        [3.35, 4.15, 0.46, 0.48, 0.66],
+        [3.72, 4.26, 0.41, 0.52, 0.54],
+        [3.96, 4.3, 0.39, 0.55, 0.48],
+      ],
+      head: {
+        at: [4.1, 4.3],
+        length: 1.5,
+        pitch: -0.08,
+        cheek: 0.04, // jaw-muscle bulge behind the eye, × length (default 0.02)
+        // Keyhole skull: cheeks flare to ~0.9 m behind the eyes, a deep, blunt, U-shaped muzzle in front.
+        stations: [
+          [0.0, 0.56, 0.36, 0.42, -0.18],
+          [0.1, 0.62, 0.32, 0.49, -0.26],
+          [0.22, 0.61, 0.12, 0.43, -0.34],
+          [0.36, 0.55, 0.06, 0.3, -0.3],
+          [0.52, 0.49, 0.055, 0.245, -0.24],
+          [0.68, 0.44, 0.055, 0.225, -0.18],
+          [0.82, 0.39, 0.055, 0.215, -0.12],
+          [0.92, 0.335, 0.05, 0.2, -0.06],
+          [0.975, 0.25, 0.045, 0.17, 0],
+          [1.0, 0.1, 0.03, 0.09, 0],
+        ],
+        jaw: { hinge: 0.07, depth: [[0, 0.26], [0.12, 0.38], [0.4, 0.3], [0.7, 0.26], [0.92, 0.25], [1, 0.12]], width: 0.86 }, // deep, with a chin
+        eye: { u: 0.25, v: 0.42, r: 0.055, fwd: 0.6 }, // fwd: gaze turned forward (binocular), default 0.28
+        nostril: { u: 0.93, v: 0.2, r: 0.03 },
+        beak: 0,
+        teeth: { upper: 13, lower: 12, length: 0.16, from: 0.3, to: 0.96, thick: 0.36 }, // thick: round, banana-like crowns (default 0.15)
+      },
+      bones: { tail: 8, neck: 4, spineZ: 0.8, chestZ: 1.6, neckZ: 2.7, tailZ: -0.7 },
+      hind: {
+        x: 0.52, footX: 0.4, footZ: 0.16, thigh: 1.58, shin: 1.4, meta: 0.72, toe: 0.54, metaAngle: 0.45,
+        radii: { top: [0.42, 0.8, 0.8], hip: [0.6, 0.84, 0.8], thigh: [0.52, 0.68, 0.64], knee: [0.28, 0.3, 0.3], calf: [0.29, 0.27, 0.45], ankle: [0.16, 0.17, 0.17], meta: [0.14, 0.15, 0.13], ball: [0.15, 0.15, 0.13] },
+        foot: { ...THEROPOD_FOOT, claw: 0.24 }, // blunter claws on thick toes
+      },
+      arms: {
+        x: 0.46, y: 2.95, z: 2.25, upper: 0.4, fore: 0.22, hand: 0.2,
+        radii: [0.12, 0.085, 0.055],
+        fingers: [{ yaw: -0.12, len: 0.9 }, { yaw: 0.12, len: 1.0 }], // two fingers
+        claw: 0.42,
+      },
+      // Hatchling proportions, fading linearly to adult: legs = leg length relative to
+      // the frame, head = [length, depth, width] multipliers.
+      juvenile: { legs: 1.2, head: [1.12, 0.84, 0.84] },
+      // bosses: rough skin-covered knobs [{ u along the skull, y as a fraction of its top
+      // radius, h × head length }] (postorbital behind the eye, lacrimal ahead of it);
+      // nasalBumps: rugose knobs down the snout's midline.
+      features: { teeth: true, bosses: [{ u: 0.17, y: 0.9, h: 0.075 }, { u: 0.34, y: 0.86, h: 0.045 }], nasalBumps: 6 },
+    },
+  },
+
+  spinosaurus: {
+    id: "spinosaurus",
+    name: "Spinosaurus",
+    diet: "carnivore",
+    playable: true,
+    tagline: "A sail above the shallows, a trap of teeth below.",
+    description:
+      "The longest hunter on the island: a crocodile's snout, a sail of skin over its spines and a tail built like an oar. " +
+      "Short-legged and slow on land, unmatched in water. Wait where the herds come down to drink, and leave the armoured giants to the tyrant.",
+    era: "Mid-Cretaceous · Kem Kem and Bahariya, 99–93 Ma",
+    length: 14,
+    height: 2.3,
+    mass: 7000,
+    health: 2600,
+    bite: 95,
+    biteCooldown: 1.1,
+    biteRange: 1.6,
+    attack: "bite",
+    armor: 0.1,
+    bleed: 3, // deep conical punctures
+    speed: { walk: 2.0, trot: 4.6, sprint: 7.8, crouch: 1.4, swim: 5.6 },
+    turnRate: 1.5,
+    stamina: { regen: 8, sprintDrain: 11 },
+    metabolism: { hunger: 3.8, thirst: 3.2 },
+    growthMinutes: 42,
+    juvenileScale: 0.17,
+    swim: 0.95, // the best swimmer on the island
+    swimDepth: 1.15, // rides low: back and sail out, snout at the surface
+    waterAffinity: 0.85,
+    maxAlive: 1,
+    social: "solo",
+    groupSize: [1, 1],
+    aggression: 0.6,
+    perception: 105,
+    spawnWeight: 0.12,
+    biomes: ["swamp", "beach", "plains"],
+    call: { kind: "rattle", pitch: 100, duration: 2.2, lift: 0.55 }, // lift: the long neck rises only part way
+    colors: {
+      eye: "#c2a640",
+      morphs: [
+        { base: "#6e6a50", dorsal: "#3b3a2c", belly: "#cbc2a0", pattern: "#2b2a21", light: "#d9d0ac", accent: "#b6532e" }, // river olive, rust sail band
+        { base: "#87725a", dorsal: "#51412f", belly: "#d8c8a6", pattern: "#36291e", light: "#e6d7b6", accent: "#c8963c" }, // sand and umber, ochre band
+        { base: "#5d655f", dorsal: "#333a37", belly: "#c3c3ad", pattern: "#242927", light: "#d3d3be", accent: "#8f3a2c" }, // slate, oxblood band
+      ],
+      // Crocodile-like cross-bands (they run up the sail as bars), light dappling, a dark back.
+      // No stripe: one at rest-normal y ≈ 0 would flood the whole sail.
+      pattern: { bands: [1.0, 0.52, 2.6], spots: [0.25, 0.63], stripe: [0, 0, 0], dorsal: 0.82, mottle: 0.3 },
+    },
+    body: {
+      plan: "biped",
+      scaleTile: 0.55,
+      swimNeck: 0.05, // per-neck-bone pitch while swimming (default -0.12 lifts the head; this keeps it low)
+      trunk: [
+        // Paddle tail: tall neural spines and long chevrons, laterally flattened (square < 2 pinches top and bottom).
+        [-7.35, 1.56, 0.01, 0.02, 0.02],
+        [-6.9, 1.64, 0.026, 0.12, 0.1, 1.7],
+        [-6.0, 1.8, 0.055, 0.34, 0.27, 1.6],
+        [-4.8, 2.04, 0.09, 0.5, 0.4, 1.6],
+        [-3.55, 2.3, 0.15, 0.56, 0.47, 1.65],
+        [-2.35, 2.5, 0.25, 0.54, 0.5, 1.8, -0.08],
+        [-1.25, 2.63, 0.38, 0.5, 0.56, 2, -0.1],
+        [-0.5, 2.7, 0.52, 0.46, 0.72, 2, -0.05],
+        // Long, fairly narrow trunk with a deep chest.
+        [0.0, 2.72, 0.58, 0.44, 0.84],
+        [0.75, 2.72, 0.6, 0.42, 1.0, 2, 0.08],
+        [1.5, 2.68, 0.59, 0.4, 1.04, 2, 0.08],
+        [2.2, 2.66, 0.47, 0.36, 0.86, 2, 0.06],
+        // S-curved neck rising gently to a low-held head.
+        [2.75, 2.74, 0.33, 0.3, 0.55],
+        [3.3, 2.94, 0.26, 0.24, 0.38],
+        [3.85, 3.1, 0.215, 0.2, 0.29],
+        [4.4, 3.2, 0.188, 0.18, 0.23],
+        [4.9, 3.24, 0.165, 0.17, 0.2],
+      ],
+      head: {
+        at: [5.04, 3.2],
+        length: 1.52,
+        pitch: -0.14,
+        stations: [
+          [0.0, 0.3, 0.15, 0.13, -0.1],
+          [0.1, 0.31, 0.15, 0.15, -0.16],
+          [0.2, 0.27, 0.07, 0.135, -0.3],
+          [0.29, 0.215, 0.04, 0.105, -0.45],
+          [0.37, 0.235, 0.034, 0.09, -0.72], // the small nasal crest ahead of the eyes
+          [0.45, 0.18, 0.03, 0.08, -0.5],
+          [0.56, 0.138, 0.028, 0.07, -0.35],
+          [0.68, 0.118, 0.026, 0.063, -0.3],
+          [0.79, 0.098, 0.012, 0.054, -0.25], // the notch: narrowest, lip line rises
+          [0.87, 0.112, 0.05, 0.072, -0.15],
+          [0.94, 0.112, 0.07, 0.082, -0.08], // terminal rosette, premaxilla hanging over the jaw tip
+          [0.985, 0.07, 0.05, 0.06, 0],
+          [1.0, 0.028, 0.024, 0.03, 0],
+        ],
+        jaw: { hinge: 0.08, depth: [[0, 0.11], [0.15, 0.17], [0.45, 0.1], [0.75, 0.075], [0.83, 0.075], [0.92, 0.1], [1, 0.045]], width: 0.84 },
+        eye: { u: 0.17, v: 0.24, r: 0.042 },
+        nostril: { u: 0.49, v: 0.135, r: 0.032 }, // retracted to mid-snout, high on the side
+        beak: 0,
+        teeth: {
+          upper: 15, lower: 14, length: 0.1, from: 0.34, to: 0.985,
+          conical: true, rosette: 0.87, // straight round cones; past u 0.87 they splay forward and out
+          size: [[0.34, 0.55], [0.6, 0.95], [0.78, 0.5], [0.84, 0.6], [0.93, 1.45], [0.985, 0.9]], // u → length multiplier
+        },
+      },
+      bones: { tail: 10, neck: 5, spineZ: 0.85, chestZ: 1.75, neckZ: 2.75, tailZ: -0.7 },
+      hind: {
+        x: 0.42, footX: 0.36, footZ: 0.14, thigh: 1.06, shin: 0.9, meta: 0.46, toe: 0.5, metaAngle: 0.46,
+        radii: { top: [0.3, 0.6, 0.6], hip: [0.46, 0.59, 0.56], thigh: [0.37, 0.47, 0.44], knee: [0.2, 0.21, 0.21], calf: [0.19, 0.185, 0.27], ankle: [0.115, 0.12, 0.12], meta: [0.1, 0.102, 0.09], ball: [0.1, 0.1, 0.088] },
+        foot: WADER_FOOT,
+      },
+      arms: {
+        x: 0.36, y: 2.35, z: 2.2, upper: 0.62, fore: 0.44, hand: 0.38,
+        radii: [0.13, 0.085, 0.055],
+        // Digit I carries the great hooked thumb claw (per-finger claw / r override the hand's).
+        fingers: [{ yaw: -0.24, len: 0.95, claw: 0.66, r: 1.3 }, { yaw: -0.02, len: 1.0, claw: 0.4 }, { yaw: 0.2, len: 0.8, claw: 0.36 }],
+        claw: 0.4,
+      },
+      features: {
+        teeth: true,
+        // A continuous skin membrane over the neural spines.
+        sail: {
+          // [z, height above the back (m)]: a rounded "M", tallest over the posterior dorsals.
+          profile: [[2.85, 0], [2.5, 0.5], [2.1, 1.1], [1.7, 1.4], [1.35, 1.38], [1.0, 1.18], [0.6, 1.38], [0.15, 1.62], [-0.35, 1.5], [-0.9, 1.05], [-1.5, 0.48], [-2.05, 0.12], [-2.45, 0]],
+          spines: 17, // ribs in the membrane
+          thick: 0.075, // half-thickness at the root (m), thinning toward the rim
+          rake: 0.1, // spines lean back (rad)
+        },
+      },
     },
   },
 
@@ -987,7 +1163,7 @@ export const SPECIES = {
   },
 };
 
-export const PLAYABLE = ["dryosaurus", "utahraptor", "gastonia", "ceratosaurus", "stegosaurus", "allosaurus", "brontosaurus"];
+export const PLAYABLE = ["dryosaurus", "utahraptor", "ceratosaurus", "stegosaurus", "allosaurus", "brontosaurus", "tyrannosaurus", "spinosaurus"];
 
 /**
  * Look up a species definition.

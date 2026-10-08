@@ -446,23 +446,28 @@ export class Ecosystem {
     const p = this._livePlayer();
     const dP = p ? Math.sqrt(dist2(pt.x, pt.z, p.position.x, p.position.z)) : Infinity;
     if (dP < PLAYER_CLEARANCE) return 0;
-    const species = this._pickSpecies(terrain.biomeAt(pt.x, pt.z), dP, diet);
+    const species = this._pickSpecies(terrain.biomeAt(pt.x, pt.z), dP, diet, pt);
     if (!species) return 0;
 
     const social = species.social || "solo";
     const [gMin = 1, gMax = gMin] = species.groupSize || [];
     let size = social === "solo" ? 1 : randInt(this.rng, Math.max(1, gMin), Math.max(1, gMin, gMax));
+    // A loner now and then turns up as a pair (sometimes a parent and its young).
+    if (social === "solo" && species.pairChance > 0 && this.rng() < species.pairChance) size = 2;
     size = Math.min(size, room);
-    if (size <= 1) {
+    if (species.maxAlive != null) size = Math.min(size, species.maxAlive - this._npcCountOf(species.id));
+    if (size < 1) return 0;
+    if (size === 1) {
       this.spawn(species.id, pt.x, pt.z, { growth: this._npcGrowth(true), heading: this.rng() * TAU });
       return 1;
     }
     return this.spawnGroup(species.id, pt.x, pt.z, size).length;
   }
 
-  // spawnWeight × biome preference, minus predators the balance rules don't
-  // allow right now.
-  _pickSpecies(biome, distToPlayer, diet) {
+  // spawnWeight × biome (and, for water lovers, shore) preference, minus
+  // predators the balance rules don't allow right now and rare species that
+  // are already about.
+  _pickSpecies(biome, distToPlayer, diet, pt = null) {
     const list = this._spawnable;
     const w = this._weights;
     const p = this._livePlayer();
@@ -472,12 +477,18 @@ export class Ecosystem {
     const carnFull = carnivores >= Math.max(1, Math.ceil(this.npcCap * CARNIVORE_SHARE));
     const reserve = this.npcCap >= 5 ? Math.round(this.npcCap * CARNIVORE_RESERVE) : 0;
     const herbFull = herbivores >= this.npcCap - reserve;
+    let wet = null; // is the spawn point on the shore or by fresh water? (asked once, if needed)
     let total = 0;
     for (let i = 0; i < list.length; i++) {
       const s = list[i];
       let wgt = s.spawnWeight;
       if (diet && s.diet !== diet) wgt = 0;
       if (s.biomes && s.biomes.length && !s.biomes.includes(biome)) wgt *= OFF_BIOME_WEIGHT;
+      if (s.waterAffinity > 0 && pt && wgt > 0) {
+        if (wet === null) wet = biome === "beach" || !!this.world.terrain?.nearestFreshWater?.(pt.x, pt.z, 60);
+        wgt *= wet ? 1 + 2.5 * s.waterAffinity : 1 - 0.8 * s.waterAffinity;
+      }
+      if (s.maxAlive != null && wgt > 0 && this._npcCountOf(s.id) >= s.maxAlive) wgt = 0; // rare: never more at once
       if (s.diet !== "carnivore" && herbFull) wgt = 0;
       if (s.diet === "carnivore") {
         if (carnFull) wgt = 0;
@@ -542,6 +553,16 @@ export class Ecosystem {
   _npcCount() {
     let n = 0;
     for (let i = 0; i < this.creatures.length; i++) if (!this._isPlayerActor(this.creatures[i])) n++;
+    return n;
+  }
+
+  // Living NPCs of one species (a player of that species doesn't count).
+  _npcCountOf(id) {
+    let n = 0;
+    for (let i = 0; i < this.creatures.length; i++) {
+      const c = this.creatures[i];
+      if (!this._isPlayerActor(c) && c.species && c.species.id === id) n++;
+    }
     return n;
   }
 

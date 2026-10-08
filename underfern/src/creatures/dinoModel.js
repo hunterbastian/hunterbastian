@@ -967,6 +967,34 @@ function makeBlueprint(sp) {
     return (_pr.w + (_pr.t + _pr.b) * 0.5) * 0.5;
   };
 
+  /* Sail (Spinosaurus): a few bones rooted along the back carry the membrane's
+     upper part, so it can sway with a little lag, lean out of turns and droop
+     onto the ground in death. */
+  let sail = null;
+  const sd = body.features?.sail;
+  if (sd) {
+    const pts = sd.profile.slice().sort((p, q) => p[0] - q[0]);
+    const hAt = pchip(pts.map((p) => p[0]), pts.map((p) => p[1]));
+    const zBack = pts[0][0];
+    const zFront = pts[pts.length - 1][0];
+    const sb = [];
+    const nb = sd.bones ?? 3;
+    for (let k = 0; k < nb; k++) {
+      const z = lerp(zBack, zFront, (k + 0.5) / nb);
+      const a = path.arcAtZ(z);
+      const inf = chainInfluence(a, centers, new Influence());
+      let par = 0;
+      let bw = -1;
+      for (let i = 0; i < inf.n; i++) if (inf.w[i] > bw) { bw = inf.w[i]; par = inf.b[i]; }
+      const pos = surface(a, 0, new THREE.Vector3());
+      const i = bones.length;
+      index["sail" + k] = i;
+      bones.push({ name: "sail" + k, parent: par, pos });
+      sb.push({ bone: i, z });
+    }
+    sail = { def: sd, hAt, zBack, zFront, bones: sb };
+  }
+
   /* Head landmarks and bumps. */
   const bumps = [];
   const addBump = (a, th, rs, rt, amp, accent = 0, mirror = true) => bumps.push({ a, th, rs, rt, amp, accent, mirror });
@@ -978,7 +1006,7 @@ function makeBlueprint(sp) {
   const rLoc = localRadius(aEye);
   addBump(aEye, thEye, eye.r * 1.7, eye.r * 1.7, -eye.r * 0.32);
   addBump(aEye + eye.r * 0.4, thEye - (eye.r * 1.55) / rLoc, eye.r * 2.8, eye.r * 1.05, eye.r * 0.55);
-  const eyeAxis = eyeN.clone().addScaledVector(head.D, 0.28).addScaledVector(head.N, 0.08).normalize();
+  const eyeAxis = eyeN.clone().addScaledVector(head.D, eye.fwd ?? 0.28).addScaledVector(head.N, 0.08).normalize();
   const eyeCenter = eyeSurf.clone().addScaledVector(eyeN, -eye.r * 0.3);
   const nos = hd.nostril;
   const aNos = arcAtU(nos.u);
@@ -986,6 +1014,18 @@ function makeBlueprint(sp) {
   addBump(aNos, thNos, nos.r * 1.8, nos.r * 1.1, -nos.r * 0.45);
   if (nos.top) addBump(aNos, 0, nos.r * 4, nos.r * 3, nos.r * 1.2, 0, false); // diplodocid nasal dome
   const f = body.features || {};
+  for (const bs of f.bosses || []) {
+    // Tyrannosaur skull bosses: a raised, rough skin pad under each knob.
+    const a = arcAtU(bs.u);
+    addBump(a, thetaForY(a, ft(a) * bs.y), hd.length * bs.h * 0.9, hd.length * bs.h * 0.7, hd.length * bs.h * 0.45, 0.3);
+  }
+  if (f.nasalBumps) {
+    // Rugose nasals: a midline row of low knobs down the snout.
+    for (let k = 0; k < f.nasalBumps; k++) {
+      const a = arcAtU(lerp(0.42, 0.86, k / Math.max(1, f.nasalBumps - 1)));
+      addBump(a, 0, hd.length * 0.03, hd.length * 0.035, hd.length * 0.013, 0.2, false);
+    }
+  }
   if (f.browHorns) {
     const a = arcAtU(0.27);
     addBump(a, thetaForY(a, ft(a) * 0.84), 0.075, 0.042, 0.07, 0.2);
@@ -995,10 +1035,6 @@ function makeBlueprint(sp) {
   if (f.browBosses) {
     const a = arcAtU(0.23);
     addBump(a, thetaForY(a, ft(a) * 0.8), 0.06, 0.045, 0.055, 0.2);
-  }
-  if (f.armor === "gastonia") {
-    const a = arcAtU(0.12);
-    addBump(a, thetaForY(a, ft(a) * 0.55), 0.06, 0.05, 0.04, 0.4);
   }
 
   /* Bounding sphere big enough for any pose (lying down, rearing, dead). */
@@ -1039,6 +1075,7 @@ function makeBlueprint(sp) {
     nostril: { a: aNos, th: thNos, r: nos.r },
     jaw: { pivot: jawPivot },
     bound,
+    sail,
     backTop,
     bellyLow,
     snoutLocal: path.point(L).sub(bones[index.head].pos),
@@ -1095,7 +1132,7 @@ function extendBlueprint(bp) {
     bp.bumps.push({ a: a1, th: bp.thetaForY(a1, pr.t * 0.42), rs: head.len * 0.11, rt: head.len * 0.05, amp: -head.len * 0.016, accent: 0, mirror: true });
     const a2 = head.arcAtU(0.06);
     bp.prof(a2, pr);
-    bp.bumps.push({ a: a2, th: bp.thetaForY(a2, pr.t * 0.12), rs: head.len * 0.09, rt: head.len * 0.07, amp: head.len * 0.02, accent: 0, mirror: true });
+    bp.bumps.push({ a: a2, th: bp.thetaForY(a2, pr.t * 0.12), rs: head.len * 0.09, rt: head.len * 0.07, amp: head.len * (hd.cheek ?? 0.02), accent: 0, mirror: true });
   }
   if (f.throatGular) {
     // Stegosaur throat ossicles: a pebbly patch under the neck.
@@ -1634,7 +1671,7 @@ function buildEyes(bp, lod, B) {
   const irisLight = iris.clone().lerp(new THREE.Color(1, 0.95, 0.8), 0.25);
   const pupil = FIXED_LINEAR.pupil;
   const rim = new THREE.Color(0.02, 0.018, 0.015);
-  const slit = sp.diet === "carnivore";
+  const slit = (sp.colors.pupil ?? (sp.diet === "carnivore" ? "slit" : "round")) === "slit";
   const alphas = lod.detail ? [0.12, 0.24, 0.36, 0.5, 0.64, 0.8, 0.95, 1.2, 1.65, 2.3] : [0.3, 0.62, 0.95, 1.6];
   const segs = lod.detail ? 14 : 8;
   const look = makeLook();
@@ -1764,6 +1801,9 @@ function buildTeeth(bp, B) {
   if (!td) return;
   const jd = hd.jaw;
   const depthF = pchip(jd.depth.map((d) => d[0]), jd.depth.map((d) => d[1]));
+  // Optional size profile along the jaw (u → length multiplier) and a forward-splayed rosette.
+  const sizeF = td.size ? pchip(td.size.map((p) => p[0]), td.size.map((p) => p[1])) : null;
+  const cone = !!td.conical;
   const look = makeLook();
   look.skin = 0;
   look.pattern = 0;
@@ -1791,27 +1831,32 @@ function buildTeeth(bp, B) {
         const a = head.arcAtU(u);
         bp.prof(a, pr);
         // Biggest teeth a third of the way along the tooth row, small at the front and back.
-        const len = td.length * (0.5 + 0.5 * Math.sin(Math.PI * Math.pow(f, 0.75))) * (row.upper ? 0.85 : 0.75);
+        const len = td.length * (sizeF ? sizeF(u) : 0.5 + 0.5 * Math.sin(Math.PI * Math.pow(f, 0.75))) * (row.upper ? 0.85 : 0.75);
+        const splay = td.rosette ? smoothstep(td.rosette - 0.05, td.rosette + 0.05, u) : 0;
         const jawW = jd.width * pr.w;
         if (row.upper) {
           base.copy(head.O).addScaledVector(D, u * head.len).addScaledVector(N, pr.b * 0.1);
           base.x += side * pr.w * 0.86;
-          dir.copy(negN).addScaledVector(D, td.peg ? 0.5 : -0.12).normalize();
+          dir.copy(negN).addScaledVector(D, td.peg ? 0.5 : cone ? 0.04 + 0.85 * splay : -0.12);
+          dir.x += side * 0.35 * splay;
+          dir.normalize();
         } else {
           const top = pr.b * 0.85;
           base.copy(head.O).addScaledVector(D, u * head.len).addScaledVector(N, -top - depthF(u) * 0.15);
           base.x += side * jawW * 0.78;
-          dir.copy(N).addScaledVector(D, td.peg ? 0.5 : -0.08).normalize();
+          dir.copy(N).addScaledVector(D, td.peg ? 0.5 : cone ? 0.04 + 0.7 * splay : -0.08);
+          dir.x += side * 0.3 * splay;
+          dir.normalize();
         }
         spike(B, {
           base,
           dir,
           wide: D,
           len: td.peg ? len * 0.8 : len,
-          rw: len * (td.peg ? 0.22 : 0.32),
-          rt: len * (td.peg ? 0.2 : 0.15),
+          rw: len * (td.peg ? 0.22 : cone ? 0.2 : 0.32),
+          rt: len * (td.peg ? 0.2 : cone ? 0.18 : td.thick ?? 0.15),
           bendDir: back,
-          bend: td.peg ? 0 : 0.22,
+          bend: td.peg ? 0 : cone ? 0.05 : 0.22,
           segs: 4,
           rings: 2,
           prof: (s) => 1 - s * 0.55,
@@ -2045,14 +2090,14 @@ function buildArm(bp, arm, lod, B) {
     const dir = hdir.clone().applyAxisAngle(sideAxis, fg.yaw * 0.9).addScaledVector(new V3(side, 0, 0), 0.12 + fg.yaw * side * 0.2).normalize();
     const base = _lerpV(arm.wrist, arm.handEnd, 0.7);
     const len = fg.len * d.hand * 0.75;
-    const rr = rh * 0.42;
+    const rr = rh * 0.42 * (fg.r ?? 1);
     spike(B, { base, dir, wide: palm, len, rw: rr, rt: rr * 0.85, segs, rings: 2, prof: (s) => 1 - 0.4 * s, look, inf });
     const cb = base.clone().addScaledVector(dir, len * 0.85);
     spike(B, {
       base: cb,
       dir,
       wide: palm,
-      len: d.claw * d.hand * 1.3 * fg.len,
+      len: (fg.claw ?? d.claw) * d.hand * 1.3 * fg.len,
       rw: rr * 0.8,
       rt: rr * 0.42,
       bendDir: palm.clone().negate(),
@@ -2166,77 +2211,6 @@ function buildFeatures(bp, lod, B) {
       }
     }
   }
-  if (f.armor === "gastonia") {
-    // Dorsal osteoderm field.
-    if (detail) {
-      const zA = bp.body.bones.neckZ - 0.05;
-      const zB = bp.body.bones.tailZ - 0.35;
-      const rowsTh = [0.0, 0.42, 0.85, 1.22];
-      for (let z = zA, k = 0; z > zB; z -= 0.24, k++) {
-        const a = aZ(z);
-        for (const th0 of rowsTh) {
-          for (const side of th0 === 0 ? [1] : [1, -1]) {
-            const th = side * (th0 + (k % 2) * 0.12);
-            const { P, N, T, inf } = bodyAnchor(bp, a, th);
-            const sz = 0.065 + 0.03 * Math.cos(th0);
-            spike(B, {
-              base: P.addScaledVector(N, -sz * 0.35),
-              dir: N,
-              wide: T,
-              len: sz * 0.95,
-              rw: sz * 1.1,
-              rt: sz * 0.85,
-              segs: 6,
-              rings: 2,
-              prof: (s) => Math.sqrt(Math.max(0, 1 - s * s)),
-              shade: (s, lk) => hornLook(lk, s, 0.3, 1.2),
-              look,
-              inf,
-            });
-          }
-        }
-      }
-    }
-    // Lateral blades along the flanks (biggest at the shoulder) and down the tail.
-    const flank = [];
-    for (let k = 0; k < 7; k++) flank.push({ z: lerp(1.45, -0.55, k / 6), len: lerp(0.42, 0.2, k / 6), th: Math.PI * 0.45 });
-    for (let k = 0; k < 6; k++) flank.push({ z: lerp(-1.05, -2.25, k / 5), len: lerp(0.24, 0.1, k / 5), th: Math.PI * 0.5 });
-    for (const sp of flank) {
-      const a = aZ(sp.z);
-      for (const side of [1, -1]) {
-        const { P, N, T, inf } = bodyAnchor(bp, a, side * sp.th);
-        const dir = N.clone().add(new V3(0, 0.15, -0.45)).normalize();
-        spike(B, {
-          base: P.addScaledVector(N, -0.03),
-          dir,
-          wide: T,
-          len: sp.len,
-          rw: Math.min(0.13, sp.len * 0.45),
-          rt: 0.035,
-          bendDir: back,
-          bend: 0.12,
-          segs: detail ? 7 : 5,
-          rings: detail ? 4 : 2,
-          shade: (s, lk) => hornLook(lk, s, 0.0, 0.45),
-          look,
-          inf,
-        });
-      }
-    }
-    // Shoulder spikes.
-    for (const side of [1, -1]) {
-      const { P, N, inf } = bodyAnchor(bp, aZ(1.3), side * 0.95);
-      const dir = new V3(side * 0.6, 0.62, -0.5).normalize();
-      spike(B, { base: P.addScaledVector(N, -0.04), dir, wide: up, len: 0.4, rw: 0.075, rt: 0.06, bendDir: back, bend: 0.1, segs: detail ? 8 : 5, rings: detail ? 4 : 3, shade: (s, lk) => hornLook(lk, s, 0.0, 0.4), look, inf });
-    }
-    // Squamosal hornlets at the back corners of the skull.
-    const ah = head.arcAtU(0.06);
-    for (const side of [1, -1]) {
-      const { P, N } = bodyAnchor(bp, ah, side * 1.0);
-      const dir = N.clone().add(new V3(0, 0, -0.6)).normalize();
-      spike(B, { base: P.addScaledVector(N, -0.015), dir, wide: up, len: 0.09, rw: 0.035, rt: 0.025, segs: 5, rings: 2, shade: (s, lk) => hornLook(lk, s, 0.0, 0.5), look, inf: headInfluence(bp) });
-    }
-  }
   if (f.nasalHorn) {
     // Ceratosaurus: a tall, blade-like horn on the nose.
     const a = head.arcAtU(0.74);
@@ -2291,6 +2265,39 @@ function buildFeatures(bp, lod, B) {
       });
     }
   }
+  if (f.bosses) {
+    // Tyrannosaur postorbital / lacrimal bosses: blunt, skin-covered knobs over and ahead of the eyes.
+    for (const bs of f.bosses) {
+      const a = head.arcAtU(bs.u);
+      const pr = bp.prof(a, {});
+      const th = bp.thetaForY(a, pr.t * bs.y);
+      const hgt = head.len * bs.h;
+      for (const side of [1, -1]) {
+        const { P, N } = bodyAnchor(bp, a, side * th);
+        const dir = N.clone().addScaledVector(head.N, 0.8).addScaledVector(head.D, -0.2).normalize();
+        spike(B, {
+          base: P.addScaledVector(N, -hgt * 0.35),
+          dir,
+          wide: head.D,
+          len: hgt,
+          rw: hgt * 1.1,
+          rt: hgt * 0.75,
+          segs: detail ? 7 : 5,
+          rings: 3,
+          prof: (s) => Math.pow(Math.max(0, 1 - s * s), 0.55),
+          shade: (s, lk) => {
+            lk.skin = 1;
+            lk.accent = 0.45;
+            lk.pattern = 0.15;
+            lk.detail = 0.9;
+            lk.rough = 0.75;
+          },
+          look,
+          inf: headInfluence(bp),
+        });
+      }
+    }
+  }
   if (f.scuteRow && detail) {
     // Ceratosaurus: one row of small osteoderms down the midline.
     for (let z = bp.body.bones.neckZ + 0.55; z > bp.st[0].z * 0.55; z -= 0.2) {
@@ -2307,6 +2314,100 @@ function buildFeatures(bp, lod, B) {
       const h = 0.1 + 0.2 * Math.exp(-sq((fr - 0.55) / 0.3));
       const { P, N, T, inf } = bodyAnchor(bp, aZ(z), 0);
       spike(B, { base: P.addScaledVector(N, -0.02), dir: N, wide: T, len: h, rw: h * 0.45, rt: 0.025, bendDir: back, bend: 0.25, segs: 5, rings: detail ? 3 : 2, shade: (s, lk) => hornLook(lk, s, 0.3, 1.3), look, inf });
+    }
+  }
+}
+
+/**
+ * Spinosaurus sail: one continuous membrane over the neural spines, lofted
+ * column by column along the back. Each column is a lens-shaped section that
+ * thins toward a rounded rim; the spines show as low ribs (thicker membrane)
+ * and a faint scallop of the rim between them. The lower part rides the spine
+ * chain, the upper part the sail bones (see makeBlueprint). Colours come from
+ * the skin: cross-bands run up it as bars, and an accent band crosses the top.
+ */
+function buildSail(bp, lod, B) {
+  const sl = bp.sail;
+  const sd = sl.def;
+  const path = bp.path;
+  const detail = lod.detail;
+  const nCol = Math.round(sd.spines * (detail ? 4 : 1.5));
+  const R = detail ? 7 : 3;
+  const look = makeLook();
+  const inf = new Influence();
+  const body = new Influence();
+  const P = new V3();
+  const N = new V3();
+  const T = new V3();
+  const D = new V3();
+  const S = new V3(1, 0, 0);
+  const Q = new V3();
+  const up = new V3(0, 1, 0);
+  const span = sl.zFront - sl.zBack;
+  const ring = 2 * (R + 1) + 1;
+  const first = B.count;
+  const sb = sl.bones;
+  for (let i = 0; i < nCol; i++) {
+    const fz = i / (nCol - 1);
+    const z = lerp(sl.zFront, sl.zBack, fz);
+    const a = path.arcAtZ(z);
+    const h = Math.max(0, sl.hAt(z));
+    bp.surface(a, 0, P, N);
+    path.tangent(a, T);
+    // Rooted inside the back, rising nearly vertically and raked back a little.
+    D.copy(up).multiplyScalar(0.88).addScaledVector(N, 0.12).normalize();
+    D.multiplyScalar(Math.cos(sd.rake ?? 0)).addScaledVector(T, -Math.sin(sd.rake ?? 0)).normalize();
+    // Spines: ribs where the membrane thickens and the rim lifts slightly.
+    const ph = ((sl.zFront - z) / span) * sd.spines;
+    const rib = detail ? Math.exp(-sq((ph - Math.round(ph)) / 0.16)) : 0;
+    const hh = h * (1 - 0.018 * (1 - rib) * (detail ? 1 : 0));
+    const ends = smoothstep(0, 0.3, h);
+    // Sail bones: blend between the nearest two by z.
+    let b0 = sb[0];
+    let b1 = sb[0];
+    let bt = 0;
+    if (z >= sb[sb.length - 1].z) b0 = b1 = sb[sb.length - 1];
+    else if (z > sb[0].z) {
+      for (let k = 0; k < sb.length - 1; k++) {
+        if (z >= sb[k].z && z <= sb[k + 1].z) {
+          b0 = sb[k];
+          b1 = sb[k + 1];
+          bt = smoothstep(0, 1, (z - sb[k].z) / (sb[k + 1].z - sb[k].z));
+          break;
+        }
+      }
+    }
+    chainInfluence(a, bp.centers, body.reset());
+    for (let j = 0; j < ring; j++) {
+      // j: left side bottom → top, the rim, right side top → bottom.
+      const tip = j === R + 1;
+      const k = j <= R ? j : 2 * R + 2 - j;
+      const side = j <= R ? 1 : -1;
+      const s = tip ? 1 : lerp(-Math.max(0.06, 0.12 * hh) / Math.max(hh, 0.01), 1, Math.pow(k / R, 0.85));
+      const sc = clamp(s, 0, 1);
+      const half = tip ? 0 : sd.thick * ends * (1 - 0.7 * Math.pow(sc, 0.7)) * (1 + 0.45 * rib) * (1 + 0.6 * (1 - smoothstep(0, 0.18, sc)));
+      const lift = tip ? hh + sd.thick * 0.25 * ends : hh * s;
+      Q.copy(P).addScaledVector(D, lift).addScaledVector(S, side * half);
+      // Weights: the root rides the spine chain, the upper sail its own bones.
+      const ws = smoothstep(0.05, 0.85, sc) * 0.85;
+      inf.copy(body).scale(1 - ws);
+      inf.add(b0.bone, ws * (1 - bt)).add(b1.bone, ws * bt);
+      // Display pattern: bars from the skin bands, a warm accent band across the upper sail.
+      look.skin = 1;
+      look.pattern = 1;
+      look.detail = 0.5;
+      look.rough = 0.74;
+      look.glint = 0;
+      look.accent = smoothstep(0.52, 0.76, sc) * (1 - 0.9 * smoothstep(0.84, 0.97, sc)) * (1 - 0.35 * rib) * 0.72 * ends;
+      B.vert(Q.x, Q.y, Q.z, look, inf);
+    }
+  }
+  for (let i = 0; i < nCol - 1; i++) {
+    const r0 = first + i * ring;
+    const r1 = r0 + ring;
+    for (let j = 0; j < ring - 1; j++) {
+      B.tri(r0 + j, r1 + j, r1 + j + 1);
+      B.tri(r0 + j, r1 + j + 1, r0 + j + 1);
     }
   }
 }
@@ -2444,6 +2545,7 @@ function getGeometry(sp, lodIndex) {
   for (const leg of bp.legs) buildLeg(bp, leg, lod, B);
   for (const arm of bp.arms) buildArm(bp, arm, lod, B);
   buildFeatures(bp, lod, B);
+  if (bp.sail) buildSail(bp, lod, B);
   const skin = B.toGeometry(true);
   let feathers = null;
   if (bp.body.features?.feathers) {
@@ -2661,6 +2763,7 @@ export class DinoModel {
     this._lastAction = null;
     this._wet = 0;
     this._scale = 1;
+    this._bodyK = 1; // juvenile proportions: frame-above-the-hips scale relative to the legs (body.juvenile)
 
     this._oRot = 3;
     this._oRibs = 3 + nb * 3;
@@ -2678,6 +2781,24 @@ export class DinoModel {
   setScale(s) {
     this._scale = Math.max(0.01, s);
     this.object.scale.setScalar(this._scale);
+    // Youth: 1 hatchling → 0 adult (exactly 1 − growth, undoing growthScale's ease-out).
+    const j = this.species.juvenileScale ?? 0.3;
+    const k = Math.sqrt(clamp((1 - this._scale) / Math.max(1e-3, 1 - j), 0, 1));
+    // Juvenile proportions (body.juvenile): everything above the hips shrinks
+    // toward the hip joint while the legs keep their length, and the head
+    // grows longer, shallower and narrower. Fades out linearly with growth.
+    const J = this.species.body.juvenile;
+    if (J) {
+      const legs = lerp(1, J.legs ?? 1, k);
+      this._bodyK = 1 / legs;
+      this._bones[this._iHips].scale.setScalar(this._bodyK);
+      for (const leg of this._bp.legs) this._bones[leg.bones[0]].scale.setScalar(legs);
+      const [hl, hd, hw] = J.head ?? [1, 1, 1];
+      const hs = this._headScale;
+      this._bones[this._iHead].scale.set(hs * lerp(1, hw, k), hs * lerp(1, hd, k), hs * lerp(1, hl, k));
+    }
+    // The sail grows faster than the body: hatchlings carry a low crest of it.
+    if (this._bp.sail) for (const b of this._bp.sail.bones) this._bones[b.bone].scale.set(1, lerp(1, 0.45, k), 1);
     // Switch to the light mesh once the animal is small on screen.
     const d = (14 + 5 * this.species.length) * Math.pow(this._scale, 0.7);
     if (this._lod.levels[1]) this._lod.levels[1].distance = d;
@@ -2913,6 +3034,12 @@ export class DinoModel {
       P[b] += (k < 3 ? -lean * 0.3 + rear * 0.12 : 0) + 0.015 * amp * Math.cos(TAU * 2 * (ph - mid) - 0.5 * k);
     }
 
+    /* Sail: a little lag behind the stride's roll, and a slow idle drift. */
+    if (bp.sail) {
+      const sway = 0.035 * amp * Math.sin(TAU * ph - 1.3) + 0.015 * idle * Math.sin(t * 0.7 + sd);
+      for (const b of bp.sail.bones) P[R + b.bone * 3 + 2] += sway;
+    }
+
     /* Breathing; predators pant at speed. */
     P[this._oRibs] = 1 + (0.018 + 0.02 * runRaw) * Math.sin(this._breath);
     if (this.species.diet === "carnivore") P[R + this._iJaw * 3] += 0.08 * this._run * (0.5 + 0.5 * Math.sin(this._breath));
@@ -2976,8 +3103,11 @@ export class DinoModel {
     const nT = this._iTail.length;
     P[1] = bp.H * 0.92;
     P[R + this._iHips * 3] = -0.08;
-    for (let k = 0; k < nN; k++) P[R + this._iNeck[k] * 3] -= 0.12;
-    P[R + this._iHead * 3] += 0.12 * nN * 0.6 + 0.05;
+    // Necks rise to keep the head clear; a semi-aquatic animal (body.swimNeck) carries it low, snout at the surface.
+    const sn = bp.body.swimNeck ?? -0.12;
+    for (let k = 0; k < nN; k++) P[R + this._iNeck[k] * 3] += sn;
+    P[R + this._iHead * 3] += -sn * nN * 0.6 + 0.05;
+    if (bp.sail) for (const b of bp.sail.bones) P[R + b.bone * 3 + 2] += 0.05 * Math.sin(TAU * sw - 0.9);
     const power = 1 + (this.species.swim || 0);
     for (let k = 0; k < nT; k++) {
       const f = (k + 1) / nT;
@@ -3044,6 +3174,7 @@ export class DinoModel {
       P[iHead + 1] += tn * 0.08;
       tail(1, -tn * 0.06);
       P[iH + 2] -= tn * 0.12 * this._run;
+      if (bp.sail) for (const b of bp.sail.bones) P[R + b.bone * 3 + 2] -= tn * 0.06;
     }
 
     /* Look. */
@@ -3064,6 +3195,9 @@ export class DinoModel {
       const d = bp.drink;
       const wf = Math.min(1, wE + wD);
       P[1] -= wE * e.drop + wD * d.drop;
+      // A leggy juvenile's shorter frame bends its legs further to reach the ground.
+      const jx = 1 - this._bodyK;
+      if (jx > 0) P[1] -= jx * (wE * (H * 0.94 - e.drop) + wD * (H * 1.015 - d.drop));
       P[iH] += wE * e.hips + wD * d.hips;
       P[iS] += wE * e.spine + wD * d.spine;
       P[iC] += wE * e.chest + wD * d.chest;
@@ -3087,12 +3221,15 @@ export class DinoModel {
     if (wC > 0.001) {
       const tc = T[A_CALL];
       const env = wC * smoothstep(0, 0.18, tc) * (1 - smoothstep(0.8, 1, tc));
-      neck(0, (-0.5 * env) / Math.max(1, nN * 0.75));
-      P[iHead] -= env * 0.22;
-      P[iJaw] += env * (0.55 + 0.05 * Math.sin(tc * 60));
-      P[iC] -= env * 0.06;
-      P[iS] -= env * 0.03;
-      P[iH] -= env * 0.04;
+      const cl = this.species.call || {};
+      const lift = cl.lift ?? 1;
+      neck(0, (-0.5 * env * lift) / Math.max(1, nN * 0.75));
+      P[iHead] -= env * 0.22 * lift;
+      P[iJaw] += env * (0.55 * (cl.open ?? 1) + 0.05 * Math.sin(tc * 60));
+      if (cl.swell) P[this._oRibs] += env * cl.swell * (0.7 + 0.3 * Math.sin(tc * 40)); // throat and chest swell with a closed-mouth boom
+      P[iC] -= env * 0.06 * lift;
+      P[iS] -= env * 0.03 * lift;
+      P[iH] -= env * 0.04 * lift;
       tail(0, env * 0.03);
       arms(-env * 0.3, 0);
     }
@@ -3178,7 +3315,7 @@ export class DinoModel {
     const nN = this._iNeck.length;
     const nT = this._iTail.length;
     const iH = R + this._iHips * 3;
-    P[1] = rs.hipsY + 0.006 * H * Math.sin(this._breath);
+    P[1] = rs.hipsY * this._bodyK + 0.006 * H * Math.sin(this._breath);
     P[iH] = rs.pitch;
     P[iH + 2] = 0.04 * this._restCurl;
     const long = nN > 5;
@@ -3234,8 +3371,9 @@ export class DinoModel {
     const fall = smoothstep(0.05, 0.95, d);
     const settle = d > 0.95 ? 0.05 * Math.exp(-(d - 0.95) * 6) * Math.sin((d - 0.95) * 18) : 0;
     const side = this._deadSide;
-    P[0] = -side * (H - bp.dead.hipsY) * 0.45 * fall;
-    P[1] = lerp(H, bp.dead.hipsY, fall);
+    const deadY = bp.dead.hipsY * this._bodyK;
+    P[0] = -side * (H - deadY) * 0.45 * fall;
+    P[1] = lerp(H, deadY, fall);
     P[iH] = 0.05 * fall;
     P[iH + 2] = side * (fall * fall * 1.48 + settle);
     // The classic death pose: neck thrown back, tail arched, jaws agape.
@@ -3251,6 +3389,8 @@ export class DinoModel {
       P[R + arm.bones[0] * 3] += 0.5 * fall;
       P[R + arm.bones[1] * 3] += 0.3 * fall;
     }
+    // A sail can't lie flat with the body on its side: it folds over onto the ground.
+    if (bp.sail) for (const b of bp.sail.bones) P[R + b.bone * 3 + 2] += side * 0.45 * fall;
     const limp = smoothstep(0.1, 0.8, d);
     for (let i = 0; i < bp.legs.length; i++) {
       const leg = bp.legs[i];
@@ -3292,7 +3432,7 @@ export class DinoModel {
       } else {
         wq[i].multiplyQuaternions(wq[p], b.quaternion);
         wp[i].copy(b.position).multiplyScalar(ws[p]).applyQuaternion(wq[p]).add(wp[p]);
-        ws[i] = ws[p] * b.scale.x;
+        ws[i] = ws[p] * b.scale.z; // along the bone: only a juvenile head or a sail bone scales unevenly
       }
     }
     /* Legs: two-bone IK to the ankle, then the metatarsus onto the ball and the toes along the ground. */
@@ -3303,7 +3443,7 @@ export class DinoModel {
       const [l1, l2, l3] = leg.lengths;
       const p = leg.parentIndex;
       const pq = wq[p];
-      _hip.copy(leg.hipLocal).applyQuaternion(pq).add(wp[p]);
+      _hip.copy(leg.hipLocal).multiplyScalar(ws[p]).applyQuaternion(pq).add(wp[p]);
       _ball.set(P[o], P[o + 1], P[o + 2]);
       _meta.set(P[o + 3], P[o + 4], P[o + 5]);
       const limp = P[o + 14];

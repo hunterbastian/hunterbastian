@@ -233,9 +233,9 @@ function saveGame() {
 function loadSave() {
   const s = store.get(GAME.saveKey);
   if (!s || s.v !== 1 || !s.speciesId) return null;
-  try {
-    getSpecies(s.speciesId);
-  } catch {
+  // A life saved as a species that has since left the island: let it go.
+  if (!PLAYABLE.includes(s.speciesId)) {
+    store.remove(GAME.saveKey);
     return null;
   }
   return s;
@@ -584,6 +584,8 @@ async function boot() {
       });
     } catch (err) {
       console.warn("[underfern] unknown ?species", autostart, err);
+      // Nothing to hatch (an old link to a species that has left the island): the title instead.
+      if (game.state === "menu") menu.show({ save: menuSaveSummary() });
     }
   }
 }

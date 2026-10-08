@@ -17,6 +17,7 @@ import { Wind } from "../src/world/wind.js";
 import { World } from "../src/world/world.js";
 import { isRotated, appSize, toApp, onAppResize } from "../src/core/screen.js";
 import { Input } from "../src/player/input.js";
+import { speciesSilhouette } from "../src/ui/menu.js";
 
 /* --- Tiny harness --------------------------------------------------------- */
 
@@ -375,13 +376,13 @@ test("terrain: findSpawnPoint honours biomes / height / slope / ring and is dete
 const DIETS = ["carnivore", "herbivore"];
 const ATTACKS = ["bite", "tail", "kick"];
 const SOCIAL = ["solo", "pair", "pack", "herd"];
-const CALLS = ["roar", "bellow", "honk", "chirp", "shriek", "hoot"];
+const CALLS = ["roar", "bellow", "honk", "chirp", "shriek", "hoot", "rumble", "rattle"];
 const posNum = (v) => typeof v === "number" && Number.isFinite(v) && v > 0;
 const str = (v) => typeof v === "string" && v.trim().length > 0;
 
 test("species: every SpeciesDef carries the full contract with sane values", () => {
   const ids = Object.keys(SPECIES);
-  assert(ids.length >= 9, `expected ≥ 9 species, got ${ids.length}`);
+  assert(ids.length >= 10, `expected ≥ 10 species, got ${ids.length}`);
   for (const id of ids) {
     const s = SPECIES[id];
     const at = `[${id}]`;
@@ -415,20 +416,32 @@ test("species: every SpeciesDef carries the full contract with sane values", () 
     assert(posNum(s.call.pitch) && posNum(s.call.duration), `${at} call pitch / duration`);
     assert(s.colors && typeof s.colors === "object", `${at} colors`);
     assert(s.body && typeof s.body === "object", `${at} body`);
+    // Optional knobs, when present.
+    if (s.pierce != null) assert.range(s.pierce, 0, 1, `${at} pierce`);
+    if (s.attackStamina != null) assert(posNum(s.attackStamina), `${at} attackStamina`);
+    if (s.juvenileSpeed != null) assert.range(s.juvenileSpeed, 0.5, 1.5, `${at} juvenileSpeed`);
+    if (s.smell != null) assert.range(s.smell, 0.25, 3, `${at} smell`);
+    if (s.swimDepth != null) assert.range(s.swimDepth, 0.3, 1.3, `${at} swimDepth`);
+    if (s.waterAffinity != null) assert.range(s.waterAffinity, 0, 1, `${at} waterAffinity`);
+    if (s.pairChance != null) assert.range(s.pairChance, 0, 1, `${at} pairChance`);
+    if (s.maxAlive != null) assert(Number.isInteger(s.maxAlive) && s.maxAlive >= 1, `${at} maxAlive ${s.maxAlive}`);
     assert.equal(getSpecies(id), s, `${at} getSpecies:`);
   }
 });
 
 test("species: PLAYABLE ids exist (brontosaurus included), NPC-only stay unplayable", () => {
-  assert(PLAYABLE.length >= 7, `expected ≥ 7 playable species, got ${PLAYABLE.length}`);
+  assert(PLAYABLE.length >= 8, `expected ≥ 8 playable species, got ${PLAYABLE.length}`);
   assert.equal(new Set(PLAYABLE).size, PLAYABLE.length, "no duplicates:");
-  for (const id of ["dryosaurus", "utahraptor", "gastonia", "ceratosaurus", "stegosaurus", "allosaurus", "brontosaurus"]) {
+  for (const id of ["dryosaurus", "utahraptor", "ceratosaurus", "stegosaurus", "allosaurus", "brontosaurus", "tyrannosaurus", "spinosaurus"]) {
     assert(PLAYABLE.includes(id), `${id} should be playable`);
   }
   for (const id of PLAYABLE) {
     assert(SPECIES[id], `PLAYABLE id ${id} missing from SPECIES`);
     assert.equal(SPECIES[id].playable, true, `${id}.playable:`);
   }
+  // …and the other way round: a def marked playable must be on the menu.
+  for (const s of Object.values(SPECIES)) if (s.playable) assert(PLAYABLE.includes(s.id), `${s.id} is playable but missing from PLAYABLE`);
+  assert(!SPECIES.gastonia && !PLAYABLE.includes("gastonia"), "Gastonia has left the island");
   for (const id of ["camptosaurus", "diplodocus"]) {
     assert(SPECIES[id], `NPC species ${id} missing`);
     assert.equal(SPECIES[id].playable, false, `${id}.playable:`);
@@ -436,6 +449,52 @@ test("species: PLAYABLE ids exist (brontosaurus included), NPC-only stay unplaya
   }
   assert(PLAYABLE.some((id) => SPECIES[id].diet === "carnivore") && PLAYABLE.some((id) => SPECIES[id].diet === "herbivore"), "both diets playable");
   assert.throws(() => getSpecies("velociraptor"), "getSpecies(unknown)");
+});
+
+test("species: the apex newcomers — Tyrannosaurus and Spinosaurus — are rare, solitary and true to type", () => {
+  const rex = SPECIES.tyrannosaurus;
+  const spino = SPECIES.spinosaurus;
+  const allo = SPECIES.allosaurus;
+  for (const s of [rex, spino]) {
+    const at = `[${s.id}]`;
+    assert.equal(s.diet, "carnivore", `${at} diet:`);
+    assert.equal(s.social, "solo", `${at} social:`);
+    assert(/Cretaceous/.test(s.era), `${at} era should name its age: ${s.era}`);
+    assert(s.spawnWeight > 0 && s.spawnWeight < allo.spawnWeight, `${at} rarer than Allosaurus (${s.spawnWeight})`);
+    assert(s.maxAlive >= 1 && s.maxAlive <= 2, `${at} maxAlive ${s.maxAlive}`);
+    assert(s.mass > allo.mass * 1.8, `${at} big enough that a grown Allosaurus gives way`);
+    assert(s.length > allo.length, `${at} longer than Allosaurus`);
+    assert(s.body.plan === "biped" && s.body.arms && s.body.hind, `${at} a biped body with arms`);
+  }
+  assert.equal(rex.name, "Tyrannosaurus rex", "T. rex name:");
+  assert.equal(spino.name, "Spinosaurus", "Spinosaurus name:");
+  // T. rex: the hardest bite, armour-crushing, the keenest nose; a slow, tiring sprinter.
+  for (const s of Object.values(SPECIES)) if (s !== rex) assert(rex.bite > s.bite, `T. rex should out-bite ${s.id}`);
+  assert(rex.pierce > 0 && rex.smell > 1, "T. rex pierces armour and smells far");
+  assert(rex.speed.sprint < allo.speed.sprint && rex.turnRate < allo.turnRate, "T. rex is slower and clumsier than Allosaurus");
+  assert(rex.juvenileSpeed > 1, "young tyrannosaurs are the fast ones");
+  assert.equal(rex.call.kind, "rumble", "T. rex call:");
+  // Spinosaurus: the longest hunter, the best swimmer, a water's-edge ambusher.
+  for (const s of Object.values(SPECIES)) {
+    if (s !== spino) assert(spino.swim >= s.swim && spino.speed.swim >= s.speed.swim, `Spinosaurus should out-swim ${s.id}`);
+    if (s !== spino && s.diet === "carnivore") assert(spino.length > s.length, `Spinosaurus should be longer than ${s.id}`);
+  }
+  assert(spino.waterAffinity > 0.5 && spino.biomes.includes("swamp") && spino.biomes.includes("beach"), "Spinosaurus keeps to the water");
+  assert(spino.height < allo.height, "Spinosaurus stands lower at the hip than Allosaurus");
+  assert(spino.body.features?.sail, "Spinosaurus carries its sail");
+  assert.equal(spino.call.kind, "rattle", "Spinosaurus call:");
+});
+
+test("menu: every species has its own field-guide plate (none borrows another's drawing)", () => {
+  // A species without a PLANS entry falls back to another species' drawing, so
+  // the plates (without their length-dependent scale bars) must all differ.
+  const seen = new Map();
+  for (const def of Object.values(SPECIES)) {
+    const svg = speciesSilhouette(def, { scale: false });
+    assert(/^<svg class="sil"/.test(svg) && svg.includes("sil-body"), `[${def.id}] silhouette markup`);
+    assert(!seen.has(svg), `[${def.id}] draws the same plate as ${seen.get(svg)} — add a PLANS entry in menu.js`);
+    seen.set(svg, def.id);
+  }
 });
 
 test("species: growthScale is monotonic juvenileScale → 1; growthStage boundaries", () => {
@@ -607,21 +666,22 @@ test("creature: starvation damages ~1% maxHealth/s; growth advances when fed", (
   }
 });
 
-test("creature: armor reduces attacks fully, ignores starvation", () => {
+test("creature: armor reduces attacks (less what a crushing bite pierces), ignores starvation", () => {
   const w = getWorld();
   const eco = w.ecosystem;
   const p = landSpot(5);
-  const g = eco.spawn("gastonia", p.x, p.z, { growth: 1 });
+  const g = eco.spawn("stegosaurus", p.x, p.z, { growth: 1 });
   try {
     const armor = g.species.armor;
-    assert(armor >= 0.5, "gastonia is armoured");
+    assert(armor >= 0.25, "stegosaurus is armoured");
     const events = capture("damage", () => {
       assert.near(g.takeDamage(100, null, "bite"), 100 * (1 - armor), 1e-6, "bite after armor:");
       assert.near(g.takeDamage(100, null, "tail"), 100 * (1 - armor), 1e-6, "tail after armor:");
       assert.near(g.takeDamage(20, null, "starve"), 20, 1e-6, "starve ignores armor:");
+      assert.near(g.takeDamage(100, null, "bite", 0.5), 100 * (1 - armor * 0.5), 1e-6, "a bite that pierces half the armour:");
     });
-    assert.equal(events.length, 3, "one damage event per hit:");
-    assert.near(g.health, g.maxHealth - 200 * (1 - armor) - 20, 1e-6, "health bookkeeping:");
+    assert.equal(events.length, 4, "one damage event per hit:");
+    assert.near(g.health, g.maxHealth - 200 * (1 - armor) - 20 - 100 * (1 - armor * 0.5), 1e-6, "health bookkeeping:");
     assert.equal(g.takeDamage(-5, null, "bite"), 0, "negative damage is ignored:");
     const hp = g.health;
     g.heal(1e9);
@@ -666,6 +726,70 @@ test("creature + ecosystem: death credits the killer and leaves a carcass that i
   } finally {
     eco.remove(killer);
     eco.npcCap = cap;
+  }
+});
+
+test("ecosystem: rare apex species never exceed maxAlive in the wild (a player of the kind doesn't count)", () => {
+  const w = getWorld();
+  const eco = w.ecosystem;
+  const cap = eco.npcCap;
+  eco.npcCap = 200; // room for predators, whatever the test world holds
+  const p = landSpot(9);
+  const spawned = [];
+  const wild = (id) => eco.creatures.filter((c) => c.species.id === id && !c.isPlayer);
+  const picks = (biome, id, n = 300) => {
+    let k = 0;
+    for (let i = 0; i < n; i++) if (eco._pickSpecies(biome, Infinity, "carnivore")?.id === id) k++;
+    return k;
+  };
+  try {
+    for (const id of ["spinosaurus", "tyrannosaurus"]) for (const c of wild(id)) eco.remove(c);
+    assert(picks("swamp", "spinosaurus") > 0, "a Spinosaurus can turn up when none is about");
+    assert(picks("forest", "tyrannosaurus") > 0, "a T. rex can turn up when none is about");
+    const me = eco.spawn("spinosaurus", p.x, p.z, { growth: 0, isPlayer: true });
+    spawned.push(me);
+    assert(picks("swamp", "spinosaurus") > 0, "the player's own kind doesn't use up the wild one");
+    spawned.push(eco.spawn("spinosaurus", p.x + 40, p.z, { growth: 1 }));
+    assert.equal(picks("swamp", "spinosaurus"), 0, "with one Spinosaurus about, no second:");
+    spawned.push(eco.spawn("tyrannosaurus", p.x - 40, p.z, { growth: 1 }));
+    assert(picks("forest", "tyrannosaurus") > 0, "T. rex allows a second");
+    spawned.push(eco.spawn("tyrannosaurus", p.x - 40, p.z + 40, { growth: 1 }));
+    assert.equal(picks("forest", "tyrannosaurus"), 0, "with two T. rex about, no third:");
+  } finally {
+    eco.clearPlayer();
+    for (const c of spawned) eco.remove(c);
+    eco.npcCap = cap;
+  }
+});
+
+test("ai: a Spinosaurus backs away from a big herbivore that turns on it; a T. rex fights back", () => {
+  const w = getWorld();
+  const eco = w.ecosystem;
+  const p = landSpot(11);
+  const made = [];
+  const at = (id, dx, dz, still = false) => {
+    const c = eco.spawn(id, p.x + dx, p.z + dz, { growth: 1 });
+    if (still) c.brain = null; // a sparring partner that stays put
+    made.push(c);
+    return c;
+  };
+  // One blow from `foe`, then a moment for `c` to think it over.
+  const struck = (c, foe) => {
+    c.takeDamage(30, foe, "tail");
+    for (let i = 0; i < 4; i++) c.brain.update(0.05);
+    return { state: c.brain.state, target: c.brain.target };
+  };
+  try {
+    const bronto = at("brontosaurus", 0, 14, true);
+    const campto = at("camptosaurus", -40, 0, true);
+    let r = struck(at("spinosaurus", 0, 0), bronto);
+    assert.equal(r.state, "flee", "Spinosaurus struck by a Brontosaurus:");
+    r = struck(at("spinosaurus", -40, 10), campto);
+    assert(r.state === "hunt" && r.target === campto, `Spinosaurus should turn on a Camptosaurus that strikes it, got ${r.state}`);
+    r = struck(at("tyrannosaurus", 30, 0), bronto);
+    assert(r.state === "hunt" && r.target === bronto, `T. rex should fight back against a Brontosaurus, got ${r.state}`);
+  } finally {
+    for (const c of made) eco.remove(c);
   }
 });
 

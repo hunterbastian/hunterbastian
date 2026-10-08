@@ -104,9 +104,9 @@ underfern/
 ## Game design (what we're building)
 
 **Loop.** Title screen with a slow cinematic flight over the island (live world
-behind the menu) → pick one of six playable species → spawn as a **juvenile** in a
+behind the menu) → pick one of eight playable species → spawn as a **juvenile** in a
 safe-ish spot → survive. Keep `food` and `water` up, avoid or fight predators,
-**grow** (≈20–35 real minutes to adulthood when fed and watered). Getting bigger
+**grow** (≈20–50 real minutes to adulthood when fed and watered). Getting bigger
 makes you stronger and lets you take bigger prey (carnivores) or shrug off
 predators (herbivores). Death leaves your carcass in the world and shows a summary
 (time survived, growth reached, kills, cause); respawn as a new juvenile. Progress
@@ -132,18 +132,21 @@ autosaves to `localStorage` so "Continue" resumes a living character.
 - **Drinking**: hold to drink with your head at **fresh** water (lakes/rivers);
   ocean water is salty and doesn't help. +10% water/s.
 - **Combat**: bite (or tail swipe / kick, per species `attack`) has a cooldown and
-  costs 8 stamina. Damage = `bite · lerp(0.12, 1, growth)`, reduced by the target's
-  `armor`, plus bleeding = `bleed · lerp(0.12, 1, growth)`. Front cone ~70° for
-  bite/kick; rear/side arc for tail attacks.
+  costs 8 stamina (`attackStamina`). Damage = `bite · lerp(0.12, 1, growth)`, reduced
+  by the target's `armor` (less the attacker's `pierce` share: T. rex crushes through
+  half), plus bleeding = `bleed · lerp(0.12, 1, growth)`. A water hunter
+  (`waterAffinity`) hits swimming or wading prey harder (×1 + 0.3·affinity), and good
+  swimmers can still lunge from the water. Front cone ~70° for bite/kick; rear/side
+  arc for tail attacks.
 - **Sniff** (player ability): reveals nearby food (diet-appropriate), the nearest
-  fresh water, and creatures within ~120 m as on-screen markers for a few seconds;
-  cooldown ~12 s.
+  fresh water, and creatures within ~120 m (× the species' `smell`) as on-screen
+  markers for a few seconds; cooldown ~12 s.
 - **Call**: species-specific vocalisation. NPCs of the same species may call back
   from the distance; herbivores near a carnivore's call get nervous.
 - **Crouch** = slower and harder for AI to notice. **Rest** = lie down to regen
   faster (vulnerable).
 - **Swimming**: water deeper than ~0.8× hip height → swim. Good swimmers
-  (Ceratosaurus) are fast in water.
+  (Ceratosaurus, Spinosaurus) are fast in water.
 - **Day/night**: a full day is `TIME.dayLengthSec` (16 min). Nights are dark but
   moonlit; carnivores roam more at night, herbivores rest more.
 
@@ -153,15 +156,24 @@ autosaves to `localStorage` so "Continue" resumes a living character.
 | --- | --- | --- | --- | --- |
 | `dryosaurus` | Dryosaurus | herbivore | 3.5 m / 90 kg | tiny, very fast, fragile; herds |
 | `utahraptor` | Utahraptor | carnivore | 6 m / 500 kg | agile pack hunter, bleed bites |
-| `gastonia` | Gastonia | herbivore | 5 m / 1.5 t | armoured tank (armor 0.55), spiky counter |
 | `ceratosaurus` | Ceratosaurus | carnivore | 7 m / 900 kg | ambusher, excellent swimmer |
 | `stegosaurus` | Stegosaurus | herbivore | 9 m / 4.5 t | slow, tail-spike swipes cause heavy bleed |
-| `allosaurus` | Allosaurus | carnivore | 9.5 m / 2.3 t | apex predator |
+| `allosaurus` | Allosaurus | carnivore | 9.5 m / 2.3 t | Jurassic apex predator |
+| `brontosaurus` | Brontosaurus | herbivore | 22 m / 15 t | hatches tiny, grows into the biggest thing on the island |
+| `tyrannosaurus` | Tyrannosaurus rex | carnivore | 12 m / 8 t | hardest bite (pierces armour), best nose; slow, tires fast; slowest to grow |
+| `spinosaurus` | Spinosaurus | carnivore | 14 m / 7 t | sail-backed water's-edge ambusher; best swimmer, slow on land |
 
 NPC-only: `camptosaurus` (common herding prey, 6 m / 700 kg) and `diplodocus`
-(gentle 26 m giant, rare, tail whip when threatened).
-(A Utah touch: Allosaurus is Utah's state fossil; Utahraptor and Gastonia come
-from Utah's Cedar Mountain Formation; the rest roamed the Morrison Formation.)
+(gentle 26 m giant, rare, tail whip when threatened). The two apex newcomers also
+spawn wild: rare (`spawnWeight` 0.07 / 0.12), solitary, capped by `maxAlive` (T. rex 2,
+occasionally a pair; Spinosaurus 1, near fresh water and the shore).
+
+The island is out of time: the Morrison Formation animals (Allosaurus,
+Stegosaurus, Dryosaurus, Ceratosaurus, Camptosaurus, the sauropods; Late
+Jurassic, ~150 Ma) share it with Utahraptor (Cedar Mountain Formation, Utah,
+Early Cretaceous), Spinosaurus (Kem Kem / Bahariya, North Africa, 99–93 Ma) and
+Tyrannosaurus rex (Hell Creek Formation, 68–66 Ma). Allosaurus is Utah's state
+fossil.
 
 ---
 
@@ -321,7 +333,7 @@ export class Wind {
 
 ```js
 export const SPECIES;            // { [id]: SpeciesDef }
-export const PLAYABLE;           // ["dryosaurus","utahraptor","gastonia","ceratosaurus","stegosaurus","allosaurus"]
+export const PLAYABLE;           // ["dryosaurus","utahraptor","ceratosaurus","stegosaurus","allosaurus","brontosaurus","tyrannosaurus","spinosaurus"]
 export function getSpecies(id)   // → SpeciesDef (throws on unknown id)
 export function growthScale(species, growth) // → juvenileScale..1 (eased)
 export function growthStage(growth)          // → "juvenile" | "subadult" | "adult"
@@ -344,10 +356,30 @@ export function growthStage(growth)          // → "juvenile" | "subadult" | "a
   social: "solo" | "pair" | "pack" | "herd", groupSize: [min, max],
   aggression /* 0..1 */, perception /* m */,
   spawnWeight, biomes: [..preferred],
-  call: { kind: "roar" | "bellow" | "honk" | "chirp" | "shriek" | "hoot", pitch /* Hz */, duration /* s */ },
+  call: { kind: "roar" | "bellow" | "honk" | "chirp" | "shriek" | "hoot" | "rumble" | "rattle",
+          pitch /* Hz */, duration /* s, pose ≤ 3.5 */, open?, lift?, swell? /* call-pose shaping, model-only */ },
   colors: { ... }, body: { ... }         // model-only, free-form (DINO-ART decides)
+
+  // Optional knobs (default):
+  pierce /* 0..1 share of the victim's armour an attack ignores (0) */,
+  attackStamina /* stamina per attack (8) */,
+  juvenileSpeed /* hatchling speed × (0.85), blends to 1 with growth */,
+  smell /* scent-range multiplier for AI smell, carcass finding and the player's sniff (1) */,
+  swimDepth /* hip depth while floating, in hip heights, 0.3..1.3 (0.6 quadrupeds / 0.75 bipeds) */,
+  waterAffinity /* 0..1 (0): spawn weight ×(1 + 2.5a) by fresh water / on beaches and ×(1 − 0.8a) inland,
+                   patrols banks, prefers drinking/wading/swimming prey, hits wet prey harder */,
+  maxAlive /* never more than this many wild NPCs at once (no cap); a player of the kind doesn't count */,
+  pairChance /* 0..1 (0): a "solo" species spawns as a pair (shared group, sometimes parent + young) */,
 }
 ```
+`body` keys the two newcomers add for `dinoModel.js` (all optional, neutral defaults): `head.cheek`
+(jaw-muscle bulge), `head.eye.fwd` (gaze turned forward), `head.teeth.thick` (round crowns),
+`features.bosses` / `features.nasalBumps` (skull knobs) and `body.juvenile` (`{ legs, head: [length,
+depth, width] }` hatchling proportions, fading linearly with growth) on the T. rex;
+`head.teeth.conical / rosette / size`, `arms.fingers[].claw / r`, `swimNeck` (neck pitch while
+swimming) and `features.sail` (`{ profile: [[z, height]], spines, thick, rake, bones }`: a skinned
+membrane on its own bones that sways, leans out of turns, folds over in death and grows from 45 %
+height) on the Spinosaurus; `colors.pupil` ("slit" | "round").
 
 ### `creatures/dinoModel.js` (DINO-ART)
 
@@ -386,9 +418,9 @@ bands/stripes/spots, countershading, darker dorsal, slight sheen on wet), eyes w
 a highlight, teeth on carnivores, claws. Procedural animation:
 gait cycles by distance travelled, tail sway, breathing, head bob, jaw open on
 bite/call, lie down on rest, fall on side when dead. Each species must read
-clearly from a third-person camera (stego plates & thagomizer, gastonia spikes/
-armour, cerato nasal horn, allo brow crests, raptor feathers + sickle claw,
-diplodocus neck). Colour variants per individual (seeded).
+clearly from a third-person camera (stego plates & thagomizer, the spinosaur sail
+and croc snout, the rex's deep skull, cerato nasal horn, allo brow crests, raptor
+feathers + sickle claw, diplodocus neck). Colour variants per individual (seeded).
 
 ### `creatures/creature.js` (SIMULATION)
 
@@ -413,7 +445,7 @@ export class Creature {
   canDrink()                 // → "fresh" | "salt" | null
   update(dt)                 // full sim step (movement, terrain follow, swimming, collisions, metabolism,
                              //  growth, regen, bleeding, actions, model animation)
-  takeDamage(amount, source /* Creature|null */, type) // → damage dealt after armor; emits "damage"
+  takeDamage(amount, source /* Creature|null */, type, pierce = 0) // → damage dealt after armor (× (1 − pierce)); emits "damage"
   scent; noise; visibility;  // 0..1 stealth signals the AI senses read for ANY target (scent 1,
                              //   noise from gait (idle 0.05 … sprint 1, crouch ×0.4), visibility 1 (×0.6 crouched))
   heal(amount)
@@ -440,7 +472,8 @@ export class Ecosystem {
   remove(creature)
   setPlayer(creature) ; clearPlayer()
   update(dt, focus)   // population upkeep around focus (spawn ring GAME.npcSpawnMin..Max, despawn > npcDespawn,
-                      // species weights × biome preference, groups), brains → creatures, carcass rot
+                      // species weights × biome (and shore, for waterAffinity) preference, maxAlive caps,
+                      // groups), brains → creatures, carcass rot
   query(x, z, radius, filter = null, out = []) // → alive Creature[] within radius
   nearestCarcass(x, z, radius, minMeat = 0.5)  // → Carcass | null
   eatCarcass(carcass, amount)                  // → kg removed
@@ -463,7 +496,7 @@ export class Brain {
 }
 ```
 Herbivores graze, drink, herd (cohesion around the leader), rest at night, flee
-from threatening carnivores (bigger ones flee less; Stegosaurus/Gastonia/Diplodocus
+from threatening carnivores (bigger ones flee less; Stegosaurus/Diplodocus/Brontosaurus
 turn and fight when attacked or cornered). Carnivores roam, hunt when hungry
 (prefer prey they can handle, avoid big herds), eat carcasses, attack the player
 based on aggression/relative size, packs coordinate loosely. Everyone avoids
@@ -476,7 +509,16 @@ to being damaged (`lastAttacker`).
 (`perception × target.visibility`, needs rough line of sight — forest/night cut it),
 **hearing** (`target.noise × ~60 m`), and **smell** (`perception × 1.4 × target.scent ×
 world.wind.scentFactor(target.x, target.z, me.x, me.z)` — downwind of a target you smell it
-from far away; upwind barely; guard with `world.wind ? … : 1`).
+from far away; upwind barely; guard with `world.wind ? … : 1`). A species' `smell`
+multiplies its smell range and how far it follows its nose to a carcass (T. rex ×1.5).
+
+**Hunting styles** (`HUNT_STYLE` per carnivore: stalk → chase distance, creep distance,
+roar odds, chase time, ambush freeze). Allosaurus yields to anything over 1.8× its
+mass, so both newcomers send it off its kill. Water hunters (`style.water`,
+Spinosaurus) prefer quarry that is drinking, wading or swimming, lose interest in
+anything over half their mass (`style.bigPrey`) and back away rather than trade
+blows when a herbivore that big turns on them, and patrol river and lake banks
+(`waterAffinity`): most roams end at a bank, and destinations near fresh water win.
 
 ### `player/input.js` (PLAYER)
 

@@ -37,15 +37,23 @@ const WALK = 0.45;
 const JOG = 0.8;
 const TROT = 1;
 
-const DEFENDERS = new Set(["stegosaurus", "gastonia", "diplodocus", "brontosaurus"]);
+const DEFENDERS = new Set(["stegosaurus", "diplodocus", "brontosaurus"]);
 
 // Hunting style per carnivore: chase = distance at which a stalk turns into a
 // sprint, crouch = distance inside which it creeps, callP = chance of a roar
-// when a hunt begins, chaseTime = seconds before a chase is abandoned.
+// when a hunt begins, chaseTime = seconds before a chase is abandoned, ambush =
+// freeze in cover while the quarry drifts closer. Optional: water = prefers
+// quarry that is drinking, wading or swimming; bigPrey = interest multiplier
+// for quarry over half its own mass (and a herbivore that big that turns on it
+// is backed away from, not fought).
 const HUNT_STYLE = {
   utahraptor: { chase: 38, crouch: 55, callP: 0.55, chaseTime: 22, ambush: false },
   ceratosaurus: { chase: 22, crouch: 60, callP: 0.4, chaseTime: 14, ambush: true },
   allosaurus: { chase: 30, crouch: 50, callP: 0.8, chaseTime: 17, ambush: false },
+  // A stalker that rarely announces itself: one short, explosive rush, then it tires.
+  tyrannosaurus: { chase: 24, crouch: 45, callP: 0.35, chaseTime: 11, ambush: true },
+  // A long, patient creep at the water's edge; narrow fishing jaws aren't for armoured giants.
+  spinosaurus: { chase: 20, crouch: 75, callP: 0.2, chaseTime: 9, ambush: true, water: true, bigPrey: 0.45 },
 };
 const DEFAULT_STYLE = { chase: 30, crouch: 50, callP: 0.5, chaseTime: 16, ambush: false };
 
@@ -217,6 +225,8 @@ export class Brain {
     this._small = num(sp.mass, 500) < 150;
     this._aggr = clamp(num(sp.aggression, 0.3), 0, 1);
     this._walkSpeed = num(sp.speed && sp.speed.walk, 1.5);
+    this._nose = clamp(num(sp.smell, 1), 0.25, 3); // scent range multiplier
+    this._waterAff = clamp(num(sp.waterAffinity, 0), 0, 1); // drawn to rivers, lakes and shore
 
     // Stagger the ~4 Hz thinking so a crowd doesn't all think on one frame.
     const id = Number(creature.id) || Math.floor(this.rng() * 1000);
@@ -471,7 +481,7 @@ export class Brain {
     const guarding = this._carn && (this.state === "eat" || this.mode === "guard");
 
     const eco = w.ecosystem;
-    const range = Math.min(MAX_QUERY, Math.max(this._sightRange * 1.3, per * SMELL_MUL * 1.7, HEAR_RANGE * 1.3));
+    const range = Math.min(MAX_QUERY, Math.max(this._sightRange * 1.3, per * SMELL_MUL * this._nose * 1.7, HEAR_RANGE * 1.3));
     const list = eco && typeof eco.query === "function" ? eco.query(px, pz, range, null, _near) : EMPTY;
 
     for (let i = 0; i < list.length; i++) {
@@ -641,7 +651,7 @@ export class Brain {
       wind && typeof wind.scentFactor === "function"
         ? num(wind.scentFactor(o.position.x, o.position.z, c.position.x, c.position.z), 1)
         : 1;
-    const smell = num(c.species.perception, 80) * SMELL_MUL * clamp(num(o.scent, 1), 0, 2) * wf;
+    const smell = num(c.species.perception, 80) * SMELL_MUL * this._nose * clamp(num(o.scent, 1), 0, 2) * wf;
     if (d < smell) s = Math.max(s, (1 - d / smell) * 0.75);
     return s;
   }
@@ -719,8 +729,16 @@ export class Brain {
     const herd = matesNear(o, 25);
     s *= herd === 0 ? 1.5 : 1 / (1 + 0.22 * herd);
     if (herd >= 3 && r > 0.6 && pack < 2) s *= 0.5;
-    if (num(osp.armor, 0) >= 0.4 && my < pm * 2) s *= 0.15; // Gastonia's spikes aren't worth it
+    if (num(osp.armor, 0) >= 0.4 && my < pm * 2) s *= 0.15; // heavy armour isn't worth it
     if (DEFENDERS.has(osp.id) && r > 0.5) s *= 0.4;
+    const st = this._style;
+    if (st.bigPrey != null && r > 0.5) s *= st.bigPrey;
+    if (st.water) {
+      // The water's-edge ambusher: drinkers, waders and swimmers first.
+      const t = this.world.terrain;
+      const wet = o.swimming || o.drinking || (o.brain && o.brain.state === "drink") || (t && t.waterDepthAt(xOf(o), zOf(o)) > 0.1);
+      s *= wet ? 2.2 : 0.8;
+    }
     if (o.isPlayer) s *= 0.5 + this._aggr;
     if (o === this.target) s *= 1.5; // stick with the current quarry
     if (this.group) {
@@ -1043,9 +1061,11 @@ export class Brain {
       }
     }
 
-    // 3. Retaliate (or bolt if it's far too big).
+    // 3. Retaliate (or bolt if it's far too big). A hunter that leaves big game
+    // alone (style.bigPrey) also backs away from a herbivore over half its mass.
     if (atk && atk !== this.target) {
-      if (massOf(atk) < massOf(c) * 2.5 || (hpF > 0.75 && this.rng() < this._aggr)) {
+      const shy = this._style.bigPrey != null && atk.species && atk.species.diet === "herbivore" && massOf(atk) > massOf(c) * 0.5;
+      if (!shy && (massOf(atk) < massOf(c) * 2.5 || (hpF > 0.75 && this.rng() < this._aggr))) {
         return this._startHunt(atk, "chase", true);
       }
       return this._startFlee(atk, atk.position.x, atk.position.z, rand(this.rng, 8, 12), true, "retreat");
@@ -1129,6 +1149,16 @@ export class Brain {
       return this._enter("idle", null);
     }
     const hungry = c.food < 65;
+    // Water hunters patrol the banks, where the herds come down to drink.
+    if (this._waterAff > 0 && this.rng() < 0.85 * this._waterAff) {
+      const x = c.position.x + rand(this.rng, -90, 90);
+      const z = c.position.z + rand(this.rng, -90, 90);
+      if (this._findWater(x, z)) {
+        this._setDest(this._waterPt.x, this._waterPt.z);
+        this._activityUntil = now + 90;
+        return this._enter("wander", this._destPt, "patrol");
+      }
+    }
     if (this._pickDestination(hungry ? 100 : 60, this._night || hungry ? 240 : 170)) {
       this._activityUntil = now + 90;
       return this._enter("wander", this._destPt, hungry ? "patrol" : "");
@@ -1375,12 +1405,12 @@ export class Brain {
     const c = this.creature;
     const eco = this.world.ecosystem;
     if (!eco || typeof eco.nearestCarcass !== "function") return null;
-    const k = eco.nearestCarcass(c.position.x, c.position.z, 160, 3);
+    const k = eco.nearestCarcass(c.position.x, c.position.z, Math.min(MAX_QUERY, 160 * this._nose), 3);
     if (!k) return null;
     const d = this._distToXZ(k.x, k.z);
     const wind = this.world.wind;
     const wf = wind && typeof wind.scentFactor === "function" ? num(wind.scentFactor(k.x, k.z, c.position.x, c.position.z), 1) : 1;
-    if (d > 100 * wf) return null;
+    if (d > 100 * wf * this._nose) return null;
     // Don't walk into a bigger predator's meal.
     if (this._threat && dist2(this._threatX, this._threatZ, k.x, k.z) < 30 * 30) return null;
     return k;
@@ -1485,6 +1515,7 @@ export class Brain {
         const slope = t.slopeAt(x, z);
         if (slope > SLOPE_SOFT) continue;
         if (biomes.includes(t.biomeAt(x, z))) score += 1;
+        if (this._waterAff > 0 && t.nearestFreshWater && t.nearestFreshWater(x, z, 35)) score += 2.5 * this._waterAff;
         score -= slope * 2;
       }
       if (score > best) {

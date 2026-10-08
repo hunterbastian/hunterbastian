@@ -997,25 +997,105 @@ button:disabled {
   text-shadow: var(--text-shadow);
 }
 
+.species__strip {
+  position: relative;
+  align-self: end;
+  min-width: 0;
+}
+
+/* One row of cards. When they don't all fit it scrolls, bleeding to the
+   screen edges and fading out over the gutters; when they do, the padding
+   keeps them on the gutter and they share the width. */
 .species__list {
+  --card-min: 212px;
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-columns: minmax(var(--card-min), 1fr);
   align-items: stretch;
-  align-self: end;
   gap: 12px;
-  margin: -14px -4px -8px;
-  padding: 14px 4px 8px;
+  margin: -14px calc(-1 * var(--gutter)) -8px;
+  padding: 14px var(--gutter) 8px;
+  scroll-padding-inline: var(--gutter);
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior-x: contain;
   scroll-snap-type: x mandatory;
   scrollbar-width: none;
   touch-action: pan-x;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 var(--gutter), #000 calc(100% - var(--gutter)), transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 var(--gutter), #000 calc(100% - var(--gutter)), transparent);
 }
 
 .species__list::-webkit-scrollbar {
   display: none;
+}
+
+/* Paging arrows over the faded edges, for a mouse (thumbs swipe, keys step). */
+.strip-nav {
+  position: absolute;
+  top: 50%;
+  z-index: 1;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  margin-top: -17px;
+  border: 1px solid var(--c-line);
+  border-radius: 50%;
+  background: rgba(18, 17, 13, 0.62);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  color: var(--c-paper);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.3s,
+    background-color 0.2s,
+    border-color 0.2s;
+}
+
+.strip-nav .ico {
+  font-size: 15px;
+  transition: transform 0.3s var(--ease);
+}
+
+.strip-nav--prev {
+  left: calc(var(--gutter) / -2 - 17px);
+}
+
+.strip-nav--next {
+  right: calc(var(--gutter) / -2 - 17px);
+}
+
+.species__strip.can-prev .strip-nav--prev,
+.species__strip.can-next .strip-nav--next {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.strip-nav:hover {
+  border-color: var(--c-line-strong);
+  background: rgba(44, 41, 31, 0.86);
+}
+
+.strip-nav--prev:hover .ico {
+  transform: translate3d(-2px, 0, 0);
+}
+
+.strip-nav--next:hover .ico {
+  transform: translate3d(2px, 0, 0);
+}
+
+/* Mouse and trackpad pan the strip freely; snapping is for thumbs. */
+@media (hover: hover) and (pointer: fine) {
+  .species__list {
+    scroll-snap-type: none;
+  }
+
+  .strip-nav {
+    display: inline-flex;
+  }
 }
 
 .sp-card {
@@ -1169,7 +1249,7 @@ button:disabled {
 
 .stat {
   display: grid;
-  grid-template-columns: 62px minmax(0, 1fr);
+  grid-template-columns: 68px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
 }
@@ -3690,15 +3770,8 @@ button:disabled {
 
 /* --- Responsive ------------------------------------------------------------------ */
 
-/* Mid-width: the six cards no longer fit — scroll them. */
+/* Mid-width: the intro gives way to the cards. */
 @container app (max-width: 1180px) {
-  .species__list {
-    grid-auto-columns: 216px;
-    margin-inline: calc(-1 * var(--gutter));
-    padding-inline: var(--gutter);
-    scroll-padding-inline: var(--gutter);
-  }
-
   .species__head {
     grid-template-columns: auto minmax(0, 1fr);
   }
@@ -3886,6 +3959,57 @@ button:disabled {
 
   .hud--touch .hud__prompt {
     bottom: calc(var(--safe-b) + 292px);
+  }
+}
+
+/* Short desktop windows (960 × 540 and the like): leaner cards, so the strip
+   fits between the header and the footer, which reads out the selected
+   species in full anyway. Phones on their side go further, below. */
+@container app (max-height: 640px) {
+  .screen--species {
+    gap: 10px;
+  }
+
+  .species__head .eyebrow {
+    display: none;
+  }
+
+  .species__title {
+    margin: 0;
+    font-size: 30px;
+  }
+
+  .sp-card {
+    padding: 12px 12px 13px;
+  }
+
+  .sp-card__fig {
+    height: 44px;
+    margin: 10px 0 16px;
+  }
+
+  .sp-card__name {
+    font-size: 20px;
+  }
+
+  .sp-card__era {
+    margin-bottom: 12px;
+  }
+
+  .sp-card__tag {
+    display: none;
+  }
+
+  .stats {
+    gap: 5px;
+    padding-top: 10px;
+  }
+
+  .species__detail-desc {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
   }
 }
 

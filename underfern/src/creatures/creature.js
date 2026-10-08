@@ -32,7 +32,7 @@ const DOT_EVENT_INTERVAL = 1; // starvation / bleeding "damage" events once a se
 const REST_LOCK = 2; // seconds a hit keeps a creature from lying back down
 const GOOD_SWIMMER = 0.7; // swim ability at which swimming costs no stamina
 const LEG_HEAL_TIME = 70; // seconds a broken leg takes to heal (resting heals ×2)
-const QUADRUPEDS = new Set(["stegosaurus", "gastonia", "diplodocus", "brontosaurus", "camptosaurus"]); // fallback when body.plan is absent
+const QUADRUPEDS = new Set(["stegosaurus", "diplodocus", "brontosaurus", "camptosaurus"]); // fallback when body.plan is absent
 const ATTACK_TYPES = { bite: true, tail: true, kick: true };
 
 // One-shot attack timing: total duration and the moment (0..1) the blow lands.
@@ -175,19 +175,26 @@ export class Creature {
       swimAbility: clamp(sp.swim ?? 0.3, 0, 1),
       bite: sp.bite ?? 10,
       bleed: sp.bleed ?? 0,
+      // Share of the victim's armour an attack ignores (a bone-crushing bite).
+      pierce: clamp(sp.pierce ?? 0, 0, 1),
+      // Wading or swimming prey takes extra damage from a water hunter.
+      wetBite: 1 + 0.3 * clamp(sp.waterAffinity ?? 0, 0, 1),
+      attackStamina: sp.attackStamina ?? ATTACK_STAMINA,
       biteRange: sp.biteRange ?? 0.6,
       biteCooldown: sp.biteCooldown ?? 1,
       armor: clamp(sp.armor ?? 0, 0, 0.9),
       // Spiky armour bites back: share of a biter's raw damage reflected to it.
-      // Heavily plated species (Gastonia) get a default unless the def sets one.
+      // Heavily plated species (armor ≥ 0.5) get a default unless the def sets one.
       thorns: clamp(sp.thorns ?? ((sp.armor ?? 0) >= 0.5 ? 0.15 : 0), 0, 1),
       growthSec: Math.max(1, (sp.growthMinutes ?? 25) * 60),
+      // Hatchling speed relative to the adult, blending to 1 with growth.
+      juvenileSpeed: clamp(sp.juvenileSpeed ?? 0.85, 0.5, 1.5),
       quadruped,
-      callDur: clamp(sp.call?.duration ?? 1.2, 0.5, 2.5),
+      callDur: clamp(sp.call?.duration ?? 1.2, 0.5, 3.5),
       // Swimming float: the hip joint this many hip-heights below the surface
       // sits the torso low in the water with back and head clear. Low-headed
       // quadrupeds float higher so their heads stay above water.
-      swimDepth: clamp(sp.swimDepth ?? (quadruped ? 0.6 : 0.75), 0.3, 1),
+      swimDepth: clamp(sp.swimDepth ?? (quadruped ? 0.6 : 0.75), 0.3, 1.3),
     };
 
     // Private state.
@@ -467,7 +474,7 @@ export class Creature {
     const moving = mag > 0.05;
     const s = this.scale;
     const hip = Math.max(0.05, this.species.height * s);
-    const growthSpeed = lerp(0.85, 1, this.growth);
+    const growthSpeed = lerp(this._t.juvenileSpeed, 1, this.growth);
 
     // Water: hysteresis so the swim state doesn't flicker at the threshold.
     const depth = terrain ? terrain.waterDepthAt(pos.x, pos.z) : 0;
@@ -805,10 +812,11 @@ export class Creature {
     this._attackStruck = false;
     this._callT = -1;
     this.biteCooldown = t.biteCooldown;
-    this.stamina = Math.max(0, this.stamina - ATTACK_STAMINA);
+    this.stamina = Math.max(0, this.stamina - t.attackStamina);
     this._staminaDelay = 0.8;
     this._restLock = Math.max(this._restLock, 1);
-    if (timing.lunge > 0 && !this.swimming) {
+    // Good swimmers still lunge from the water; everyone else needs footing.
+    if (timing.lunge > 0 && (!this.swimming || t.swimAbility >= GOOD_SWIMMER)) {
       const l = timing.lunge * lerp(0.5, 1, this.scale);
       this._kx += Math.sin(this.heading) * l;
       this._kz += Math.cos(this.heading) * l;
@@ -865,14 +873,16 @@ export class Creature {
       _targets.length = 0;
     }
 
+    const t = this._t;
     const growthMul = lerp(0.12, 1, this.growth);
-    const raw = this._t.bite * growthMul;
+    let raw = t.bite * growthMul;
     let dealt = 0;
     if (best) {
       const victim = best;
-      dealt = victim.takeDamage(raw, this, kind);
-      const armor = clamp(victim.species?.armor ?? 0, 0, 0.9);
-      const bleed = this._t.bleed * growthMul * (1 - armor * 0.5);
+      if (victim.swimming || victim.submerged > 0.2) raw *= t.wetBite;
+      dealt = victim.takeDamage(raw, this, kind, t.pierce);
+      const armor = clamp(victim.species?.armor ?? 0, 0, 0.9) * (1 - t.pierce);
+      const bleed = t.bleed * growthMul * (1 - armor * 0.5);
       if (victim.alive && bleed > 0 && typeof victim.bleeding === "number") {
         const cap = (victim.maxHealth ?? 100) * 0.06; // never an instant bleed-out
         victim.bleeding = Math.min(cap, victim.bleeding + bleed);
@@ -1244,14 +1254,14 @@ export class Creature {
 
   /**
    * Apply damage. Attack types ("bite" | "tail" | "kick") are reduced by the
-   * species' armor; everything else ("starve", "dehydrate", "drown", "bleed",
-   * "fall") ignores it.
+   * species' armor, less the `pierce` share the attacker ignores (0..1);
+   * everything else ("starve", "dehydrate", "drown", "bleed", "fall") ignores it.
    * Emits "damage"; kills at 0 HP.
    * @returns {number} damage actually dealt
    */
-  takeDamage(amount, source = null, type = "bite") {
+  takeDamage(amount, source = null, type = "bite", pierce = 0) {
     if (!this.alive || !(amount > 0)) return 0;
-    const armor = this._t.armor;
+    const armor = this._t.armor * (1 - clamp(+pierce || 0, 0, 1));
     const mul = ATTACK_TYPES[type] ? 1 - armor : 1;
     const dealt = Math.min(this.health, amount * mul);
     this.health -= dealt;
