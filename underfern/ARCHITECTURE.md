@@ -504,6 +504,7 @@ export class Input {
   pressed(action)     // edge:   "bite" | "call" | "sniff" | "rest" | "map" | "pause" | "help" | "interact" | "crouch"
   consumeLook()       // → { dx, dy } pixels since last call (pointer-locked mouse or touch drag)
   consumeZoom()       // → wheel delta since last call
+  lookHeld            // a touch look is under way (thumb on the look pad, or sliding from Bite / Fire)
   requestPointerLock()
   endFrame()          // clear edge state
 }
@@ -520,6 +521,8 @@ Touch (`isTouch`): Input builds its own controls in `uiRoot` —
 `<div class="touch">` containing a left-side joystick
 (`.touch-stick` › `.touch-stick__knob`), right-side drag-to-look area, and buttons
 `<button class="touch-btn" data-action="bite|interact|sprint|call|sniff|rest|map|pause|crouch">`.
+Bite / Fire doubles as a look pad: a thumb that slides more than 10 px from the press turns
+the view like the look area (the press still bites / fires).
 CSS for these classes lives in `style.css` (UI).
 
 ### `player/camera.js` (PLAYER)
@@ -528,7 +531,8 @@ CSS for these classes lives in `style.css` (UI).
 export class ThirdPersonCamera {
   constructor(camera /* THREE.PerspectiveCamera */, terrain)
   yaw; pitch; zoom;            // zoom 0.6..2.2 multiplier
-  addLook(dx, dy)              // pixels → radians
+  addLook(dx, dy, held)        // pixels → radians; held: a touch thumb rests on the look pad
+                               // (holds off the touch auto-follow even without movement)
   addZoom(delta)
   update(dt, creature)         // smooth orbit-follow at head height; distance scales with creature size;
                                // never below terrain/water surface; slow orbit when dead

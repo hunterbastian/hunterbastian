@@ -1,7 +1,7 @@
 // Underfern — browser-side unit tests for the pure-ish modules (rng, noise,
-// terrain, species, wind, weapons) plus the creature / ecosystem simulation on a
-// real low-resolution World. No rendering: everything here is plain JS, so it
-// runs at full speed even under SwiftShader.
+// terrain, species, wind, weapons, the touch layer of input) plus the creature /
+// ecosystem simulation on a real low-resolution World. No rendering: everything
+// here is plain JS, so it runs at full speed even under SwiftShader.
 //
 // Open tests/unit.html in a browser (served from underfern/) to see the results,
 // or run `node tests/run-tests.mjs`, which reads window.__unit.
@@ -17,6 +17,7 @@ import { Wind } from "../src/world/wind.js";
 import { WEAPONS, WEAPON_ORDER, HEADSHOT_MULTIPLIER, LIMB_MULTIPLIER, damageFalloff, partMultiplier } from "../src/hunter/weapons.js";
 import { World } from "../src/world/world.js";
 import { isRotated, appSize, toApp, onAppResize } from "../src/core/screen.js";
+import { Input } from "../src/player/input.js";
 
 /* --- Tiny harness --------------------------------------------------------- */
 
@@ -108,6 +109,99 @@ test("screen: a desktop window isn't turned; the app frame is the viewport", () 
   const off = onAppResize(() => {});
   assert.equal(typeof off, "function", "onAppResize returns an unsubscribe");
   off();
+});
+
+/* --- player/input.js (touch layer) ---------------------------------------- */
+
+test("input: Bite / Fire double as a look pad past the slop; Aim/Sprint/Binoculars latches", () => {
+  // A desktop window, so toApp is the identity and client px are app px.
+  const host = document.createElement("div");
+  host.style.cssText = "position:fixed;inset:0";
+  document.body.appendChild(host);
+  const input = new Input(null, host, { touch: true });
+  const ev = (el, type, id, x, y) =>
+    el.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: "touch", clientX: x, clientY: y, bubbles: true, cancelable: true }));
+  const btn = (a) => host.querySelector(`.touch-btn[data-action="${a}"]`);
+  const centre = (el) => {
+    const r = el.getBoundingClientRect();
+    return [r.x + r.width / 2, r.y + r.height / 2];
+  };
+  const tap = (a) => {
+    const [x, y] = centre(btn(a));
+    ev(btn(a), "pointerdown", 9, x, y);
+    ev(btn(a), "pointerup", 9, x, y);
+  };
+  /** Press `a`, slide ten times by -15 px x, return the look delta (still held). */
+  const slide = (a, id) => {
+    const el = btn(a);
+    const [x, y] = centre(el);
+    ev(el, "pointerdown", id, x, y);
+    for (let i = 1; i <= 10; i++) ev(el, "pointermove", id, x - 15 * i, y);
+    return { ...input.consumeLook(), x, y, el };
+  };
+  try {
+    // A held look pad keeps auto-follow off even when the thumb rests still.
+    const pad = host.querySelector(".touch-zone--look");
+    const [px, py] = centre(pad);
+    ev(pad, "pointerdown", 1, px, py);
+    assert(input.lookHeld, "a still thumb on the look pad counts as a look");
+    ev(pad, "pointerup", 1, px, py);
+    assert(!input.lookHeld, "lifting it ends the look");
+
+    const bite = btn("bite");
+    const [bx, by] = centre(bite);
+    ev(bite, "pointerdown", 2, bx, by);
+    assert(input.isDown("bite") && input.pressed("bite"), "pressing Bite bites");
+    for (const [dx, dy] of [[3, -2], [-4, 3], [5, 4], [-2, -5]]) ev(bite, "pointermove", 2, bx + dx, by + dy);
+    const still = input.consumeLook();
+    assert(still.dx === 0 && still.dy === 0, `the wobble of a press must not turn, got ${fmt(still)}`);
+    assert(!input.lookHeld, "a press that never slid isn't a look");
+    for (let i = 1; i <= 10; i++) ev(bite, "pointermove", 2, bx - 15 * i, by);
+    const turn = input.consumeLook();
+    assert(turn.dx < -200, `sliding 150 px left should turn left, got dx ${fmt(turn.dx)}`);
+    assert(input.isDown("bite") && input.lookHeld, "Bite stays held while sliding");
+    ev(bite, "pointermove", 2, bx, by); // back inside the slop: still live
+    assert(input.consumeLook().dx > 0, "once live, the drag stays live");
+    ev(bite, "pointerup", 2, bx, by);
+    assert(!input.isDown("bite") && !input.lookHeld, "lifting releases Bite and the look");
+    input.endFrame();
+
+    const sniff = slide("sniff", 3);
+    assert(sniff.dx === 0 && sniff.dy === 0, `dragging Sniff must not turn, got ${fmt(sniff.dx)}`);
+    ev(sniff.el, "pointerup", 3, sniff.x, sniff.y);
+
+    input.setMode("hunter");
+    const fire = slide("bite", 4);
+    assert(fire.dx < -200 && input.isDown("bite"), `sliding from Fire should turn, got dx ${fmt(fire.dx)}`);
+    ev(fire.el, "pointerup", 4, fire.x, fire.y);
+    input.endFrame();
+
+    // Aim walks, so the newer of Aim / Sprint wins.
+    tap("aim");
+    tap("sprint");
+    assert(!input.isDown("aim") && input.isDown("sprint"), "Sprint after Aim drops Aim");
+    assert.equal(btn("aim").getAttribute("aria-pressed"), "false", "Aim unlit:");
+    tap("aim");
+    assert(input.isDown("aim") && !input.isDown("sprint"), "Aim after Sprint drops Sprint");
+    input.endFrame();
+    // Glassing keeps the Aim latch, so lowering the binoculars returns to the aim…
+    tap("binoculars");
+    assert(input.isDown("aim") && input.pressed("binoculars"), "raising the binoculars keeps the Aim latch");
+    input.setActive("binoculars", true); // what HunterController reports while glassing
+    input.endFrame();
+    // …and Aim tapped behind them lowers them into the aim instead of unlatching.
+    tap("aim");
+    assert(input.isDown("aim") && input.pressed("aim"), "Aim behind the binoculars aims (latch held, edge sent)");
+    assert.equal(btn("aim").getAttribute("aria-pressed"), "true", "Aim lit:");
+    input.setActive("binoculars", false);
+    input.endFrame();
+    tap("aim");
+    assert(!input.isDown("aim"), "with the binoculars down, Aim toggles off as usual");
+  } finally {
+    input.dispose();
+    host.remove();
+    document.getElementById("underfern-touch-base")?.remove();
+  }
 });
 
 test("rng: same seed → same sequence, values in [0, 1)", () => {

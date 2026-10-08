@@ -6,7 +6,8 @@
 //                              "binoculars" | "extract" | "aim"
 //   axes   → moveAxis(), consumeLook(), consumeZoom()
 // On touch devices Input builds its own on-screen controls inside `uiRoot`
-// (floating joystick, drag-to-look, action buttons per mode). Pointer positions
+// (floating joystick, drag-to-look, action buttons per mode; Bite / Fire also
+// slides to look, and `lookHeld` says a touch look is under way). Pointer positions
 // are read in the app's frame (core/screen.js toApp), which a phone held upright
 // turns sideways: "up" on the stick is the app's top, the phone's right edge.
 
@@ -77,6 +78,9 @@ const TOUCH_LOOK_SCALE = 1.9;
 const TOUCH_LOOK_PRECISION = 0.55;
 const TOUCH_LOOK_SLOW = 60;
 const TOUCH_LOOK_FAST = 600;
+// A thumb on Bite / Fire that slides further than this (px, app frame) turns
+// the view like the look pad; the wobble of a press never nudges the aim.
+const BTN_LOOK_SLOP = 10;
 const STICK_DEAD_ZONE = 0.12;
 const STICK_FALLBACK_RADIUS = 60; // px, used when CSS hasn't sized the stick
 // Drags shorter than this (px) on the mouse fallback count as a click.
@@ -135,10 +139,11 @@ const ICONS = {
  * around it, "outer0..2" an outer ring, "top0..3" small utility buttons.
  * `kind`: "hold" (isDown while touched), "tap" (edge only), "latch" (tap to
  * toggle a held state — sprint/aim, so two thumbs stay free for move + look).
+ * `look`: the button doubles as a look pad (slide past BTN_LOOK_SLOP to turn).
  */
 const BUTTON_SETS = {
   dino: [
-    { action: "bite", slot: "primary", icon: "bite", label: "Bite", kind: "hold" },
+    { action: "bite", slot: "primary", icon: "bite", label: "Bite", kind: "hold", look: true },
     { action: "sprint", slot: "arc0", icon: "sprint", label: "Sprint", kind: "latch" },
     { action: "interact", slot: "arc1", icon: "interact", label: "Eat or drink", short: "Eat/Drink", kind: "hold" },
     { action: "sniff", slot: "arc2", icon: "sniff", label: "Sniff", kind: "tap" },
@@ -149,7 +154,7 @@ const BUTTON_SETS = {
     { action: "pause", slot: "top0", icon: "pause", label: "Pause", kind: "tap" },
   ],
   hunter: [
-    { action: "bite", slot: "primary", icon: "fire", label: "Fire", kind: "hold" },
+    { action: "bite", slot: "primary", icon: "fire", label: "Fire", kind: "hold", look: true },
     { action: "aim", slot: "arc0", icon: "aim", label: "Aim", kind: "latch" },
     { action: "reload", slot: "arc1", icon: "reload", label: "Reload", kind: "tap" },
     { action: "sprint", slot: "arc2", icon: "sprint", label: "Sprint", kind: "latch" },
@@ -300,7 +305,7 @@ export class Input {
 
     // Touch state.
     this._touchCount = Object.create(null); // action → pointers holding it
-    this._btnPointers = new Map(); // pointerId → { action, el }
+    this._btnPointers = new Map(); // pointerId → { action, el, kind, drag }
     this._latch = { sprint: false, aim: false };
     // cx/cy: the stick's origin (input is measured from it); bx/by: where its
     // base is drawn (the origin, pulled in from the screen edges).
@@ -339,6 +344,14 @@ export class Input {
     // Measured while hidden (resizes / rotations under a menu) the resting
     // stick would be placed from fallback sizes; place it now it's visible.
     if (on) this._placeStickAtRest();
+  }
+
+  /** A touch look is under way: a thumb on the look pad, or one sliding from Bite / Fire. */
+  get lookHeld() {
+    if (!this._enabled) return false;
+    if (this._look.id !== -1) return true;
+    for (const rec of this._btnPointers.values()) if (rec.drag?.live) return true;
+    return false;
   }
 
   /**
@@ -831,6 +844,8 @@ export class Input {
         `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">${ICONS[def.icon]}</svg>` +
         `<span class="touch-btn__label" aria-hidden="true">${def.short || def.label}</span>`;
       el.addEventListener("pointerdown", (e) => this._btnDown(e, def, el), opts);
+      // The big button doubles as a look pad: hold Bite / Fire and slide to turn.
+      if (def.look) el.addEventListener("pointermove", (e) => this._btnMove(e), opts);
       for (const t of ["pointerup", "pointercancel", "lostpointercapture"]) {
         el.addEventListener(t, (e) => this._btnUp(e), opts);
       }
@@ -853,18 +868,44 @@ export class Input {
       /* capture is best-effort (synthetic events can't be captured) */
     }
     if (this._btnPointers.has(e.pointerId)) return;
-    this._btnPointers.set(e.pointerId, { action: def.action, el, kind: def.kind });
+    const pt = toApp(e.clientX, e.clientY, this._pt);
+    const drag = def.look ? { sx: pt.x, sy: pt.y, x: pt.x, y: pt.y, t: e.timeStamp, v: 0, live: false } : null;
+    this._btnPointers.set(e.pointerId, { action: def.action, el, kind: def.kind, drag });
     el.classList.add("touch-btn--held");
     if (def.kind === "hold") this._touchCount[def.action] = (this._touchCount[def.action] || 0) + 1;
     this._tapAction(def);
+  }
+
+  _btnMove(e) {
+    const d = this._btnPointers.get(e.pointerId)?.drag;
+    if (!d || !this._enabled) return;
+    if (!d.live) {
+      // Inside the slop: follow the thumb without turning, so crossing it can't jump.
+      const pt = toApp(e.clientX, e.clientY, this._pt);
+      if (Math.hypot(pt.x - d.sx, pt.y - d.sy) < BTN_LOOK_SLOP) {
+        d.x = pt.x;
+        d.y = pt.y;
+        d.t = e.timeStamp;
+        return;
+      }
+      d.live = true;
+    }
+    this._dragLook(d, e);
   }
 
   _tapAction(def) {
     if (!this._enabled) return;
     const a = def.action;
     if (def.kind === "latch") {
-      this._latch[a] = !this._latch[a];
-      this.setActive(a, this._latch[a]);
+      // Aim tapped behind raised binoculars lowers them back into the aim
+      // (the edge below), so a latched Aim stays on rather than toggling off.
+      const glassing = a === "aim" && this._latch.aim && this._buttons.get("binoculars")?.active;
+      if (!glassing) {
+        this._latch[a] = !this._latch[a];
+        this.setActive(a, this._latch[a]);
+        // Aiming walks, so Sprint and Aim can't both be on: the newer tap wins.
+        if (this._latch[a]) this._unlatch(a === "aim" ? "sprint" : "aim");
+      }
       if (a === "aim") this._edges.add("aim");
       return;
     }
@@ -892,6 +933,12 @@ export class Input {
     for (const rec of this._btnPointers.values()) rec.el.classList.remove("touch-btn--held");
     this._btnPointers.clear();
     for (const k in this._touchCount) this._touchCount[k] = 0;
+  }
+
+  _unlatch(a) {
+    if (!this._latch[a]) return;
+    this._latch[a] = false;
+    this.setActive(a, false);
   }
 
   /** Measure the stick radius from CSS so the knob travel matches the art. */
@@ -1059,8 +1106,11 @@ export class Input {
   }
 
   _lookMove(e) {
-    const l = this._look;
-    if (e.pointerId !== l.id || !this._enabled) return;
+    if (e.pointerId === this._look.id && this._enabled) this._dragLook(this._look, e);
+  }
+
+  /** Turn by the drag of a pointer record `l` ({ x, y, t, v }), with the speed-dependent gain. */
+  _dragLook(l, e) {
     // In the app's frame: turned sideways, a thumb sliding along the phone's
     // long edge is a horizontal drag.
     const pt = toApp(e.clientX, e.clientY, this._pt);

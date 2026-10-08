@@ -150,7 +150,7 @@ const KEYS_SURVIVAL = [
 const TOUCH_SURVIVAL = [
   ["Move", "stick", "Thumb anywhere on the left half"],
   ["Look", "hand", "Drag across the right half"],
-  ["Bite", "bite", "Large button, bottom right"],
+  ["Bite", "bite", "Large button, bottom right · slide to turn"],
   ["Eat · drink", "interact", "Hold near food or fresh water"],
   ["Sprint", "sprint", "Tap — lift the stick to stop"],
   ["Crouch", "crouch", "Tap to toggle"],

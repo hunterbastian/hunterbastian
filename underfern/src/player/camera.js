@@ -115,8 +115,10 @@ export class ThirdPersonCamera {
    * Orbit by a pointer delta.
    * @param {number} dx pixels, + = turn right
    * @param {number} dy pixels, + = look down (camera rises)
+   * @param {boolean} [held] a touch thumb is resting on the look pad: hold off auto-follow even without movement
    */
-  addLook(dx, dy) {
+  addLook(dx, dy, held = false) {
+    if (held) this._sinceLook = 0;
     if (!dx && !dy) return;
     const k = LOOK_SENSITIVITY * this.sensitivity;
     // Right is −X when facing +Z, so turning right lowers the yaw.

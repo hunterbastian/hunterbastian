@@ -340,6 +340,75 @@ const SUITES = [
         },
       },
       {
+        name: "touch: slide from Bite turns the camera",
+        async run({ page, ctx, errors }) {
+          await page.evaluate(() => __underfern.advance(0.5)); // let the dino settle
+          const c = await page.evaluate(() => {
+            const r = document.querySelector('.touch-btn[data-action="bite"]')?.getBoundingClientRect();
+            return r ? [r.x + r.width / 2, r.y + r.height / 2] : null;
+          });
+          expect(c, "no Bite touch button");
+          const client = await ctx.newCDPSession(page);
+          const touch = (type, pts) => client.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
+          const yaw = () => page.evaluate(() => __underfern.controller.camera.yaw);
+          const turned = (a, b) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
+          const yaw0 = await yaw();
+          await touch("touchStart", [{ x: c[0], y: c[1], id: 3 }]);
+          for (const [dx, dy] of [[4, -4], [-4, 4], [4, 4], [-4, -4]]) await touch("touchMove", [{ x: c[0] + dx, y: c[1] + dy, id: 3 }]);
+          await page.evaluate(() => __underfern.advance(0.1));
+          const yaw1 = await yaw();
+          expect(Math.abs(turned(yaw0, yaw1)) < 0.01, `the wobble of a press shouldn't turn the camera (Δyaw ${turned(yaw0, yaw1).toFixed(3)})`);
+          for (let i = 1; i <= 10; i++) await touch("touchMove", [{ x: c[0] - 15 * i, y: c[1], id: 3 }]);
+          expect(await page.evaluate(() => __underfern.input.isDown("bite")), "Bite should stay held while sliding");
+          await page.evaluate(() => __underfern.advance(0.1));
+          const d = turned(yaw1, await yaw());
+          expect(d > 0.15, `sliding 150 px left from Bite should turn the camera left (Δyaw ${d.toFixed(3)})`);
+          await touch("touchEnd", []);
+          expect(!(await page.evaluate(() => __underfern.input.isDown("bite"))), "lifting the thumb should release Bite");
+          await expectClean(page, errors);
+          return `wobble Δyaw ${turned(yaw0, yaw1).toFixed(4)}; slide Δyaw ${d.toFixed(3)}`;
+        },
+      },
+      {
+        name: "touch: a look thumb resting on the screen holds off camera auto-follow",
+        async run({ page, ctx, errors }) {
+          await waitState(page, "playing");
+          const z = await page.evaluate(() => {
+            const r = (s) => document.querySelector(s).getBoundingClientRect();
+            const m = r(".touch-zone--move");
+            const l = r(".touch-zone--look");
+            return { stick: [m.x + m.width * 0.45, m.y + m.height * 0.65], look: [l.x + l.width * 0.3, l.y + l.height * 0.3] };
+          });
+          const client = await ctx.newCDPSession(page);
+          const touch = (type, pts) => client.send("Input.dispatchTouchEvent", { type, touchPoints: pts });
+          const yaw = () => page.evaluate(() => __underfern.controller.camera.yaw);
+          const turned = (a, b) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
+          const [sx, sy] = z.stick;
+          const stick = { x: sx + 40, y: sy - 40, id: 1 }; // 45° right of forward: running off-camera
+          // Without a look thumb the camera eases round behind the running dino…
+          await touch("touchStart", [{ x: sx, y: sy, id: 1 }]);
+          await touch("touchMove", [stick]);
+          let y0 = await yaw();
+          await page.evaluate(() => __underfern.advance(3));
+          const free = turned(y0, await yaw());
+          await touch("touchEnd", []);
+          expect(Math.abs(free) > 0.1, `control: auto-follow should swing the camera while running (Δyaw ${free.toFixed(3)})`);
+          // …but a thumb resting still on the look pad keeps the view where it is.
+          const look = { x: z.look[0], y: z.look[1], id: 2 };
+          await touch("touchStart", [look]);
+          await touch("touchStart", [look, { x: sx, y: sy, id: 1 }]);
+          await touch("touchMove", [look, stick]);
+          expect(await page.evaluate(() => __underfern.input.lookHeld), "a still thumb on the look pad should count as a look");
+          y0 = await yaw();
+          await page.evaluate(() => __underfern.advance(3));
+          const held = turned(y0, await yaw());
+          await touch("touchEnd", []);
+          expect(Math.abs(held) < 0.05, `a resting look thumb should hold the camera (Δyaw ${held.toFixed(3)})`);
+          await expectClean(page, errors);
+          return `auto-follow Δyaw ${free.toFixed(3)} free, ${held.toFixed(4)} with a resting thumb`;
+        },
+      },
+      {
         name: "touch: pause button pauses",
         async run({ page, ctx, errors }) {
           const c = await page.evaluate(() => {
@@ -459,6 +528,48 @@ const SUITES = [
           expect(along > 0.5, `the player should walk away from the camera (alignment ${along.toFixed(2)})`);
           await expectClean(page, errors);
           return `${dist.toFixed(1)} m, alignment with the camera ${along.toFixed(2)}; axis ${axis.x.toFixed(2)}, ${axis.y.toFixed(2)}`;
+        },
+      },
+      {
+        name: "upright phone: slide from Bite turns the camera through the rotation",
+        async run({ page, ctx, errors }) {
+          // App-frame point → client point: the inverse of #app's rotate(90deg).
+          const toClient = (x, y) =>
+            page.evaluate(([x, y]) => {
+              const r = document.getElementById("app").getBoundingClientRect();
+              return [r.right - y, r.top + x];
+            }, [x, y]);
+          await page.evaluate(() => __underfern.advance(0.5)); // let the dino settle
+          // Bite's centre in the app frame (the turned box's centre, mapped back).
+          const a = await page.evaluate(() => {
+            const b = document.querySelector('.touch-btn[data-action="bite"]')?.getBoundingClientRect();
+            const r = document.getElementById("app").getBoundingClientRect();
+            return b ? [b.y + b.height / 2 - r.top, r.right - (b.x + b.width / 2)] : null;
+          });
+          expect(a, "no Bite touch button");
+          const client = await ctx.newCDPSession(page);
+          const touch = async (type, x, y) => {
+            const [cx, cy] = await toClient(x, y);
+            await client.send("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x: cx, y: cy, id: 3 }] });
+          };
+          const yaw = () => page.evaluate(() => __underfern.controller.camera.yaw);
+          const turned = (a, b) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
+          const yaw0 = await yaw();
+          await touch("touchStart", a[0], a[1]);
+          for (const [dx, dy] of [[4, -4], [-4, 4], [4, 4], [-4, -4]]) await touch("touchMove", a[0] + dx, a[1] + dy);
+          await page.evaluate(() => __underfern.advance(0.1));
+          const yaw1 = await yaw();
+          expect(Math.abs(turned(yaw0, yaw1)) < 0.01, `the wobble of a press shouldn't turn the camera (Δyaw ${turned(yaw0, yaw1).toFixed(3)})`);
+          // Toward the app's left: on the upright phone, toward its top edge.
+          for (let i = 1; i <= 10; i++) await touch("touchMove", a[0] - 15 * i, a[1]);
+          expect(await page.evaluate(() => __underfern.input.isDown("bite")), "Bite should stay held while sliding");
+          await page.evaluate(() => __underfern.advance(0.1));
+          const d = turned(yaw1, await yaw());
+          expect(d > 0.15, `sliding 150 px toward the app's left from Bite should turn the camera left (Δyaw ${d.toFixed(3)})`);
+          await touch("touchEnd", 0, 0);
+          expect(!(await page.evaluate(() => __underfern.input.isDown("bite"))), "lifting the thumb should release Bite");
+          await expectClean(page, errors);
+          return `wobble Δyaw ${turned(yaw0, yaw1).toFixed(4)}; slide Δyaw ${d.toFixed(3)}`;
         },
       },
       {

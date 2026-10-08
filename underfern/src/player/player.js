@@ -203,7 +203,7 @@ export class PlayerController {
 
     if (!cam.colliders && this.world?.vegetation) cam.colliders = this.world.vegetation;
     const look = input.consumeLook();
-    cam.addLook(look.dx, look.dy);
+    cam.addLook(look.dx, look.dy, input.lookHeld);
     cam.addZoom(input.consumeZoom());
 
     this.sniff.cooldown = Math.max(0, this.sniff.cooldown - dt);
