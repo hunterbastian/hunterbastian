@@ -1224,6 +1224,8 @@ test("ai: the herd defends its player, its leader waits and comes back when call
     eco.remove(allo);
 
     // The leader holds while the player is far behind, and walks back after a call.
+    // (Brains run on world time, which only moves in World.update: let the scare pass.)
+    w.time += 30;
     const L = me.group.leader;
     for (const m of herd) Object.assign(m.brain, { state: "idle", target: null, mode: "", _threat: null, _attacker: null });
     me.position.x = L.position.x + 110;
@@ -1240,7 +1242,12 @@ test("ai: the herd defends its player, its leader waits and comes back when call
     eco.formPlayerGroup(raptor);
     const pack = raptor.group.members.filter((m) => m !== raptor);
     made.push(...pack);
-    for (const m of pack) Object.assign(m, { food: 100, water: 100 });
+    // Sated and lazy: none will start a hunt of its own (see _wantsHunt), so any
+    // hunt below is the one the player named.
+    for (const m of pack) {
+      Object.assign(m, { food: 100, water: 100 });
+      m.brain._tiredUntil = w.time + 1e6;
+    }
     const quarry = eco.spawn("camptosaurus", raptor.position.x + 14, raptor.position.z, { growth: 1 });
     quarry.brain = null;
     made.push(quarry);
