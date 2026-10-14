@@ -94,6 +94,12 @@ usually near a freshwater lake. Then:
 - **Fight or flee.** Each species attacks its own way: a bite, a kick or a tail
   swipe, softened by the target's armour. A Tyrannosaurus bite crushes through
   half of it.
+- **Run with your own kind.** Herd and pack species (Dryosaurus, Stegosaurus,
+  Brontosaurus, Utahraptor) hatch among adults of their kind. The herd keeps
+  watch, waits for you and wades in when you're attacked, and a raptor pack
+  joins whatever you bite. Wander off for too long and you lose them. **Call**
+  brings your group back to you, and calling near another group of your kind
+  joins it. The HUD badge and a compass pin show where they are.
 - **Use your senses.** **Sniff** marks nearby food, the nearest fresh water and
   other creatures for a few seconds. **Call** lets others of your species answer
   from the distance. Herbivores get nervous when they hear a carnivore. **Crouch**

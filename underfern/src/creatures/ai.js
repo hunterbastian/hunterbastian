@@ -112,6 +112,17 @@ function matesNear(o, r) {
   return n;
 }
 
+// The player, when it belongs to herd / pack `g` and is alive.
+function playerIn(g) {
+  const m = g && g.members;
+  if (!m) return null;
+  for (let i = 0; i < m.length; i++) {
+    const k = m[i];
+    if (k && k.isPlayer && k.alive && k.position) return k;
+  }
+  return null;
+}
+
 // How far one sees into a biome (forest and swamp hide things).
 function coverOf(biome) {
   if (biome === "forest") return 0.55;
@@ -136,6 +147,9 @@ function groupMemo(g) {
       alarmX: 0,
       alarmZ: 0,
       alarmFrom: null,
+      rush: false, // the quarry was named by the player: the pack runs it down
+      playerAtk: null, // whoever last hurt a player in the group…
+      playerAtkAge: -1e9, // …and when, on the player's own clock
     };
     GROUPS.set(g, m);
   }
@@ -154,7 +168,7 @@ function attach(brain) {
   if (!bus || typeof bus.on !== "function") return;
   let reg = REGISTRY.get(bus);
   if (!reg) {
-    reg = { brains: [], offs: [], lastCall: Object.create(null) };
+    reg = { brains: [], offs: [], lastCall: Object.create(null), world: brain.world };
     const fanOut = (method) => (e) => {
       if (!e) return;
       const list = reg.brains;
@@ -166,8 +180,30 @@ function attach(brain) {
     };
     sub("call", fanOut("_hearCall"));
     sub("damage", (e) => {
-      const b = e && e.target && e.target.brain;
+      const t = e && e.target;
+      const b = t && t.brain;
       if (b && b._reg === reg) b._onDamage(e);
+      else if (t && t.isPlayer && t.group && e.source && e.source !== t && e.source.position) {
+        // The player has no brain: its herd / pack remembers who hurt it.
+        const m = groupMemo(t.group);
+        m.playerAtk = e.source;
+        m.playerAtkAge = num(t.age, 0);
+      }
+      // A player hunting with a pack names the quarry, and the pack joins in.
+      const src = e && e.source;
+      if (src && src.isPlayer && src.group && t && t !== src && t.alive && t.position && t.group !== src.group) {
+        const sp = src.species;
+        if (sp && sp.social === "pack" && t.species && t.species.id !== sp.id) {
+          const now = num(reg.world && reg.world.time, 0);
+          const m = groupMemo(src.group);
+          m.target = t;
+          m.targetT = now;
+          m.seenT = now;
+          m.seenX = t.position.x;
+          m.seenZ = t.position.z;
+          m.rush = true;
+        }
+      }
     });
     REGISTRY.set(bus, reg);
   }
@@ -306,6 +342,7 @@ export class Brain {
     this._flank = 0;
     this._eatTry = 0;
     this._aidUntil = -1e9;
+    this._regroupUntil = -1e9; // leading the player's group: walk back to it until then
 
     // Routine.
     this._activityUntil = 0;
@@ -752,6 +789,14 @@ export class Brain {
     return this._attacker === o && this._now - this._attackedAt < 60;
   }
 
+  // Quarry the player named for its pack (see the damage fan-out): the pack
+  // sees it through like a fight of its own, hungry or not.
+  _namedQuarry(o) {
+    if (!this.group) return false;
+    const m = groupMemo(this.group);
+    return m.rush && m.target === o;
+  }
+
   _recentAttacker(window, maxD = 45) {
     const a = this._attacker;
     if (!a || !a.alive || !a.position || this._now - this._attackedAt > window) return null;
@@ -765,6 +810,29 @@ export class Brain {
     const L = g.leader;
     if (!L || L === this.creature || !L.alive || !L.position) return null;
     return L;
+  }
+
+  // Leading a group the player belongs to: after it called, walk back to it;
+  // otherwise hold here while it's far behind. True while that's what we do.
+  _tendPlayer() {
+    const g = this.group;
+    if (!g || g.leader !== this.creature) return false;
+    const p = playerIn(g);
+    if (!p) return false;
+    const d = this._distTo(p);
+    if (this._now < this._regroupUntil && d > this._herdR * 1.2) {
+      const dest = this._destPt;
+      if (this.state !== "wander" || this.mode !== "regroup" || dist2(dest.x, dest.z, p.position.x, p.position.z) > 100) {
+        this._setDest(p.position.x, p.position.z);
+        this._enter("wander", dest, "regroup");
+      }
+      return true;
+    }
+    if (d > this._herdR * 2 + 14) {
+      if (this.state !== "idle" || this.mode !== "wait") this._enter("idle", null, "wait");
+      return true;
+    }
+    return false;
   }
 
   // Flight initiation distance: bigger danger, smaller/younger self, a threat
@@ -803,19 +871,27 @@ export class Brain {
     return 10 + c.species.length * num(c.scale, 1) * 0.6 + radiusOf(t);
   }
 
-  // The carnivore currently mauling a herd mate near us, if any.
-  _mateAttacker() {
+  // The carnivore (or, with carnOnly false, anything) currently mauling a herd
+  // mate near us, if any — the player included.
+  _mateAttacker(carnOnly = true) {
     const g = this.group;
     const m = g && g.members;
     if (!m) return null;
     const c = this.creature;
     for (let i = 0; i < m.length; i++) {
       const k = m[i];
-      if (k === c || !k || !k.alive || !k.brain || !k.position) continue;
-      const kb = k.brain;
-      const a = kb._attacker;
-      if (!a || !a.alive || !a.position || this._now - kb._attackedAt > 5) continue;
-      if (!a.species || a.species.diet !== "carnivore") continue;
+      if (k === c || !k || !k.alive || !k.position) continue;
+      let a = null;
+      if (k.brain) {
+        if (this._now - k.brain._attackedAt > 5) continue;
+        a = k.brain._attacker;
+      } else if (k.isPlayer) {
+        const gm = groupMemo(g);
+        if (num(k.age, 0) - gm.playerAtkAge > 5) continue;
+        a = gm.playerAtk;
+      }
+      if (!a || !a.alive || !a.position || a === c || a.group === g) continue;
+      if (carnOnly && (!a.species || a.species.diet !== "carnivore")) continue;
       if (dist2(c.position.x, c.position.z, k.position.x, k.position.z) > 45 * 45) continue;
       return a;
     }
@@ -977,6 +1053,7 @@ export class Brain {
     // Grazing / ambling / standing about.
     if (this.state === "graze" && this._plantOk(this.target) && Math.min(c.food, L ? 100 : this._herdFood) < 99 && now < this._activityUntil) return;
     if (!L) {
+      if (this._tendPlayer()) return;
       const busy =
         (this.state === "wander" && !this._arrived && now < this._activityUntil) ||
         (this.state === "idle" && this.mode === "" && now < this._activityUntil);
@@ -1071,6 +1148,12 @@ export class Brain {
       return this._startFlee(atk, atk.position.x, atk.position.z, rand(this.rng, 8, 12), true, "retreat");
     }
 
+    // 3b. A pack mate (the player too) under attack: the pack piles in.
+    if (this.group && c.species.social === "pack" && c.growth >= JUVENILE && hpF > 0.4) {
+      const foe = this._mateAttacker(false);
+      if (foe && foe !== this.target && massOf(foe) < massOf(c) * 2.5) return this._startHunt(foe, "chase", true);
+    }
+
     // 4. Seeing off a rival at our kill.
     if (this.mode === "guard" && this.state === "attack" && this._keepGuarding()) return;
     if (this._rival && (this.state === "eat") && this.target) {
@@ -1108,11 +1191,13 @@ export class Brain {
       const m = groupMemo(this.group);
       const t = m.target;
       if (t && t.alive && t.position && now - m.targetT < 30 && !(this._ignoreObj === t && now < this._ignoreUntil) && c.stamina > 20) {
-        if (this._distTo(t) < 220) {
+        // Quarry the player named is run down at once (unless it's far too big).
+        const rush = m.rush && massOf(t) < massOf(c) * 6;
+        if (this._distTo(t) < 220 && (rush || !m.rush)) {
           this._preyT = m.seenT;
           this._preyX = m.seenX;
           this._preyZ = m.seenZ;
-          return this._startHunt(t, "stalk", false);
+          return this._startHunt(t, rush ? "chase" : "stalk", false);
         }
       }
     }
@@ -1142,6 +1227,7 @@ export class Brain {
       if (this.state !== "idle") this._enter("idle", null);
       return;
     }
+    if (this._tendPlayer()) return;
     if (this.state === "wander" && !this._arrived && now < this._activityUntil) return;
     if (this.state === "idle" && now < this._activityUntil) return;
     if (this.state === "wander" || this.rng() < 0.25) {
@@ -1314,6 +1400,7 @@ export class Brain {
     if (!provoked && this.rng() < p) this._queueCall(rand(this.rng, 0.2, 1.2), false);
     if (this.group) {
       const m = groupMemo(this.group);
+      if (m.target !== prey) m.rush = false;
       m.target = prey;
       m.targetT = now;
       m.seenT = this._preyT;
@@ -1338,7 +1425,7 @@ export class Brain {
       }
       return false;
     }
-    const provoked = this._provokedBy(t);
+    const provoked = this._provokedBy(t) || this._namedQuarry(t);
     if (t.isPlayer && !provoked && num(t.age, 1e9) < SPAWN_GRACE) return false;
     const lost = now - this._preyT;
     if (lost > MEMORY_TIME + (this.mode === "chase" ? 2 : 5)) return this._giveUp(t, 30, 0);
@@ -1587,6 +1674,17 @@ export class Brain {
 
     if (osp.id === c.species.id) {
       if (d2 > CALL_ANSWER_RANGE * CALL_ANSWER_RANGE) return;
+      // Our player calling: the leader comes back for it and the group answers.
+      if (caller.isPlayer && this.group && caller.group === this.group) {
+        const leads = this.group.leader === c;
+        if (leads) this._regroupUntil = now + 25;
+        if (now - this._lastAnswerAt < 6 || this.state === "flee" || this.state === "attack" || this.state === "rest") return;
+        if (this.rng() < (leads ? 0.9 : 0.45)) {
+          this._lastAnswerAt = now;
+          this._queueCall(rand(this.rng, 0.6, 2.2), true);
+        }
+        return;
+      }
       const isAnswer = !!(caller.brain && caller.brain._answering);
       if (isAnswer || now - this._lastAnswerAt < 25) return;
       if (this.state === "flee" || this.state === "attack" || (this.state === "hunt" && this.mode === "stalk") || this.state === "rest") return;
@@ -2146,7 +2244,7 @@ export class Brain {
       this._arrived = true;
       return;
     }
-    let mag = this.mode === "patrol" || (this._carn && this._night) ? JOG : WALK;
+    let mag = this.mode === "patrol" || this.mode === "regroup" || (this._carn && this._night) ? JOG : WALK;
     // Leaders wait for stragglers.
     if (this.group && this._herdN > 0 && !this._leader()) {
       const behind = this._distToXZ(this._herdCX, this._herdCZ);

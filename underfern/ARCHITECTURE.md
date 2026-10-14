@@ -471,9 +471,14 @@ export class Ecosystem {
   spawnGroup(speciesId, x, z, count, { growth }) // → Creature[]  (shares a group object for herds/packs)
   remove(creature)
   setPlayer(creature) ; clearPlayer()
+  formPlayerGroup(player, { resumed = false }) // → group | null — a herd/pack species hatches among 2+ NPCs of
+                      // its kind (an NPC adult leads, the player never does); loners get null
+  joinGroupNear(player, range = 60)            // → group | null — also runs on the player's own "call"
+  joinGroup(creature, group)
   update(dt, focus)   // population upkeep around focus (spawn ring GAME.npcSpawnMin..Max, despawn > npcDespawn,
                       // species weights × biome (and shore, for waterAffinity) preference, maxAlive caps,
-                      // groups), brains → creatures, carcass rot
+                      // groups), brains → creatures, carcass rot, and the player's group: no mate
+                      // within 90 m for 25 s and it has left (groupStray warns as it starts)
   query(x, z, radius, filter = null, out = []) // → alive Creature[] within radius
   nearestCarcass(x, z, radius, minMeat = 0.5)  // → Carcass | null
   eatCarcass(carcass, amount)                  // → kg removed
@@ -667,6 +672,9 @@ URL params: `?species=<id>` autostart · `?growth=0..1` · `?t=0..1` time of day
 | `legBreak` | `{ creature }` |
 | `notify` | `{ text, kind }` — anything that should toast on the HUD |
 | `newDay` | `{ day }` |
+| `groupJoined` | `{ creature, group, formed, resumed }` — the player hatched into (`formed`) or called its way into a herd / pack |
+| `groupStray` | `{ creature, group }` — the player has drifted out of reach of every mate |
+| `groupLeft` | `{ creature, group, reason: "strayed" \| "lost" }` — strayed too long, or every mate is gone |
 | `spawn` | `{ creature }` |
 | `sniff` | `{ creature }` |
 

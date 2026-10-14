@@ -293,6 +293,8 @@ function startSurvival(speciesId, { growth = 0, from = null, pos = null } = {}) 
     isPlayer: true,
   });
   if (eco.player !== creature) eco.setPlayer(creature);
+  // Herd and pack animals hatch (or carry on) among their own kind.
+  eco.formPlayerGroup?.(creature, { resumed: !!from });
 
   if (from) {
     creature.health = clamp(from.health ?? 1, 0.05, 1) * creature.maxHealth;

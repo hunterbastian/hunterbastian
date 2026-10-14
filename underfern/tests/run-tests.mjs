@@ -300,6 +300,32 @@ const SUITES = [
         },
       },
       {
+        name: "survival (dryosaurus, pixel): hatches into a herd of its kind (HUD chip, compass pin)",
+        async run({ page, errors }) {
+          const g = await page.evaluate(() => {
+            const p = __underfern.player;
+            const grp = p?.group;
+            const mates = grp ? grp.members.filter((m) => m !== p && m.alive) : [];
+            const chip = document.querySelector('[data-chip="group"]');
+            return {
+              member: !!grp && grp.members.includes(p),
+              mates: mates.length,
+              kinds: [...new Set(mates.map((m) => m.species.id))],
+              leaderNpc: !!grp?.leader && !grp.leader.isPlayer,
+              far: Math.max(0, ...mates.map((m) => Math.hypot(m.position.x - p.position.x, m.position.z - p.position.z))),
+              chip: chip && !chip.hidden ? chip.textContent.trim() : null,
+            };
+          });
+          expect(g.member && g.mates >= 2, `the hatchling should belong to a herd with 2+ mates, got ${JSON.stringify(g)}`);
+          expect(g.kinds.length === 1 && g.kinds[0] === "dryosaurus", `herd mates should all be Dryosaurus, got ${g.kinds}`);
+          expect(g.leaderNpc, "an NPC should lead the herd");
+          expect(g.far < 80, `herd mates should be close by (farthest ${g.far.toFixed(1)} m)`);
+          expect(g.chip === `Herd · ${g.mates}`, `the HUD chip should read "Herd · ${g.mates}", got ${JSON.stringify(g.chip)}`);
+          await expectClean(page, errors);
+          return `${g.mates} Dryosaurus mates within ${g.far.toFixed(0)} m; chip "${g.chip}"`;
+        },
+      },
+      {
         name: "survival (dryosaurus, pixel): W moves the player",
         async run({ page, errors }) {
           // Spawns are random: if a trunk or bank happens to block W, try turning away.

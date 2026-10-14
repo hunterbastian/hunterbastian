@@ -237,6 +237,9 @@ export class Hud {
     on("legBreak", (e) => {
       if (e?.creature && e.creature === this._player) this.toast("Broken leg — you can't sprint until it heals", "danger", "fracture");
     });
+    on("groupJoined", (e) => this._onGroup("joined", e));
+    on("groupStray", (e) => this._onGroup("stray", e));
+    on("groupLeft", (e) => this._onGroup("left", e));
     on("newDay", (e) => this.toast(`Day ${e?.day ?? ""} — first light`, "info", "dawn"));
     on("notify", (e) => e?.text && this.toast(e.text, e.kind || "info"));
   }
@@ -426,7 +429,7 @@ export class Hud {
       <div class="hud__prompt" aria-live="polite"><span class="prompt"></span></div>
       <div class="hud__status">
         <div class="chips">
-          ${chip("bleeding", "Bleeding", "bleed")}${chip("leg", "Broken leg", "fracture")}${chip("resting", "Resting", "rest")}
+          ${chip("group", "Herd", "track")}${chip("bleeding", "Bleeding", "bleed")}${chip("leg", "Broken leg", "fracture")}${chip("resting", "Resting", "rest")}
           ${chip("swimming", "Swimming", "waves")}${chip("crouched", "Crouched", "crouch")}${chip("night", "Night", "moon")}
         </div>
         <div class="vitals">
@@ -482,6 +485,13 @@ export class Hud {
     this._waterPin.className = "compass__pin compass__pin--water";
     this._waterPin.innerHTML = icon("drop");
     this._compassPins.appendChild(this._waterPin);
+    // Your herd / pack, when it's out of sight.
+    this._groupPin = document.createElement("span");
+    this._groupPin.className = "compass__pin compass__pin--group";
+    this._groupPin.innerHTML = icon("track");
+    this._compassPins.appendChild(this._groupPin);
+    this._groupPinState = { x: null, on: false };
+    this._group = { n: -1, x: 0, z: 0, d: Infinity, label: "" };
     this._threatPins = [];
     for (let i = 0; i < 6; i++) {
       const t = document.createElement("span");
@@ -610,6 +620,7 @@ export class Hud {
     }
 
     // Status chips.
+    this._updateGroupChip(p);
     this._chip("bleeding", bleeding);
     this._chip("leg", (Number(p.legBroken) || 0) > 0);
     this._chip("resting", Boolean(p.resting));
@@ -656,6 +667,82 @@ export class Hud {
       v.n = n;
       v.num.textContent = String(n);
       v.el.setAttribute("aria-valuenow", String(n));
+    }
+  }
+
+  // Herd / pack: mates alive, their centre and how far it is (cached on this._group).
+  _updateGroupChip(p) {
+    const g = p?.group;
+    const st = this._group;
+    let n = 0;
+    let sx = 0;
+    let sz = 0;
+    if (g?.members) {
+      for (const m of g.members) {
+        if (m === p || !m?.alive || !m.position) continue;
+        n++;
+        sx += m.position.x;
+        sz += m.position.z;
+      }
+    }
+    if (n) {
+      st.x = sx / n;
+      st.z = sz / n;
+      st.d = Math.hypot(st.x - p.position.x, st.z - p.position.z);
+    } else {
+      st.d = Infinity;
+    }
+    this._chip("group", n > 0);
+    const label = n ? `${p.species?.social === "pack" ? "Pack" : "Herd"} · ${n}` : "";
+    if (label !== st.label) {
+      st.label = label;
+      const t = this._chips.group?.el.querySelector("span:last-child");
+      if (t && label) t.textContent = label;
+    }
+    st.n = n;
+  }
+
+  // A compass pin toward the group once it's out of sight range.
+  _updateGroupPin(b, p) {
+    const st = this._group;
+    const on = Boolean(p && st.n > 0 && st.d > 30);
+    const ps = this._groupPinState;
+    if (on !== ps.on) {
+      ps.on = on;
+      this._groupPin.classList.toggle("is-on", on);
+    }
+    if (!on) return;
+    const half = this._compassW / 2 - 56;
+    const rel = relDeg(b, bearingOf(Math.atan2(st.x - p.position.x, st.z - p.position.z)));
+    const x = Math.round(clamp(rel * PX_PER_DEG, -half, half) + this._compassW / 2);
+    if (x !== ps.x) {
+      ps.x = x;
+      this._groupPin.style.transform = `translate3d(${x}px,0,0)`;
+    }
+  }
+
+  _onGroup(kind, e) {
+    const p = e?.creature;
+    // The HUD may not have seen this player yet (the event fires as it hatches).
+    if (!p?.isPlayer) return;
+    const sp = p.species || {};
+    const unit = sp.social === "pack" ? "pack" : "herd";
+    const call = this.isTouch ? "tap Call" : "call (Q)";
+    if (kind === "joined") {
+      if (e.resumed) {
+        this.toast(`Your ${sp.name} ${unit} is close by. Stay with them.`, "good", "track");
+      } else if (e.formed) {
+        const tip = unit === "pack" ? "bite something and they'll join in" : "they'll watch for danger";
+        this.toast(`You hatched into a ${sp.name} ${unit}. Stay close: ${tip}.`, "good", "track");
+      } else {
+        this.toast(`You've joined a ${sp.name} ${unit}`, "good", "track");
+      }
+    } else if (kind === "stray") {
+      this.toast(`Your ${unit} is getting away. ${call[0].toUpperCase()}${call.slice(1)} to bring them back.`, "warn", "track");
+    } else if (e.reason === "lost") {
+      this.toast(`Your ${unit} is gone. You're on your own now.`, "warn", "track");
+    } else {
+      this.toast(`You've lost your ${unit}. Find another and ${call} to join it.`, "warn", "track");
     }
   }
 
@@ -727,6 +814,7 @@ export class Hud {
       ws.edge = wEdge;
       this._waterPin.classList.toggle("is-edge", wEdge);
     }
+    this._updateGroupPin(b, p);
     if (wOn) {
       const fade = 1 - smoothstep(WATER_PIN_MEMORY - 15, WATER_PIN_MEMORY, w.age);
       const fq = Math.round(fade * 20) / 20;

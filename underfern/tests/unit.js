@@ -793,6 +793,119 @@ test("ai: a Spinosaurus backs away from a big herbivore that turns on it; a T. r
   }
 });
 
+test("ecosystem: herd and pack hatchlings join their own kind (an NPC adult leads); loners hatch alone", () => {
+  const w = getWorld();
+  const eco = w.ecosystem;
+  const p = landSpot(13);
+  const made = [];
+  try {
+    for (const id of ["dryosaurus", "utahraptor"]) {
+      const me = eco.spawn(id, p.x, p.z, { growth: 0, isPlayer: true });
+      const ev = capture("groupJoined", () => eco.formPlayerGroup(me));
+      const g = me.group;
+      assert(g && g.members.includes(me), `${id}: the hatchling belongs to a group`);
+      const mates = g.members.filter((m) => m !== me);
+      made.push(...mates);
+      assert(mates.length >= 2 && mates.every((m) => m.species.id === id && m.brain), `${id}: two or more NPC mates of its kind, got ${mates.length}`);
+      assert(g.leader && !g.leader.isPlayer && g.leader.growth === 1, `${id}: an adult NPC leads`);
+      assert(ev.length === 1 && ev[0].formed && ev[0].group === g && !ev[0].resumed, `${id}: one groupJoined (formed)`);
+      const far = Math.max(...mates.map((m) => Math.hypot(m.position.x - me.position.x, m.position.z - me.position.z)));
+      assert(far < 60, `${id}: mates gather close by (farthest ${fmt(far)} m)`);
+      eco.clearPlayer();
+    }
+    const allo = eco.spawn("allosaurus", p.x, p.z, { growth: 0, isPlayer: true });
+    assert.equal(eco.formPlayerGroup(allo), null, "an Allosaurus hatches alone:");
+    assert(!allo.group, "no group for a loner");
+  } finally {
+    eco.clearPlayer();
+    for (const c of made) eco.remove(c);
+  }
+});
+
+test("ecosystem: a player who strays loses its herd; calling near one joins it", () => {
+  const w = getWorld();
+  const eco = w.ecosystem;
+  const p = landSpot(14);
+  let mates = [];
+  try {
+    const me = eco.spawn("stegosaurus", p.x, p.z, { growth: 0.3, isPlayer: true });
+    eco.formPlayerGroup(me);
+    const g = me.group;
+    mates = g.members.filter((m) => m !== me);
+    me.position.x += 200; // well clear of every mate
+    const stray = capture("groupStray", () => eco._updatePlayerGroup(0.5));
+    assert(stray.length === 1 && me.group === g, "drifting away warns once and keeps the membership");
+    const left = capture("groupLeft", () => {
+      for (let i = 0; i < 60; i++) eco._updatePlayerGroup(0.5);
+    });
+    assert(left.length === 1 && left[0].reason === "strayed" && !me.group, "after a while away the herd is lost");
+    assert(!g.members.includes(me) && g.leader && !g.leader.isPlayer, "the herd carries on under its leader");
+    me.position.x -= 200;
+    const joined = capture("groupJoined", () => w.events.emit("call", { creature: me, x: me.position.x, z: me.position.z }));
+    assert(joined.length === 1 && me.group === g && !joined[0].formed, "a call near the herd joins it");
+    const quiet = capture("groupJoined", () => w.events.emit("call", { creature: me, x: me.position.x, z: me.position.z }));
+    assert.equal(quiet.length, 0, "calling again changes nothing:");
+  } finally {
+    eco.clearPlayer();
+    for (const c of mates) eco.remove(c);
+  }
+});
+
+test("ai: the herd defends its player, its leader waits and comes back when called; a pack runs down the player's quarry", () => {
+  const w = getWorld();
+  const eco = w.ecosystem;
+  const p = landSpot(15);
+  const made = [];
+  const think = (list, n = 10) => {
+    for (let i = 0; i < n; i++) for (const c of list) c.brain && c.brain.update(0.05);
+  };
+  try {
+    // A Stegosaurus herd wades in when its hatchling is bitten.
+    const me = eco.spawn("stegosaurus", p.x, p.z, { growth: 0.2, isPlayer: true });
+    eco.formPlayerGroup(me);
+    const herd = me.group.members.filter((m) => m !== me);
+    made.push(...herd);
+    for (const m of herd) Object.assign(m, { food: 100, water: 100 });
+    const allo = eco.spawn("allosaurus", me.position.x + 6, me.position.z, { growth: 1 });
+    allo.brain = null; // stands still for the test
+    made.push(allo);
+    me.takeDamage(5, allo, "bite");
+    think(herd);
+    assert(herd.some((m) => m.brain.state === "attack" && m.brain.target === allo), "an adult of the herd turns on whoever bit the hatchling");
+    eco.remove(allo);
+
+    // The leader holds while the player is far behind, and walks back after a call.
+    const L = me.group.leader;
+    for (const m of herd) Object.assign(m.brain, { state: "idle", target: null, mode: "", _threat: null, _attacker: null });
+    me.position.x = L.position.x + 110;
+    me.position.z = L.position.z;
+    think([L], 12);
+    assert(L.brain.state === "idle" && L.brain.mode === "wait", `the leader waits for a straggling player, got ${L.brain.state}/${L.brain.mode}`);
+    w.events.emit("call", { creature: me, x: me.position.x, z: me.position.z });
+    think([L], 12);
+    assert(L.brain.state === "wander" && L.brain.mode === "regroup", `after a call the leader heads back, got ${L.brain.state}/${L.brain.mode}`);
+    eco.clearPlayer();
+
+    // A Utahraptor pack follows its player's lead.
+    const raptor = eco.spawn("utahraptor", p.x + 60, p.z, { growth: 0.6, isPlayer: true });
+    eco.formPlayerGroup(raptor);
+    const pack = raptor.group.members.filter((m) => m !== raptor);
+    made.push(...pack);
+    for (const m of pack) Object.assign(m, { food: 100, water: 100 });
+    const quarry = eco.spawn("camptosaurus", raptor.position.x + 14, raptor.position.z, { growth: 1 });
+    quarry.brain = null;
+    made.push(quarry);
+    think(pack, 4);
+    assert(!pack.some((m) => m.brain.target === quarry), "a full pack leaves the Camptosaurus alone at first");
+    quarry.takeDamage(8, raptor, "bite");
+    think(pack);
+    assert(pack.some((m) => m.brain.state === "hunt" && m.brain.target === quarry), "once the player bites, the pack hunts its quarry, hungry or not");
+  } finally {
+    eco.clearPlayer();
+    for (const c of made) eco.remove(c);
+  }
+});
+
 test("ecosystem: query finds the living within a radius", () => {
   const w = getWorld();
   const eco = w.ecosystem;

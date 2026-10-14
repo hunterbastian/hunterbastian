@@ -2051,6 +2051,19 @@ button:disabled {
   font-size: 13px;
 }
 
+.compass__pin--group {
+  width: 15px;
+  height: 15px;
+  margin-left: -7.5px;
+  color: var(--c-ochre);
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7));
+}
+
+.compass__pin--group .ico {
+  display: block;
+  font-size: 15px;
+}
+
 .compass__pin--threat {
   top: 17px;
   width: 6px;
@@ -2352,6 +2365,11 @@ button:disabled {
 
 .chip--night {
   color: var(--c-night);
+}
+
+.chip--group {
+  border-color: rgba(217, 164, 65, 0.4);
+  color: var(--c-ochre);
 }
 
 @keyframes pulse {

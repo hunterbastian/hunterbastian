@@ -5,6 +5,10 @@
 //
 // Balance goals: the island should never feel empty, herbivores outnumber
 // predators, and a freshly hatched juvenile gets a quiet first minute.
+//
+// A player of a herd or pack species hatches among its own kind: the group
+// takes it in (NPCs keep the lead), a player who drifts too far loses it, and
+// calling near another group of the species joins that one.
 
 import * as THREE from "three";
 import { Creature } from "./creature.js";
@@ -33,6 +37,14 @@ const OFF_BIOME_WEIGHT = 0.2; // spawn weight outside a species' preferred biome
 const ANIM_LOD_NEAR = 75; // full-rate animation inside this distance from the focus
 const ANIM_LOD_MID = 170; // half-rate inside this, third-rate beyond
 const ROT_COLOR = new THREE.Color(0x2a2119);
+// The player's herd / pack: with no mate within STRAY_RANGE m for STRAY_TIME s
+// the player has left it; a call within JOIN_RANGE m of a group joins it.
+const STRAY_RANGE = 90;
+const STRAY_TIME = 25;
+const JOIN_RANGE = 60;
+
+/** Herd and pack species live in groups the player can belong to. */
+const isSocial = (sp) => !!sp && (sp.social === "herd" || sp.social === "pack");
 
 /* --- Ecosystem ----------------------------------------------------------- */
 
@@ -70,6 +82,11 @@ export class Ecosystem {
     this._carcassSerial = 0;
     this._brainErrors = 0;
     this._spawnErrors = 0;
+    this._strayT = 0;
+    // A player calling near a herd / pack of its own kind is taken in.
+    this._offCall = world.events?.on?.("call", (e) => {
+      if (e && e.creature && e.creature === this.player) this.joinGroupNear(e.creature);
+    });
   }
 
   /* --- Spawning ---------------------------------------------------------- */
@@ -138,6 +155,108 @@ export class Ecosystem {
     }
     this._electLeader(group);
     return group.members.slice();
+  }
+
+  /**
+   * Hatch the player into a herd / pack of its own species: a few NPCs led by
+   * an adult, gathered just ahead of it, with the player as a member. Loners
+   * get nothing. Emits "groupJoined" ({ creature, group, formed: true,
+   * resumed }) — `resumed` for a continued life rather than a fresh hatch.
+   * @returns {object|null} the group
+   */
+  formPlayerGroup(player = this.player, { resumed = false } = {}) {
+    const p = player;
+    const sp = p && p.species;
+    if (!p || !p.alive || !p.position || !isSocial(sp)) return null;
+    const rng = this.rng;
+    const size = Array.isArray(sp.groupSize) ? sp.groupSize : [2, 4];
+    const n = randInt(rng, Math.max(2, size[0] | 0), Math.max(2, size[1] | 0));
+    const spacing = Math.max(2.5, sp.length * 0.6);
+    // The group gathers a little ahead of the hatchling, on open ground.
+    let cx = p.position.x;
+    let cz = p.position.z;
+    const ahead = (p.radius || 0.5) + spacing * 1.6;
+    for (let tries = 0; tries < 10; tries++) {
+      const a = (Number(p.heading) || 0) + (tries ? rand(rng, -1.6, 1.6) : 0);
+      const x = p.position.x + Math.sin(a) * ahead;
+      const z = p.position.z + Math.cos(a) * ahead;
+      if (this._validGround(x, z)) {
+        cx = x;
+        cz = z;
+        break;
+      }
+    }
+    this._leaveGroup(p);
+    const group = { id: ++this._groupSerial, species: sp.id, members: [], leader: null };
+    this.groups.push(group);
+    const heading = Number(p.heading) || 0;
+    for (let i = 0; i < n; i++) {
+      let px = cx;
+      let pz = cz;
+      for (let tries = 0; tries < 8; tries++) {
+        const a = rng() * TAU;
+        const d = i ? spacing * (0.6 + rng() * 0.8) * Math.sqrt(i) : 0;
+        const x = cx + Math.sin(a) * d;
+        const z = cz + Math.cos(a) * d;
+        // Not on top of the hatchling.
+        if (dist2(x, z, p.position.x, p.position.z) < (spacing * 0.9) ** 2) continue;
+        if (this._validGround(x, z)) {
+          px = x;
+          pz = z;
+          break;
+        }
+      }
+      // An adult leads; the rest is the usual mix (the odd youngster too).
+      const g = i === 0 ? 1 : this._npcGrowth(false);
+      this.spawn(sp.id, px, pz, { growth: g, heading: heading + rand(rng, -0.6, 0.6), group });
+    }
+    this.joinGroup(p, group);
+    this._strayT = 0;
+    this.world.events?.emit("groupJoined", { creature: p, group, formed: true, resumed });
+    return group;
+  }
+
+  /**
+   * A player without a group joins the nearest herd / pack of its own species
+   * with a member within `range` m (called when the player calls). Emits
+   * "groupJoined" ({ creature, group, formed: false }).
+   * @returns {object|null} the group joined
+   */
+  joinGroupNear(player = this.player, range = JOIN_RANGE) {
+    const p = player;
+    if (!p || !p.alive || !p.position || p.group || !isSocial(p.species)) return null;
+    const cap = (Array.isArray(p.species.groupSize) ? p.species.groupSize[1] | 0 : 4) + 2;
+    let best = null;
+    let bestD = range * range;
+    for (const g of this.groups) {
+      if (g.species !== p.species.id) continue;
+      let n = 0;
+      let d = Infinity;
+      for (const m of g.members) {
+        if (!m.alive || !m.position) continue;
+        n++;
+        d = Math.min(d, dist2(m.position.x, m.position.z, p.position.x, p.position.z));
+      }
+      if (n && n < cap && d < bestD) {
+        bestD = d;
+        best = g;
+      }
+    }
+    if (!best) return null;
+    this.joinGroup(p, best);
+    this._strayT = 0;
+    this.world.events?.emit("groupJoined", { creature: p, group: best, formed: false });
+    return best;
+  }
+
+  /** Add `c` to `group` (leaving any other). NPCs keep the lead. */
+  joinGroup(c, group) {
+    if (!c || !group || c.group === group) return;
+    this._leaveGroup(c);
+    c.group = group;
+    group.members.push(c);
+    if (!this.groups.includes(group)) this.groups.push(group);
+    this._electLeader(group);
   }
 
   /**
@@ -269,6 +388,7 @@ export class Ecosystem {
       c.brain = null;
       this._toCarcass(c);
     }
+    this._updatePlayerGroup(dt);
     this._updateCarcasses(dt);
   }
 
@@ -518,12 +638,47 @@ export class Ecosystem {
     return rand(rng, 0.55, 0.98);
   }
 
+  // The biggest NPC leads; the player never does.
   _electLeader(group) {
     let leader = null;
     for (const m of group.members) {
-      if (m.alive && (!leader || m.growth > leader.growth)) leader = m;
+      if (m.alive && !this._isPlayerActor(m) && (!leader || m.growth > leader.growth)) leader = m;
     }
     group.leader = leader;
+  }
+
+  // A player with no mate in reach for a while has left its herd / pack (and
+  // is warned once as it starts to drift away); one whose mates are all gone
+  // has lost it.
+  _updatePlayerGroup(dt) {
+    const p = this._livePlayer();
+    const g = p && p.group;
+    if (!g) {
+      this._strayT = 0;
+      return;
+    }
+    let mates = 0;
+    let near = Infinity;
+    for (const m of g.members) {
+      if (m === p || !m.alive || !m.position) continue;
+      mates++;
+      near = Math.min(near, dist2(m.position.x, m.position.z, p.position.x, p.position.z));
+    }
+    if (!mates) return this._leavePlayerGroup(p, "lost");
+    if (near <= STRAY_RANGE * STRAY_RANGE) {
+      this._strayT = 0;
+      return;
+    }
+    if (this._strayT === 0) this.world.events?.emit("groupStray", { creature: p, group: g });
+    this._strayT += dt;
+    if (this._strayT > STRAY_TIME) this._leavePlayerGroup(p, "strayed");
+  }
+
+  _leavePlayerGroup(p, reason) {
+    const g = p.group;
+    this._leaveGroup(p);
+    this._strayT = 0;
+    this.world.events?.emit("groupLeft", { creature: p, group: g, reason });
   }
 
   _leaveGroup(c) {

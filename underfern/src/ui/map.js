@@ -1,5 +1,5 @@
 // Island map overlay (M): the terrain's shaded-relief survey plate with your
-// position, heading, view cone, recent trail and sniffed markers.
+// position, heading, view cone, recent trail, sniffed markers and your herd or pack.
 //
 // The relief is rendered once (terrain.mapCanvas is expensive) — lazily, or
 // ahead of time in an idle callback — and only the small dynamic layer on top
@@ -346,6 +346,21 @@ export class MapView {
         ctx.lineWidth = 1.6 * u;
         ctx.beginPath();
         ctx.arc(x, y, (m.kind === "water" ? 5 : 4.2) * u, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+
+    // Your herd / pack: small ochre dots.
+    const mates = player?.group?.members;
+    if (mates) {
+      ctx.fillStyle = "#c08a2e";
+      ctx.strokeStyle = "rgba(244, 238, 222, 0.95)";
+      ctx.lineWidth = 1.2 * u;
+      for (const m of mates) {
+        if (m === player || !m?.alive || !m.position) continue;
+        ctx.beginPath();
+        ctx.arc(mx(m.position.x), mz(m.position.z), 3.4 * u, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
       }
