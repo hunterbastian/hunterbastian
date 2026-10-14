@@ -1,0 +1,19 @@
+{
+  "name": "Underfern",
+  "short_name": "Underfern",
+  "description": "Survive a misty island out of time as a dinosaur, from fragile hatchling to apex adult.",
+  "lang": "en",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "landscape",
+  "background_color": "#12110d",
+  "theme_color": "#12110d",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "apple-touch-icon.png", "sizes": "180x180", "type": "image/png", "purpose": "any" }
+  ]
+}
