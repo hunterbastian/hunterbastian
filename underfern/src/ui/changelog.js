@@ -4,6 +4,19 @@
 /** @type {{ v: string, date: string, title: string, notes: string[] }[]} */
 export const CHANGELOG = [
   {
+    v: "0.9",
+    date: "2026-10-14",
+    title: "A wilder light",
+    notes: [
+      "A new look: soft painted light, valley mist, and blue-green haze that layers the far ridges.",
+      "Three living lands — coast, plains and forest. The beach grows dunes, palms and driftwood; the swamps become wet woods.",
+      "Weather changes day to day: clear, fair, overcast or misty. Some clear nights bring an aurora.",
+      "Painted rock, snow on the high peaks, and grass that ripples in the wind.",
+      "Fossil giants and stone wonders to find — a ribcage you can walk through, a half-buried skull, a stone arch, sea stacks and basalt columns.",
+      "Fireflies at dusk, sunbeams under the canopy, light falling into caves, and glowing fungi underground.",
+    ],
+  },
+  {
     v: "0.8",
     date: "2026-10-14",
     title: "Creative mode",
