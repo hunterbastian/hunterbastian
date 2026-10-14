@@ -15,6 +15,7 @@ import * as THREE from "three";
 import { makeRng, hash } from "../core/rng.js";
 import { clamp, lerp, damp, smoothstep, TAU } from "../core/math.js";
 import { getSpecies } from "./species.js";
+import { patchLook } from "../world/look.js";
 
 /* --- Tuning ------------------------------------------------------------- */
 
@@ -416,7 +417,12 @@ function createSkinMaterial(uniforms, feather) {
     m.side = THREE.DoubleSide;
     m.defines = { SAURIA_FEATHER: "" };
   }
-  m.onBeforeCompile = (shader) => patchSkinShader(shader, uniforms);
+  m.onBeforeCompile = (shader) => {
+    patchSkinShader(shader, uniforms);
+    // A clear rim keeps every animal readable against the land, and a soft
+    // wrap rounds its forms (look.js).
+    patchLook(shader, { wrap: 0.4, rim: feather ? 0.8 : 1.0, fill: 1 });
+  };
   m.customProgramCacheKey = () => "sauria-dino-skin-1";
   return m;
 }

@@ -1,26 +1,33 @@
-// Sky, sun & moon light, fog and the day/night cycle.
+// Sky, sun & moon light, fog, weather and the day/night cycle.
 //
 // One Sky owns everything that depends on the time of day:
 //   - a camera-following sky dome (one ShaderMaterial: hazy gradient, sunrise /
-//     sunset glow, sun disc + halo, moon, twinkling stars, a faint Milky Way and
-//     soft sun-lit clouds from a mip-mapped procedural noise texture),
+//     sunset glow, sun disc with a soft bloom, moon, twinkling stars, a faint
+//     Milky Way, painted puffy clouds from a mip-mapped procedural noise
+//     texture, and aurora curtains on some clear nights),
 //   - the key DirectionalLight (the sun by day, a cool dim moon by night),
 //   - a HemisphereLight for ambient fill,
 //   - scene.fog, whose colour IS the dome's horizon so distant land melts into
-//     the sky.
+//     the sky,
+//   - the painterly look's shared state (look.js): valley mist, aerial blue,
+//     the cool shadow fill and the grade, by time of day and weather,
+//   - the weather: one deterministic state per day (clear, fair, overcast or
+//     misty, from the seed and the day count), blended across the night.
 // Everything is driven by a single day phase: 0 midnight, 0.25 sunrise,
 // 0.5 noon, 0.75 sunset.
 //
 // Colour pipeline. three.js tone-maps lit materials but mixes fog in *after*
-// tone mapping, so the fog colour reaches the screen as-is. The dome is
-// therefore not tone mapped either: its horizon equals the fog exactly, in the
-// direct ("detailed") path and in a low-res render-target ("pixel") path, where
-// everything — dome, fog and lit scene — goes through the final blit together.
+// tone mapping and the sRGB encode, so the fog colour reaches the screen
+// as-is. The dome is therefore not tone mapped either: its horizon equals the
+// fog exactly. Both render styles draw straight to the canvas (the pixel style
+// just draws fewer pixels), and the look's grade, mist and vignette run inside
+// each material, so the two styles match.
 
 import * as THREE from "three";
 import { TIME } from "../config.js";
-import { makeRng } from "../core/rng.js";
+import { makeRng, hash } from "../core/rng.js";
 import { TAU, clamp, lerp, smoothstep, damp } from "../core/math.js";
+import { LOOK } from "./look.js";
 
 /* --- Celestial geometry --- */
 
@@ -74,27 +81,83 @@ const FOG_ALTITUDE_RANGE = [20, 220]; // metres above sea level
 // fraction of viewDistance. `glow` is the warm band hugging the horizon around
 // the sun; `hemi*` drive the HemisphereLight; `cloud*` shade the clouds
 // (`cloudLit` fully lit by the key light, `cloudDark` the shadowed underside).
+// The look (look.js): `aerial` is the blue the middle distance takes on before
+// it melts into the horizon, `mist` the valley mist's colour, `fill` the cool
+// light that fills shadows (× `fillK` of the key light), `vib` the grade's
+// vibrance and `warm` how golden its highlights are.
+//
+// Palette: Breath of the Wild by day — a deep, saturated zenith over a bright
+// cyan-white horizon, blue-green aerial haze, white puffy clouds with cool blue
+// undersides, blue-violet shadows — and Skyrim's cold blue moonlit nights.
 const RAW_KEYS = [
-  { p: 0.0, zenith: "#03060d", horizon: "#101a2c", glow: "#1b2540", glowAmt: 0, hemiSky: "#3e5480", hemiGround: "#0f131b", hemi: 3.5, cloudLit: "#3a4560", cloudDark: "#0b0f19", near: 0.03, far: 0.72 },
-  { p: 0.17, zenith: "#040710", horizon: "#121c30", glow: "#1d2744", glowAmt: 0, hemiSky: "#3e5480", hemiGround: "#0f131b", hemi: 3.4, cloudLit: "#363f58", cloudDark: "#0b0f19", near: 0.03, far: 0.7 },
-  { p: 0.21, zenith: "#0b1226", horizon: "#272a46", glow: "#6a4a6a", glowAmt: 0.35, hemiSky: "#424e74", hemiGround: "#131419", hemi: 3.0, cloudLit: "#4a4561", cloudDark: "#12141f", near: 0.02, far: 0.58 },
-  { p: 0.235, zenith: "#1d2a52", horizon: "#7a667a", glow: "#d68a78", glowAmt: 0.72, hemiSky: "#6c6e8c", hemiGround: "#2a2420", hemi: 2.1, cloudLit: "#c08a90", cloudDark: "#3a3852", near: 0.0, far: 0.44 },
-  { p: 0.255, zenith: "#3a578a", horizon: "#d0a089", glow: "#ffa060", glowAmt: 1.0, hemiSky: "#b0a4a8", hemiGround: "#4a3a2c", hemi: 1.65, cloudLit: "#ffc49a", cloudDark: "#665a70", near: 0.0, far: 0.4 },
-  { p: 0.285, zenith: "#5481b5", horizon: "#e2c7a8", glow: "#ffc68a", glowAmt: 0.6, hemiSky: "#c4c6c8", hemiGround: "#5a4a36", hemi: 1.5, cloudLit: "#fff0dc", cloudDark: "#8c8c9c", near: 0.02, far: 0.5 },
-  { p: 0.34, zenith: "#5589c0", horizon: "#cbd6d4", glow: "#ffe6c0", glowAmt: 0.2, hemiSky: "#b4c8da", hemiGround: "#5c5440", hemi: 1.5, cloudLit: "#fbfaf6", cloudDark: "#9eaabb", near: 0.07, far: 0.78 },
-  { p: 0.42, zenith: "#4d84bf", horizon: "#c1d2da", glow: "#fff2d8", glowAmt: 0.06, hemiSky: "#b0c6dc", hemiGround: "#5e5844", hemi: 1.55, cloudLit: "#fbfbf8", cloudDark: "#a2b0c2", near: 0.12, far: 0.95 },
-  { p: 0.5, zenith: "#4b83be", horizon: "#bfd1da", glow: "#fff4e0", glowAmt: 0.04, hemiSky: "#b0c6dc", hemiGround: "#605a46", hemi: 1.55, cloudLit: "#fbfbf8", cloudDark: "#a2b0c2", near: 0.13, far: 1.0 },
-  { p: 0.6, zenith: "#4d83bb", horizon: "#c4d3d7", glow: "#fff0d4", glowAmt: 0.06, hemiSky: "#b4c6da", hemiGround: "#625a44", hemi: 1.55, cloudLit: "#fbf9f4", cloudDark: "#a4aebe", near: 0.12, far: 0.95 },
-  { p: 0.68, zenith: "#5078a8", horizon: "#d8ceb4", glow: "#ffcc8a", glowAmt: 0.3, hemiSky: "#c4c2c0", hemiGround: "#62523c", hemi: 1.45, cloudLit: "#fff0d6", cloudDark: "#9a96a2", near: 0.1, far: 0.88 },
-  { p: 0.725, zenith: "#3c5486", horizon: "#e0ac84", glow: "#ffa058", glowAmt: 0.78, hemiSky: "#c4aaa0", hemiGround: "#54402e", hemi: 1.45, cloudLit: "#ffb27a", cloudDark: "#6a5a6c", near: 0.06, far: 0.74 },
-  { p: 0.75, zenith: "#29376a", horizon: "#c67c66", glow: "#ff7440", glowAmt: 1.0, hemiSky: "#a08498", hemiGround: "#3c2e28", hemi: 1.7, cloudLit: "#ff9a6a", cloudDark: "#4c3c58", near: 0.04, far: 0.68 },
-  { p: 0.77, zenith: "#18214a", horizon: "#6a4a62", glow: "#cc566a", glowAmt: 0.6, hemiSky: "#62608a", hemiGround: "#1e1a1e", hemi: 2.3, cloudLit: "#8a5470", cloudDark: "#28233a", near: 0.04, far: 0.66 },
-  { p: 0.795, zenith: "#0c1330", horizon: "#283050", glow: "#5a3e62", glowAmt: 0.25, hemiSky: "#425078", hemiGround: "#12141a", hemi: 3.0, cloudLit: "#3e3e5c", cloudDark: "#10131f", near: 0.035, far: 0.68 },
-  { p: 0.84, zenith: "#050812", horizon: "#121c30", glow: "#1d2744", glowAmt: 0, hemiSky: "#3e5480", hemiGround: "#0f131b", hemi: 3.5, cloudLit: "#3a4560", cloudDark: "#0b0f19", near: 0.03, far: 0.72 },
+  { p: 0.0, zenith: "#040a1e", horizon: "#13203a", glow: "#1b2540", glowAmt: 0, hemiSky: "#4a62a6", hemiGround: "#0e1320", hemi: 3.5, cloudLit: "#3a4868", cloudDark: "#0a0e1a", near: 0.03, far: 0.72, aerial: "#18264a", mist: "#2a3656", fill: "#4c60b0", fillK: 0.09, vib: 0.06, warm: 0.0 },
+  { p: 0.17, zenith: "#050b20", horizon: "#15213c", glow: "#1d2744", glowAmt: 0, hemiSky: "#4a62a6", hemiGround: "#0e1320", hemi: 3.4, cloudLit: "#364262", cloudDark: "#0a0e1a", near: 0.03, far: 0.7, aerial: "#1a284c", mist: "#2c3858", fill: "#4c60b0", fillK: 0.09, vib: 0.06, warm: 0.0 },
+  { p: 0.21, zenith: "#0c1430", horizon: "#2c2c4e", glow: "#6c4c70", glowAmt: 0.35, hemiSky: "#46527e", hemiGround: "#14141c", hemi: 3.0, cloudLit: "#4c4866", cloudDark: "#12141f", near: 0.02, far: 0.58, aerial: "#2a2c52", mist: "#4a4a6a", fill: "#5a5ab0", fillK: 0.16, vib: 0.08, warm: 0.2 },
+  { p: 0.235, zenith: "#22306a", horizon: "#8c6c84", glow: "#e68c7c", glowAmt: 0.72, hemiSky: "#7a76a0", hemiGround: "#2c2420", hemi: 2.1, cloudLit: "#d4929c", cloudDark: "#3c3a5a", near: 0.0, far: 0.44, aerial: "#5c5a80", mist: "#b89caa", fill: "#6a62bc", fillK: 0.18, vib: 0.14, warm: 0.8 },
+  { p: 0.255, zenith: "#3f5f9e", horizon: "#e4ae90", glow: "#ffa868", glowAmt: 1.0, hemiSky: "#b8aac2", hemiGround: "#4e3c2c", hemi: 1.65, cloudLit: "#ffcaa2", cloudDark: "#6a5e80", near: 0.0, far: 0.4, aerial: "#8c90b6", mist: "#f2d2be", fill: "#7a70cc", fillK: 0.15, vib: 0.2, warm: 1.0 },
+  { p: 0.285, zenith: "#5288ca", horizon: "#ecd4b6", glow: "#ffcc90", glowAmt: 0.6, hemiSky: "#c4cad6", hemiGround: "#5c4c36", hemi: 1.5, cloudLit: "#fff2de", cloudDark: "#8e94b0", near: 0.02, far: 0.52, aerial: "#9cb0ce", mist: "#f2e4d2", fill: "#7486cc", fillK: 0.13, vib: 0.22, warm: 0.85 },
+  { p: 0.34, zenith: "#4888d6", horizon: "#c8e0e8", glow: "#fff0d0", glowAmt: 0.2, hemiSky: "#acc8ea", hemiGround: "#5e5640", hemi: 1.5, cloudLit: "#ffffff", cloudDark: "#9eb2ce", near: 0.05, far: 0.82, aerial: "#86b2d4", mist: "#e4edf2", fill: "#6e8ed8", fillK: 0.11, vib: 0.24, warm: 0.55 },
+  { p: 0.42, zenith: "#3e82d8", horizon: "#bedcea", glow: "#fff4dc", glowAmt: 0.06, hemiSky: "#a6c6ec", hemiGround: "#625a44", hemi: 1.55, cloudLit: "#ffffff", cloudDark: "#a2b6d2", near: 0.06, far: 0.98, aerial: "#82b0d6", mist: "#e6eef4", fill: "#6c8cdc", fillK: 0.1, vib: 0.24, warm: 0.45 },
+  { p: 0.5, zenith: "#3b80d6", horizon: "#bcdbea", glow: "#fff6e4", glowAmt: 0.04, hemiSky: "#a6c6ec", hemiGround: "#645a44", hemi: 1.55, cloudLit: "#ffffff", cloudDark: "#a2b6d2", near: 0.07, far: 1.0, aerial: "#80aed6", mist: "#e6eef4", fill: "#6c8cdc", fillK: 0.1, vib: 0.24, warm: 0.4 },
+  { p: 0.6, zenith: "#3e7fd0", horizon: "#c2dce6", glow: "#fff0d4", glowAmt: 0.06, hemiSky: "#aac4e4", hemiGround: "#665a42", hemi: 1.55, cloudLit: "#fffcf6", cloudDark: "#a4b4cc", near: 0.06, far: 0.95, aerial: "#86aed2", mist: "#e6ecf0", fill: "#6e8ad8", fillK: 0.1, vib: 0.24, warm: 0.5 },
+  { p: 0.68, zenith: "#4a78b8", horizon: "#e4d8b8", glow: "#ffcc88", glowAmt: 0.32, hemiSky: "#c6c6c8", hemiGround: "#665238", hemi: 1.45, cloudLit: "#fff0d4", cloudDark: "#9a96ac", near: 0.05, far: 0.88, aerial: "#a6aac4", mist: "#ecdec8", fill: "#7a7ad2", fillK: 0.12, vib: 0.24, warm: 0.8 },
+  { p: 0.725, zenith: "#3a5292", horizon: "#f0b28a", glow: "#ffa058", glowAmt: 0.78, hemiSky: "#c8aaa6", hemiGround: "#56402e", hemi: 1.45, cloudLit: "#ffb47c", cloudDark: "#6e5a78", near: 0.04, far: 0.74, aerial: "#9a8eac", mist: "#eabea2", fill: "#7c68cc", fillK: 0.15, vib: 0.24, warm: 1.0 },
+  { p: 0.75, zenith: "#283674", horizon: "#d67e66", glow: "#ff7a44", glowAmt: 1.0, hemiSky: "#a284a2", hemiGround: "#3c2e28", hemi: 1.7, cloudLit: "#ff9a6a", cloudDark: "#4e3c5e", near: 0.04, far: 0.68, aerial: "#7a6a94", mist: "#c6929c", fill: "#7060c4", fillK: 0.16, vib: 0.2, warm: 1.0 },
+  { p: 0.77, zenith: "#182254", horizon: "#764c6e", glow: "#d2587a", glowAmt: 0.6, hemiSky: "#626290", hemiGround: "#1e1a20", hemi: 2.3, cloudLit: "#905678", cloudDark: "#28233e", near: 0.04, far: 0.66, aerial: "#4a4072", mist: "#6c5072", fill: "#5a5aac", fillK: 0.16, vib: 0.12, warm: 0.5 },
+  { p: 0.795, zenith: "#0c1436", horizon: "#2a3256", glow: "#5a3e66", glowAmt: 0.25, hemiSky: "#46548c", hemiGround: "#12141c", hemi: 3.0, cloudLit: "#40425e", cloudDark: "#10131f", near: 0.035, far: 0.68, aerial: "#20284c", mist: "#323c5c", fill: "#4e5aa8", fillK: 0.15, vib: 0.08, warm: 0.1 },
+  { p: 0.84, zenith: "#060b20", horizon: "#13203a", glow: "#1d2744", glowAmt: 0, hemiSky: "#4a62a6", hemiGround: "#0e1320", hemi: 3.5, cloudLit: "#3a4868", cloudDark: "#0a0e1a", near: 0.03, far: 0.72, aerial: "#18264a", mist: "#2a3656", fill: "#4c60b0", fillK: 0.09, vib: 0.06, warm: 0.0 },
 ];
 
-const COLOR_FIELDS = ["zenith", "horizon", "glow", "hemiSky", "hemiGround", "cloudLit", "cloudDark"];
-const NUMBER_FIELDS = ["glowAmt", "hemi", "near", "far"];
+const COLOR_FIELDS = ["zenith", "horizon", "glow", "hemiSky", "hemiGround", "cloudLit", "cloudDark", "aerial", "mist", "fill"];
+const NUMBER_FIELDS = ["glowAmt", "hemi", "near", "far", "fillK", "vib", "warm"];
+
+/* --- Weather --- */
+
+// One state per day, from the seed and the day count; the next day's blends
+// in across the evening and night, so a day never changes its mind. `cover` is
+// the clouds' coverage threshold (lower = more cloud), `grey` how leaden they
+// are; `sun`/`hemi`/`shadow` scale the key light, the ambient and the shadow
+// darkness; `fog` scales the haze distances and `pale` washes the sky toward
+// a pale grey; `mist` is how strong the dawn (and night) valley mist is,
+// `mistDay` how much lingers all day, `mistH` its depth in metres.
+export const WEATHER_KINDS = ["clear", "fair", "overcast", "misty"];
+const WEATHER = {
+  clear: { cover: 0.6, grey: 0.0, sun: 1.0, hemi: 1.0, shadow: 1.0, fog: 1.08, pale: 0.0, mist: 0.6, mistDay: 0.0, mistH: 9 },
+  fair: { cover: 0.49, grey: 0.0, sun: 1.0, hemi: 1.0, shadow: 1.0, fog: 1.0, pale: 0.0, mist: 0.8, mistDay: 0.04, mistH: 10 },
+  overcast: { cover: 0.26, grey: 0.75, sun: 0.36, hemi: 1.3, shadow: 0.3, fog: 0.72, pale: 0.55, mist: 0.9, mistDay: 0.22, mistH: 15 },
+  misty: { cover: 0.42, grey: 0.4, sun: 0.6, hemi: 1.18, shadow: 0.55, fog: 0.42, pale: 0.6, mist: 1.0, mistDay: 0.65, mistH: 22 },
+};
+const WEATHER_FIELDS = Object.keys(WEATHER.fair);
+// How often each kind turns up (day 1 is always fair, with an aurora that night).
+const WEATHER_ODDS = [["fair", 0.36], ["clear", 0.24], ["misty", 0.2], ["overcast", 0.2]];
+
+/**
+ * The weather of in-game day `day` (1 = the first) on island `seed`:
+ * `{ kind, aurora }` — aurora is whether curtains light the night that
+ * follows that day (only ever after a clear or fair day). Deterministic.
+ * @param {number} seed
+ * @param {number} day
+ * @returns {{ kind: "clear"|"fair"|"overcast"|"misty", aurora: boolean }}
+ */
+export function weatherForDay(seed, day) {
+  day = Math.max(1, Math.floor(day));
+  if (day === 1) return { kind: "fair", aurora: true };
+  // Through the PRNG: the bare hash of neighbouring days is too alike.
+  const rng = makeRng(hash("underfern-weather", seed >>> 0, day));
+  const r = rng();
+  let kind = WEATHER_ODDS[0][0];
+  let acc = 0;
+  for (const [k, w] of WEATHER_ODDS) {
+    acc += w;
+    if (r < acc) {
+      kind = k;
+      break;
+    }
+  }
+  const a = rng();
+  const aurora = kind === "clear" ? a < 0.55 : kind === "fair" ? a < 0.18 : false;
+  return { kind, aurora };
+}
 
 function buildKeys(raw) {
   const keys = raw.map((k) => {
@@ -245,12 +308,45 @@ function makeTileNoise(seed) {
 }
 
 const CLOUD_TEX_SIZE = 256;
+
+/**
+ * Tileable Worley puffs: for a P×P grid of jittered points wrapped at the
+ * edges, (1 − F1)^1.5 — round, soft-edged lumps — at (u, v) in [0, 1).
+ */
+function makeTilePuffs(seed, P) {
+  const rng = makeRng(seed);
+  const px = new Float32Array(P * P);
+  const py = new Float32Array(P * P);
+  for (let i = 0; i < P * P; i++) {
+    px[i] = 0.15 + 0.7 * rng();
+    py[i] = 0.15 + 0.7 * rng();
+  }
+  return (u, v) => {
+    const x = u * P;
+    const y = v * P;
+    const cx = Math.floor(x);
+    const cy = Math.floor(y);
+    let d1 = 9;
+    for (let dy = -1; dy <= 1; dy++) {
+      const gy = (((cy + dy) % P) + P) % P;
+      for (let dx = -1; dx <= 1; dx++) {
+        const gx = (((cx + dx) % P) + P) % P;
+        const k = gy * P + gx;
+        const qx = cx + dx + px[k] - x;
+        const qy = cy + dy + py[k] - y;
+        d1 = Math.min(d1, qx * qx + qy * qy);
+      }
+    }
+    return Math.pow(clamp(1 - Math.sqrt(d1), 0, 1), 1.5);
+  };
+}
 let cloudPixels = null; // generated once per page, shared by every Sky
 
 /**
  * RGBA8 tileable cloud noise:
  *   R — domain-warped fBm, the large cloud masses,
- *   G — warped mid-frequency fBm that frays the masses' edges,
+ *   G — billowing Worley puffs (three octaves of rounded cells), the
+ *       cauliflower lobes along the masses' edges,
  *   B — fine fBm for wisps and edges,
  *   A — stretched fBm for high cirrus streaks.
  */
@@ -260,6 +356,9 @@ function cloudNoisePixels() {
   const nA = makeTileNoise(9127);
   const nB = makeTileNoise(4441);
   const nC = makeTileNoise(771);
+  const puffA = makeTilePuffs(5813, 7);
+  const puffB = makeTilePuffs(2203, 15);
+  const puffC = makeTilePuffs(907, 31);
   const raw = new Float32Array(S * S * 4);
   const fbm = (n, u, v, period, octaves) => {
     let sum = 0;
@@ -284,7 +383,7 @@ function cloudNoisePixels() {
       // Octaves stop at ~8 texels per cycle: finer detail comes from the
       // shader sampling these channels at higher frequencies.
       const r = fbm(nA, u + wx, v + wy, 4, 4);
-      const g = fbm(nB, u - wy * 0.7, v + wx * 0.7, 8, 3);
+      const g = puffA(u + wx * 0.5, v + wy * 0.5) * 0.55 + puffB(u, v) * 0.3 + puffC(u - wy, v + wx) * 0.15;
       const b = fbm(nC, u, v, 16, 3);
       const a = fbm(nB, u, v * 4, 4, 2);
       const i = (y * S + x) * 4;
@@ -401,6 +500,11 @@ uniform float uCloudCover;
 uniform float uCloudAmount;
 uniform vec3 uCloudLit;
 uniform vec3 uCloudDark;
+uniform float uCloudGrey;
+uniform float uAurora;
+uniform vec3 uAuroraLow;
+uniform vec3 uAuroraHigh;
+uniform vec4 uLookScreen;
 
 varying vec3 vDir;
 
@@ -452,13 +556,34 @@ float vnoise3(vec3 p) {
 #endif
 
 #ifdef CLOUDS
-/* Cloud density on the cloud plane (cp = horizontal position at unit height). */
+/* Cloud density on the cloud plane (cp = horizontal position at unit height):
+   broad masses, their edges bulging into the Worley puffs' rounded lobes —
+   fair-weather cumulus rather than streaks. */
 float cloudField(vec2 cp) {
-  float base = texture2D(uClouds, cp * 0.16 + uCloudOff.xy).r;
-  float puff = texture2D(uClouds, cp * 0.47 + uCloudOff.zw).g;
-  return base * 0.7 + puff * 0.3;
+  float base = texture2D(uClouds, cp * 0.13 + uCloudOff.xy).r;
+  float puff = texture2D(uClouds, cp * 0.36 + uCloudOff.zw).g;
+  return base * 0.6 + puff * 0.4;
 }
 #endif
+
+/* Aurora: curtains hanging in the northern sky. A sheet of ribbons is sampled
+   at several heights along the view ray; the same ribbon lit at every height
+   stacks into a vertical curtain, green below fading to violet above, its
+   folds drifting and its rays flickering slowly. */
+vec3 aurora(vec3 dir) {
+  vec3 acc = vec3(0.0);
+  for (int i = 0; i < 7; i++) {
+    float k = float(i) / 6.0;
+    float hgt = 1.0 + k * 1.3;
+    vec2 p = dir.xz / max(dir.y, 0.02) * hgt;
+    float fold = (vnoise(vec2(p.x * 0.32 + uTime * 0.012, 3.7)) - 0.5) * 2.4 + (vnoise(vec2(p.x * 0.9 - uTime * 0.03, 8.1)) - 0.5) * 0.7;
+    float d = p.y + 2.6 + fold;
+    float ribbon = exp(-d * d * 5.0) + 0.6 * exp(-(d + 1.1) * (d + 1.1) * 7.0);
+    float rays = 0.45 + 0.55 * vnoise(vec2(p.x * 7.0 + fold * 2.0, uTime * 0.25 + k));
+    acc += mix(uAuroraLow, uAuroraHigh, smoothstep(0.1, 0.9, k)) * ribbon * rays * (1.0 - 0.55 * k);
+  }
+  return acc / 7.0;
+}
 
 void main() {
   vec3 dir = normalize(vDir);
@@ -506,9 +631,13 @@ void main() {
     }
   }
 
-  /* Sun: tight glare around a crisp, limb-darkened disc. */
+  /* Aurora on some clear nights: behind the moon and the clouds. */
+  if (uAurora > 0.003 && y > 0.0) col += aurora(dir) * uAurora * smoothstep(0.0, 0.12, y);
+
+  /* Sun: a wide, soft bloom, a hot glare and a crisp, limb-darkened disc —
+     the glow a lens would spread around it, painted into the sky itself. */
   float mu = max(dot(dir, uSunDir), 0.0);
-  col += uSunHalo * pow(mu, 2200.0) * 0.8 * above;
+  col += uSunHalo * (pow(mu, 24.0) * 0.12 + pow(mu, 380.0) * 0.55 + pow(mu, 2200.0) * 0.8) * above;
   float sunMask = smoothstep(SUN_COS_OUT, SUN_COS_IN, mu) * above * uSunVis;
   if (sunMask > 0.0) {
     // Added on top of the glow behind it, so the disc always reads as the
@@ -554,12 +683,17 @@ void main() {
     // the cloud instead of mottled.
     float s1 = smoothstep(uCloudCover - 0.05, uCloudCover + 0.3, cloudField(cp + toL * 0.28));
     float s2 = smoothstep(uCloudCover - 0.05, uCloudCover + 0.3, cloudField(cp + toL * 0.7));
-    float lit = exp(-(density * 0.5 + s1 * 1.0 + s2 * 0.8) * 1.5);
+    float lit = exp(-(density * 0.5 + s1 * 1.0 + s2 * 0.8) * 0.9);
     #else
     float lit = clamp(1.1 - density * 0.75, 0.0, 1.0);
     #endif
+    // Painted: firmer light/shade on the lobes, a gentle step between them.
+    lit = mix(lit, smoothstep(0.1, 0.8, lit), 0.45);
+    lit = mix(lit, floor(lit * 3.0 + 0.5) / 3.0, 0.12);
     density *= 0.9 + 0.2 * fine;
     vec3 cloud = mix(uCloudDark, uCloudLit, lit);
+    // Bright, thin edges where the sky shows through the lobes.
+    cloud += uCloudLit * (1.0 - smoothstep(0.0, 0.55, density)) * 0.12 * (1.0 - uCloudGrey);
     // Thin cloud near the sun glows (silver lining / forward scattering).
     float mu2 = mu * mu;
     float mu8 = mu2 * mu2;
@@ -577,6 +711,9 @@ void main() {
 
   gl_FragColor = vec4(col, 1.0);
   #include <colorspace_fragment>
+  // The look's vignette (look.js lookFinish), so the sky matches the land.
+  vec2 vuv = gl_FragCoord.xy * uLookScreen.xy - 0.5;
+  gl_FragColor.rgb *= 1.0 - uLookScreen.z * smoothstep(0.18, 0.62, dot(vuv, vuv) * 1.6);
   // Static dither hides 8-bit banding in the slow night gradients. Static on
   // purpose: a moving pattern would flicker under the pixel style's
   // colour quantisation.
@@ -595,6 +732,20 @@ const _axisZ = new THREE.Vector3();
 const _origin = new THREE.Vector3();
 const _snap = new THREE.Vector3();
 const _rotM = new THREE.Matrix4();
+const _grey = new THREE.Color();
+
+// Aurora curtains: green below, violet above (display-referred).
+const AURORA_LOW = new THREE.Color("#2fe39a").multiplyScalar(0.55);
+const AURORA_HIGH = new THREE.Color("#8a5cf0").multiplyScalar(0.45);
+// Cool shadow fill: × the palette's fillK × the key light's intensity.
+const FILL_GAIN = 3;
+// Valley mist density (1/m) at its base at full strength.
+const MIST_DENSITY = 0.016;
+
+/** A linear colour → three's fog space (display-referred sRGB), into `out`. */
+function toFog(out, c) {
+  return out.copy(c).convertLinearToSRGB();
+}
 
 const LABELS = [
   { until: 0.21, label: "night" },
@@ -619,6 +770,7 @@ export class Sky {
    * @param {number} [opts.shadowMapSize]  shadow map resolution
    * @param {"high"|"low"} [opts.detail]   sky shader detail; defaults to "high" when shadows are on
    * @param {boolean} [opts.clouds]        draw the cloud layer (default true)
+   * @param {number} [opts.seed]           island seed: picks each day's weather
    */
   constructor(scene, {
     startPhase = TIME.startPhase,
@@ -628,10 +780,28 @@ export class Sky {
     shadowMapSize = 2048,
     detail = shadows ? "high" : "low",
     clouds = true,
+    seed = 1,
   } = {}) {
     this.scene = scene;
     this.phase = ((startPhase % 1) + 1) % 1;
     this.day = 1;
+    this.seed = seed >>> 0;
+    /** World y of the sea (World sets it from the terrain): the valley mist settles on it. */
+    this.seaLevel = 0;
+    /**
+     * Force one weather ("clear" | "fair" | "overcast" | "misty") instead of
+     * the day's own (the `?weather=` deep link); null follows the schedule.
+     */
+    this.forceWeather = null;
+    /** Force the aurora on (true) or off (false) tonight; null follows the schedule. */
+    this.forceAurora = null;
+    /**
+     * Today's weather as it blends toward tomorrow's across the night:
+     * { kind, next, blend 0..1, aurora 0..1 (tonight's curtains, by darkness) }.
+     */
+    this.weather = { kind: "fair", next: "fair", blend: 0, aurora: 0 };
+    this._wx = {};
+    for (const f of WEATHER_FIELDS) this._wx[f] = WEATHER.fair[f];
     this.paused = false;
     this.dayLengthSec = dayLengthSec;
     /** Metres. Can be changed at runtime; fog follows on the next update. */
@@ -725,6 +895,11 @@ export class Sky {
       uCloudAmount: { value: clouds ? 1 : 0 },
       uCloudLit: { value: new THREE.Color() },
       uCloudDark: { value: new THREE.Color() },
+      uCloudGrey: { value: 0 },
+      uAurora: { value: 0 },
+      uAuroraLow: { value: AURORA_LOW.clone() },
+      uAuroraHigh: { value: AURORA_HIGH.clone() },
+      uLookScreen: LOOK.uLookScreen,
     };
     const defines = {};
     if (clouds) defines.CLOUDS = "";
@@ -785,7 +960,7 @@ export class Sky {
     o.w = (o.w + dt * 0.0012) % 1;
     this._cirrusOff = (this._cirrusOff + dt * 0.0004) % 1;
     u.uCirrusOff.value = this._cirrusOff;
-    u.uCloudCover.value = 0.5 + 0.05 * Math.sin(this._time * 0.0019 + 1.3) + 0.025 * Math.sin(this._time * 0.0053);
+    this._coverWobble = 0.05 * Math.sin(this._time * 0.0019 + 1.3) + 0.025 * Math.sin(this._time * 0.0053);
 
     if (camera) {
       const r = FOG_ALTITUDE_RANGE;
@@ -820,6 +995,12 @@ export class Sky {
     this.phase = ((p % 1) + 1) % 1;
     this._apply();
     this._placeLight(this._focus);
+  }
+
+  /** Label of the weather now: "clear" | "fair" | "overcast" | "misty" (whichever dominates the blend). */
+  weatherLabel() {
+    const w = this.weather;
+    return w.blend > 0.5 ? w.next : w.kind;
   }
 
   /** True while it is dark enough to count as night (daylight < 0.25). */
@@ -879,15 +1060,57 @@ export class Sky {
     sh.normalBias = 0.05 * (2048 / size);
   }
 
+  /** Blend today's weather toward tomorrow's (across the late evening) into this._wx. */
+  _applyWeather() {
+    const p = this.phase;
+    const sched = (d) => weatherForDay(this.seed, d);
+    const forced = WEATHER[this.forceWeather] ? this.forceWeather : null;
+    const today = forced || sched(this.day).kind;
+    const next = forced || sched(this.day + 1).kind;
+    const t = forced ? 0 : smoothstep(0.86, 1.0, p);
+    const A = WEATHER[today];
+    const B = WEATHER[next];
+    for (const f of WEATHER_FIELDS) this._wx[f] = lerp(A[f], B[f], t);
+    // Tonight's aurora belongs to the day that is ending: the evening of
+    // `day`, or (before dawn) the evening of the day before.
+    let on = sched(p > 0.5 ? this.day : this.day - 1).aurora;
+    if (forced) on = on && (forced === "clear" || forced === "fair");
+    if (this.forceAurora != null) on = !!this.forceAurora;
+    this._auroraOn = on;
+    const w = this.weather;
+    w.kind = today;
+    w.next = next;
+    w.blend = t;
+  }
+
   /** Recompute colours, lights, fog and dome uniforms for the current phase. */
   _apply() {
     const K = sampleKeys(this.phase, this._key);
+    this._applyWeather();
+    const W = this._wx;
+    // Grey weather washes the sky (and so the fog, its horizon) toward a pale
+    // grey, keeping some of the hour's warmth.
+    if (W.pale > 0.001) {
+      const g = _grey.copy(K.horizon);
+      const l = (g.r + g.g + g.b) / 3;
+      g.setRGB(l * 1.02 + 0.03, l * 1.03 + 0.035, l * 1.06 + 0.04);
+      K.horizon.lerp(g, W.pale * 0.8);
+      K.aerial.lerp(g, W.pale * 0.7);
+      K.zenith.lerp(g.multiplyScalar(0.82), W.pale * 0.75);
+      K.glowAmt *= 1 - 0.6 * W.pale;
+    }
+    if (W.grey > 0.001) {
+      const lit = (K.cloudLit.r + K.cloudLit.g + K.cloudLit.b) / 3;
+      K.cloudLit.lerp(_grey.setRGB(lit * 0.62, lit * 0.64, lit * 0.68), W.grey);
+      K.cloudDark.lerp(_grey.setRGB(lit * 0.24, lit * 0.25, lit * 0.28), W.grey);
+    }
     const sun = sunDirAt(this.phase, this.sunDirection);
     const moon = moonDirAt(this.phase, this.moonDirection);
     const sunY = sun.y;
     const moonY = moon.y;
 
     this.daylight = smoothstep(-0.18, 0.3, sunY);
+    this.weather.aurora = this._auroraOn ? 1 - smoothstep(0.0, 0.12, this.daylight) : 0;
     this.moonlight = smoothstep(-0.04, 0.12, moonY);
     this.skyColor.copy(K.zenith);
     this.fogColor.copy(K.horizon);
@@ -903,7 +1126,7 @@ export class Sky {
     liftDir(sun, _liftA);
     liftDir(moon, _liftB);
     slerpDir(_liftB, _liftA, w, this.lightDirection);
-    this.sunLight.intensity = lerp(moonI, sunI, w);
+    this.sunLight.intensity = lerp(moonI, sunI, w) * lerp(1, W.sun, smoothstep(-0.05, 0.1, sunY) * 0.85 + 0.15);
     this.sunLight.color.lerpColors(MOON_LIGHT, this.sunColor, w);
     // Moon shadows are softer; low sun shadows fade a little into the haze;
     // and shadows vanish entirely while the key direction swings overhead
@@ -912,11 +1135,13 @@ export class Sky {
     this.sunLight.shadow.intensity =
       lerp(0.6, 0.92, w) *
       lerp(0.75, 1, smoothstep(0.02, 0.2, Math.max(sunY, moonY))) *
-      (1 - smoothstep(0.25, 0.85, swing));
+      (1 - smoothstep(0.25, 0.85, swing)) *
+      W.shadow;
 
     this.hemiLight.color.copy(K.hemiSky);
     this.hemiLight.groundColor.copy(K.hemiGround);
-    this.hemiLight.intensity = K.hemi;
+    // A little more sky fill by day: shadows read airy rather than black.
+    this.hemiLight.intensity = K.hemi * W.hemi * lerp(1, 1.25, this.daylight);
 
     // In a cave: the rock blocks most of the sky's fill and the direct light
     // (the cave surfaces carry their own baked darkness on top of this).
@@ -927,7 +1152,7 @@ export class Sky {
     }
 
     /* Fog */
-    const vd = this.viewDistance * this._fogScale;
+    const vd = this.viewDistance * this._fogScale * W.fog;
     this.fog.color.copy(K.horizon);
     // The haze is an outdoor thing: inside a cave push it back so its colour
     // (bright at dawn) never glows on the rock walls.
@@ -963,6 +1188,46 @@ export class Sky {
     u.uLightDir.value.copy(this.lightDirection);
     u.uCloudLit.value.copy(K.cloudLit);
     u.uCloudDark.value.copy(K.cloudDark);
+    u.uCloudGrey.value = W.grey;
+    u.uCloudCover.value = W.cover + (this._coverWobble || 0);
+    u.uAurora.value = this.weather.aurora * (1 - 0.8 * W.grey);
+
+    this._applyLook(K, W, sunY);
+  }
+
+  /** The painterly look's shared state (look.js) for this hour and weather. */
+  _applyLook(K, W, sunY) {
+    const L = LOOK;
+    const sh = this._shelter;
+    const p = this.phase;
+    // Valley mist: thick at dawn, a little at dusk and through the night,
+    // plus whatever the weather leaves lying all day. None under a cave roof.
+    const dawn = smoothstep(0.17, 0.235, p) * (1 - smoothstep(0.3, 0.42, p));
+    const night = 1 - smoothstep(0.0, 0.3, this.daylight);
+    const dusk = smoothstep(0.74, 0.82, p) * (1 - smoothstep(0.92, 1.0, p));
+    const mist = (W.mist * Math.max(dawn, 0.3 * night, 0.25 * dusk) + W.mistDay) * (1 - sh);
+    const deep = lerp(W.mistH, 8, dawn * (1 - W.mistDay)); // dawn banks hug the ground
+    L.uLookMist.value.set(MIST_DENSITY * mist, deep, this.seaLevel + 1, 0.55 + 0.3 * (1 - W.mistDay));
+    toFog(L.uLookMistColor.value, K.mist);
+    // Sunlit mist and haze glow toward a low sun.
+    const low = smoothstep(-0.08, 0.04, sunY) * (1 - smoothstep(0.15, 0.5, sunY));
+    toFog(L.uLookMistSun.value, this.sunColor).multiplyScalar(0.55 * low * (1 - 0.6 * W.pale));
+    L.uLookSun.value.set(this.sunDirection.x, this.sunDirection.y, this.sunDirection.z, 0.5 * (1 - 0.5 * W.pale));
+    toFog(_grey, K.glow);
+    L.uLookHazeGlow.value.set(_grey.r, _grey.g, _grey.b, K.glowAmt * 0.9);
+    toFog(L.uLookAerial.value, K.aerial);
+    // Cool sky bounce into shadows, by the key light's strength.
+    L.uLookFill.value.copy(K.fill).multiplyScalar(FILL_GAIN * K.fillK * this.sunLight.intensity * (1 - 0.6 * sh) * lerp(1, 1.3, W.pale));
+    // Grade: vibrance, cool shadows / warm highlights (golden hour warmest).
+    // By night the split tone and the rim ease off: under the moon everything
+    // sits in the "shadow" range, and a full-strength rim and blue lift turn
+    // the animals into pale ghosts.
+    const warm = K.warm * (1 - 0.7 * W.pale);
+    const dayK = smoothstep(0.05, 0.4, this.daylight);
+    L.uLookGrade.value.set(K.vib * (1 - 0.5 * W.pale), lerp(0.4, 1, dayK), 0.06, lerp(0.3, 1, dayK));
+    L.uLookShadowTint.value.setRGB(0.93, 0.965, 1.08);
+    L.uLookHighTint.value.setRGB(1 + 0.07 * warm, 1 + 0.01 * warm, 1 - 0.1 * warm);
+    L.uLookScreen.value.w = this._time;
   }
 
   /**

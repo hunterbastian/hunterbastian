@@ -18,6 +18,7 @@ import * as THREE from "three";
 import { makeRng } from "../core/rng.js";
 import { TAU, clamp, lerp, smoothstep } from "../core/math.js";
 import { SKY_COLOR_GLSL } from "./sky.js";
+import { LOOK, LOOK_PARS, LOOK_GRADE_GLSL, LOOK_ATMOS_GLSL } from "./look.js";
 
 /* --- Tuning --- */
 
@@ -61,6 +62,9 @@ const r2s = Math.sin(RIPPLE_2.angle).toFixed(6);
 
 const FRAGMENT = /* glsl */ `
 ${SKY_COLOR_GLSL}
+${LOOK_PARS}
+${LOOK_GRADE_GLSL}
+${LOOK_ATMOS_GLSL}
 uniform sampler2D uHeight;
 uniform vec4 uHeightMap;     // x: half tile size, y: 1 / cellSize, z: texels per side, w: sea level
 uniform sampler2D uFresh;
@@ -187,7 +191,7 @@ void main() {
   float back = pow(clamp(dot(-V, uLightDir) * 0.5 + 0.5, 0.0, 1.0), 6.0);
   body += shallowC * uKeyLight * back * clamp(dot(slope, normalize(V.xz + 1e-4)) * 6.0, 0.0, 1.0) * smoothstep(1.0, 6.0, depth) * 0.6;
   #ifdef TONE_MAPPING
-  body = toneMapping(body);
+  body = lookGrade(toneMapping(body));
   #endif
   // How much of the bed shows through: light goes down and comes back up
   // along the view ray; lakes are murkier.
@@ -206,7 +210,7 @@ void main() {
   caustic *= (1.0 - fresh * 0.75) * (1.0 - smoothstep(18.0, 70.0, dist)) * uDaylight;
   vec3 causticLight = uKeyLight * caustic * trans * 0.9;
   #ifdef TONE_MAPPING
-  causticLight = toneMapping(causticLight);
+  causticLight = lookGrade(toneMapping(causticLight));
   #endif
 
   /* Sky reflection (same model as the dome) and glints. */
@@ -248,7 +252,7 @@ void main() {
   foam *= 1.0 - smoothstep(180.0, 450.0, dist);
   vec3 foamLit = uFoam * (uAmbient + uKeyLight * (0.35 + 0.65 * max(uLightDir.y, 0.0)));
   #ifdef TONE_MAPPING
-  foamLit = toneMapping(foamLit);
+  foamLit = lookGrade(toneMapping(foamLit));
   #endif
 
   /* Composite, premultiplied: what the water adds over the (attenuated) bed. */
@@ -266,8 +270,15 @@ void main() {
   gl_FragColor = vec4(rgb / max(alpha, 1e-3), alpha);
   #include <colorspace_fragment>
 
-  /* Fog toward the sky's own horizon haze for this azimuth (incl. sun glow),
-     in the same colour space three.js mixes its fog in. */
+  /* Valley mist lying on the water (look.js), then fog toward the sky's own
+     horizon haze for this azimuth (incl. sun glow), blue in the middle
+     distance like the land's, in the same colour space three.js mixes its
+     fog in. */
+  float mist = lookMistAmount(cameraPosition, vWorld);
+  float mistSun = max(dot(-V, uLookSun.xyz), 0.0);
+  mistSun *= mistSun;
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, uLookMistColor + uLookMistSun * mistSun * mistSun, mist);
+  gl_FragColor.a = mix(gl_FragColor.a, 1.0, mist);
   #ifdef USE_FOG
   #ifdef FOG_EXP2
   float fogFactor = 1.0 - exp(-fogDensity * fogDensity * vFogDepth * vFogDepth);
@@ -276,9 +287,11 @@ void main() {
   #endif
   vec3 hazeDir = vec3(-V.x, 0.0, -V.z);
   vec3 haze = linearToOutputTexel(vec4(skyBase(hazeDir), 1.0)).rgb;
+  haze = mix(uLookAerial, haze, smoothstep(0.15, 0.95, fogFactor));
   gl_FragColor.rgb = mix(gl_FragColor.rgb, haze, fogFactor);
   gl_FragColor.a = mix(gl_FragColor.a, 1.0, fogFactor);
   #endif
+  gl_FragColor.rgb = lookFinish(gl_FragColor.rgb);
   gl_FragColor.rgb *= gl_FragColor.a;
 }
 `;
@@ -638,6 +651,7 @@ export class Water {
       },
     ]);
     // merge() clones uniform values; textures and our live vectors are shared.
+    Object.assign(this.uniforms, LOOK);
     this.uniforms.uHeight.value = height.texture;
     this.uniforms.uFresh.value = this._fresh;
     this.uniforms.uRipples.value = this._ripples;
