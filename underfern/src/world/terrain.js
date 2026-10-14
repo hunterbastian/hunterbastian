@@ -16,6 +16,7 @@ import { WORLD } from "../config.js";
 import { makeRng, rand, randInt, hash } from "../core/rng.js";
 import { clamp, lerp, smoothstep, TAU } from "../core/math.js";
 import { createNoise2D, createNoise2DGrad, fbm2D, ridged2D, erodedFbm2D } from "../core/noise.js";
+import { planCaves, carveCaves, buildCaveMeshes, describeCave, CaveIndex } from "./caves.js";
 
 export const BIOMES = ["ocean", "lake", "beach", "plains", "forest", "swamp", "highland", "rock"];
 
@@ -75,6 +76,11 @@ function boxInFrustum(box, o, margin) {
 function smin(a, b, k) {
   const h = Math.max(k - Math.abs(a - b), 0) / k;
   return Math.min(a, b) - h * h * k * 0.25;
+}
+
+/** Smooth maximum (peaks rising out of a ridge without a crease at the join). */
+function smax(a, b, k) {
+  return -smin(-a, -b, k);
 }
 
 const srgbToLinear = (c) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
@@ -252,6 +258,63 @@ function rasterPolyline(pts, radius, grid, dist, param, side = null) {
     }
   }
   return total;
+}
+
+/* --- Routes (pass valleys, trails, lookout ledges) ----------------------- */
+
+const ROUTE_SPACING = 6; // design metres between route profile samples
+
+/** A route from raw centreline points: resampled uniformly, floor from `floorAt`. */
+function finishRoute(pts, floorAt, kind, opts) {
+  const p = resample(chaikin(pts, 2), ROUTE_SPACING);
+  const n = p.length / 2;
+  const prof = new Float32Array(n);
+  for (let i = 0; i < n; i++) prof[i] = floorAt(p[i * 2], p[i * 2 + 1], i / Math.max(1, n - 1));
+  return { kind, pts: p, prof, length: polylineLength(p), ...opts };
+}
+
+/** Keep a profile's grade ≤ gmax per metre both ways (only ever cuts the bumps down). */
+function gradeLimit(prof, ds, gmax) {
+  for (let i = 1; i < prof.length; i++) prof[i] = Math.min(prof[i], prof[i - 1] + gmax * ds);
+  for (let i = prof.length - 2; i >= 0; i--) prof[i] = Math.min(prof[i], prof[i + 1] + gmax * ds);
+}
+
+/** Box-smooth a profile in place (radius r samples). */
+function smoothProf(prof, r) {
+  const tmp = Float32Array.from(prof);
+  for (let i = 0; i < prof.length; i++) {
+    let s = 0;
+    let c = 0;
+    for (let k = -r; k <= r; k++) {
+      const j = i + k;
+      if (j < 0 || j >= prof.length) continue;
+      s += tmp[j];
+      c++;
+    }
+    prof[i] = s / c;
+  }
+}
+
+/** Trail search moves on the layout grid: [dx, dz, heading] (8 + 8 knight moves). */
+const TRAIL_DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1], [2, 1], [2, -1], [-2, 1], [-2, -1], [1, 2], [1, -2], [-1, 2], [-1, -2]].map(
+  ([x, z]) => [x, z, Math.atan2(x, z)]
+);
+// Flat tables for the trail search's inner loop: offsets, lengths (cells),
+// the midpoint cell a knight move must not hop over, and the turning
+// penalty (radians past a gentle bend) between every pair of headings.
+const TD_N = TRAIL_DIRS.length;
+const TD_X = Int32Array.from(TRAIL_DIRS, (d) => d[0]);
+const TD_Z = Int32Array.from(TRAIL_DIRS, (d) => d[1]);
+const TD_LEN = Float64Array.from(TRAIL_DIRS, (d) => Math.hypot(d[0], d[1]));
+const TD_MX = Int32Array.from(TRAIL_DIRS, (d) => Math.round(d[0] / 2));
+const TD_MZ = Int32Array.from(TRAIL_DIRS, (d) => Math.round(d[1] / 2));
+const TD_TURN = new Float64Array(TD_N * TD_N);
+for (let a = 0; a < TD_N; a++) {
+  for (let b = 0; b < TD_N; b++) {
+    let turn = Math.abs(TRAIL_DIRS[b][2] - TRAIL_DIRS[a][2]);
+    if (turn > Math.PI) turn = 2 * Math.PI - turn;
+    TD_TURN[a * TD_N + b] = Math.max(0, turn - 0.42);
+  }
 }
 
 /** Minimal binary min-heap of (key, value) pairs for the river path search. */
@@ -1179,6 +1242,10 @@ varying vec3 vTerPos;
 varying vec3 vTerNrm;
 varying vec4 vTerA;
 varying vec4 vTerB;
+#ifdef TER_CAVE
+attribute float aCave;
+varying float vCave;
+#endif
 `;
 
 const VERT_MAIN = /* glsl */ `
@@ -1186,6 +1253,9 @@ vTerPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
 vTerNrm = normalize(mat3(modelMatrix) * objectNormal);
 vTerA = aMatA;
 vTerB = aMatB;
+#ifdef TER_CAVE
+vCave = aCave;
+#endif
 `;
 
 const FRAG_PARS = /* glsl */ `
@@ -1199,6 +1269,9 @@ varying vec3 vTerPos;
 varying vec3 vTerNrm;
 varying vec4 vTerA;
 varying vec4 vTerB;
+#ifdef TER_CAVE
+varying float vCave;
+#endif
 
 // The far-scale lookup is rotated, ~4.3x larger and pre-blurred: it adds the
 // texture's own broad mottling at a period that never lines up with the near
@@ -1355,8 +1428,29 @@ terRough = mix(terRough, 0.3, terWet * 0.85);
 float terDepth = max(-terAbove, 0.0);
 terAlb = mix(terAlb, terAlb * vec3(0.6, 0.84, 0.82), smoothstep(0.0, 1.2, terDepth));
 terAlb = mix(terAlb, terDeep, smoothstep(0.3, 7.0, terDepth) * 0.85);
+#ifdef TER_CAVE
+// Deeper in, the crevices darken (the baked light itself is applied after lighting).
+terAO *= mix(0.55, 1.0, vCave);
+#endif
 
 diffuseColor.rgb *= terAlb;
+`;
+
+// Caves only: the baked light (aCave — how much daylight reaches this far from
+// a mouth or skylight) scales the lit colour, and a dim fill from the sky's
+// hemisphere light stands in for light bouncing in, so deep walls stay
+// readable instead of black (and follow day and night).
+const FRAG_CAVE_LIGHT = /* glsl */ `
+#ifdef TER_CAVE
+{
+#if NUM_HEMI_LIGHTS > 0
+  vec3 terFill = 0.5 * (hemisphereLights[0].skyColor + hemisphereLights[0].groundColor);
+#else
+  vec3 terFill = vec3(0.4);
+#endif
+  outgoingLight = outgoingLight * vCave + diffuseColor.rgb * terFill * (0.8 * (1.0 - vCave));
+}
+#endif
 `;
 
 /**
@@ -1388,9 +1482,29 @@ function createTerrainMaterial(textures, seaLevel) {
       .replace(
         "#include <aomap_fragment>",
         "reflectedLight.indirectDiffuse *= terAO;\nreflectedLight.indirectSpecular *= mix(1.0, terAO, 0.7);"
-      );
+      )
+      .replace("#include <opaque_fragment>", `${FRAG_CAVE_LIGHT}\n#include <opaque_fragment>`);
   };
   mat.customProgramCacheKey = () => "sauria-terrain-v3";
+  return mat;
+}
+
+/**
+ * The caves' variant of the terrain material: same surface (it shares the
+ * terrain's uniforms, so texture upgrades reach it too) plus a baked light
+ * term per vertex (aCave), and pushed back a hair in depth so where a cave's
+ * skirt lies on the hillside the terrain wins.
+ */
+function createCaveMaterial(terrainMat) {
+  const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.9, metalness: 0 });
+  mat.name = "CaveMaterial";
+  mat.userData.uniforms = terrainMat.userData.uniforms;
+  mat.defines = { TER_CAVE: "" };
+  mat.polygonOffset = true;
+  mat.polygonOffsetFactor = 1;
+  mat.polygonOffsetUnits = 2;
+  mat.onBeforeCompile = terrainMat.onBeforeCompile;
+  mat.customProgramCacheKey = () => "underfern-cave-v1";
   return mat;
 }
 
@@ -1458,12 +1572,22 @@ export class Terrain {
     this._layout(g);
     this._placeLakes(g);
     this._placeRivers(g);
+    let t1 = now();
+    this._planLookouts(g);
+    timings.lookouts = now() - t1;
+    t1 = now();
+    this._planCaves(g);
+    timings.cavePlan = now() - t1;
+    this._exportMassif(g);
     timings.layout = now() - t;
     t = now();
     this._shapeVertices(g);
+    this._refinePeaks();
     timings.shape = now() - t;
     t = now();
     this._carveWater(g);
+    this._carveRoutes(g, true);
+    this._carveCaves(g);
     this._classifyWater(g);
     timings.water = now() - t;
     t = now();
@@ -1471,7 +1595,15 @@ export class Terrain {
     timings.paint = now() - t;
 
     // Everything above works relative to the sea; store absolute heights.
-    if (seaLevel !== 0) for (let i = 0; i < n * n; i++) this.heights[i] += seaLevel;
+    if (seaLevel !== 0) {
+      for (let i = 0; i < n * n; i++) {
+        this.heights[i] += seaLevel;
+        this._surfH[i] += seaLevel;
+        this._topH[i] += seaLevel;
+      }
+    }
+    // From here on heightAt reads cave floors from the cave index.
+    this._caveFloor = !!(this._caveIndex && this.caves.length);
 
     t = now();
     this._collectShore();
@@ -1485,6 +1617,9 @@ export class Terrain {
     timings.textures = now() - t;
     t = now();
     this.mesh = this._buildMesh(textures);
+    t1 = now();
+    this._buildCaveMeshes(g);
+    timings.caveMesh = now() - t1;
     this.heightTexture = this._buildHeightTexture();
     timings.mesh = now() - t;
 
@@ -1513,9 +1648,17 @@ export class Terrain {
   /**
    * Ground height at a world position. Interpolates over the same two
    * triangles per cell the mesh is drawn with, so feet sit exactly on the
-   * visible surface. Off the tile → deep ocean.
+   * visible surface; under a cave's roof it is the cave's floor (as its
+   * mesh draws it — see surfaceAt / groundAt for the hillside on top).
+   * Off the tile → deep ocean.
    */
   heightAt(x, z) {
+    const h = this._gridHeightAt(x, z);
+    return this._caveFloor ? this._caveIndex.floorAt(x, z, h - this.seaLevel) + this.seaLevel : h;
+  }
+
+  /** The heightfield alone, interpolated on the mesh's own triangles. */
+  _gridHeightAt(x, z) {
     const res = this.resolution;
     const fx = (x + this.half) / this.cellSize;
     const fz = (z + this.half) / this.cellSize;
@@ -1563,6 +1706,8 @@ export class Terrain {
   /** One of BIOMES. Water → "ocean" | "lake" (rivers count as "lake"). */
   biomeAt(x, z) {
     if (this.heightAt(x, z) < this.seaLevel) return this.isFreshWater(x, z) ? "lake" : "ocean";
+    // Inside a cave it's bare rock, whatever grows on the hillside above.
+    if (this._caveIndex && this._caveIndex.zoneAt(x, z) === 2) return "rock";
     const res = this.resolution;
     const ix = clamp(Math.round((x + this.half) / this.cellSize), 0, res);
     const iz = clamp(Math.round((z + this.half) / this.cellSize), 0, res);
@@ -1589,6 +1734,85 @@ export class Terrain {
   inBounds(x, z, margin = 0) {
     const h = this.half - margin;
     return x >= -h && x <= h && z >= -h && z <= h;
+  }
+
+  /* --- Caves ------------------------------------------------------------- */
+
+  /**
+   * World y of the rock overhead — a cave's ceiling — or Infinity in the open.
+   * Beside a cave's vault (inside the rock) it is at or below the floor.
+   */
+  ceilingAt(x, z) {
+    const ci = this._caveIndex;
+    if (!ci) return Infinity;
+    const c = ci.ceilingAt(x, z);
+    return c === Infinity ? c : c + this.seaLevel;
+  }
+
+  /** Headroom in metres: ceilingAt − heightAt. Infinity in the open, ≤ 0 inside rock. */
+  clearanceAt(x, z) {
+    const c = this.ceilingAt(x, z);
+    return c === Infinity ? Infinity : c - this.heightAt(x, z);
+  }
+
+  /** 0 in the open … 1 deep in a cave, where no daylight reaches (mouths and skylights let it in). */
+  shelterAt(x, z) {
+    return this._caveIndex ? this._caveIndex.shelterAt(x, z) : 0;
+  }
+
+  /** True under a cave's roof. */
+  inCave(x, z) {
+    return this._caveIndex ? this._caveIndex.zoneAt(x, z) === 2 : false;
+  }
+
+  /** The cave (an entry of `caves`) whose roof covers (x, z), or null. */
+  caveAt(x, z) {
+    if (!this._caveIndex || this._caveIndex.zoneAt(x, z) !== 2) return null;
+    const c = this._caveIndex.caveAt(x, z);
+    return c ? this.caves[c.id] : null;
+  }
+
+  /**
+   * True in or near a cave: under its roof, in the cut before a mouth, just
+   * around them — or anywhere the cave's floor (heightAt) lies hidden below
+   * the hillside, where nothing should be placed at heightAt.
+   */
+  nearCave(x, z) {
+    if (!this._caveIndex) return false;
+    if (this._caveIndex.zoneAt(x, z) > 0) return true;
+    const res = this.resolution;
+    const fx = (x + this.half) / this.cellSize;
+    const fz = (z + this.half) / this.cellSize;
+    if (!(fx >= 0 && fz >= 0 && fx <= res && fz <= res)) return false;
+    const ix = Math.min(res - 1, fx | 0);
+    const iz = Math.min(res - 1, fz | 0);
+    const n = this._n;
+    const zone = this._caveZone;
+    for (let q = 0; q < 4; q++) {
+      const i = (iz + (q >> 1)) * n + ix + (q & 1);
+      if (zone[i] === 2 && this._surfH[i] - this.heights[i] > 0.3) return true;
+    }
+    return false;
+  }
+
+  /** The highest walkable surface: over a cave, the hillside on top of it; elsewhere heightAt. */
+  surfaceAt(x, z) {
+    if (!this._caveIndex || this._caveIndex.zoneAt(x, z) !== 2) return this.heightAt(x, z);
+    return Math.max(this.heightAt(x, z), this._sampleField(this._topH, x, z));
+  }
+
+  /**
+   * The ground under something at height y: inside a cave (below the middle of
+   * its roof) the cave floor, on top of a cave the hillside, elsewhere heightAt.
+   */
+  groundAt(x, z, y = -Infinity) {
+    const h = this.heightAt(x, z);
+    const ci = this._caveIndex;
+    if (!ci || y === -Infinity) return h;
+    const c = ci.ceilingAt(x, z);
+    if (c === Infinity) return h;
+    const top = this._sampleField(this._topH, x, z);
+    return y > (c + this.seaLevel + top) * 0.5 ? Math.max(h, top) : h;
   }
 
   /**
@@ -1628,6 +1852,8 @@ export class Terrain {
       }
       if (this.heightAt(x, z) - this.seaLevel < minHeight) continue;
       if (this.slopeAt(x, z) > maxSlope) continue;
+      // Nothing ever spawns in (or in the mouth of) a cave.
+      if (this.nearCave(x, z)) continue;
       if (biomes && biomes.length && !biomes.includes(this.biomeAt(x, z))) continue;
       return { x, z };
     }
@@ -1714,7 +1940,8 @@ export class Terrain {
       for (let u = 0; u < px; u++) {
         const x = -half + (u + 0.5) * mpp;
         const i = v * px + u;
-        H[i] = this._sampleField(this.heights, x, z) - sea;
+        // The surface as drawn: over a cave, the hillside (the cave is a symbol).
+        H[i] = this._sampleField(this._surfH, x, z) - sea;
         fresh[i] = this._sampleField(this._freshField, x, z);
         shoreDist[i] = this._sampleField(this._landDist, x, z);
       }
@@ -1829,6 +2056,7 @@ export class Terrain {
     }
     ctx.putImageData(img, 0, 0);
     this._mapSymbols(ctx, px);
+    this._mapLandmarks(ctx, px);
 
     // Neat-line frame, like a printed plate.
     const inset = Math.round(px * 0.022) + 0.5;
@@ -1846,6 +2074,8 @@ export class Terrain {
     this._disposed = true;
     this.mesh.geometry.dispose();
     this.mesh.material.dispose();
+    for (const m of this.caveMeshes || []) m.geometry.dispose();
+    if (this.caveMeshes && this.caveMeshes[0]) this.caveMeshes[0].material.dispose();
     this.heightTexture.dispose();
   }
 
@@ -1891,6 +2121,11 @@ export class Terrain {
       nMacro: tag("macro"),
       nOutcrop: tag("outcrop"),
       nMid: tag("mid"),
+      // The massif (peaks, cliff bands, passes) and the caves draw from their
+      // own streams so the older layout above keeps its sequence.
+      nPeak: createNoise2D(hash("underfern-massif", "peak", this.seed)),
+      nBand: createNoise2D(hash("underfern-massif", "band", this.seed)),
+      nCave: createNoise2D(hash("underfern-caves", "shape", this.seed)),
       // The vertex grid in design metres.
       vgrid: { n: this._n, origin: -this.half / k, step: this.cellSize / k },
       lgrid: { n: LAYOUT_RES + 1, origin: -DESIGN_SIZE / 2, step: DESIGN_SIZE / LAYOUT_RES },
@@ -1968,6 +2203,9 @@ export class Terrain {
       g.islets.push({ x, z, r: rand(rng, 34, 66), peak: rand(rng, 6, 22) });
     }
 
+    // The massif: horn peaks along the spine and the saddles of its passes.
+    this._planMassif(g);
+
     // Large-scale height on the layout grid.
     const L = g.lgrid;
     const LN = L.n;
@@ -2020,6 +2258,10 @@ export class Terrain {
     const lH = new Float32Array(LN * LN);
     for (let i = 0; i < LN * LN; i++) lH[i] = rest[i] + mtn[i] * g.mtnScale;
     g.lH = lH;
+
+    // A walkable valley through every pass, carved into the layout heights so
+    // everything decided later (lakes, rivers, trails, caves, gullies) sees it.
+    this._planPassValleys(g);
 
     // Smoothed slope of the large-scale surface (m/m) — steers the gullies.
     const lGx = new Float32Array(LN * LN);
@@ -2197,6 +2439,7 @@ export class Terrain {
     let mtn = 0;
     let hm = 0;
     let mm = 0;
+    let rough = 0;
     let sw = 0;
     if (m < 0) {
       // Sea floor: a shallow shelf off the beaches, then a drop to the deep.
@@ -2243,25 +2486,9 @@ export class Terrain {
           const terr = (fl + smoothstep(0.5 - sharp, 0.5 + sharp, tq - fl)) * step - wander;
           h = lerp(hb, terr, hm * (0.3 + 0.62 * mesa));
         }
-        if (dd < w * 1.8) {
-          // A coherent massif rather than a field of spikes: one crest line
-          // with peaks and saddles, spurs running down the flanks (gullies
-          // between them come later), one flank steeper than the other.
-          const ws = w * (side === g.steepSide ? 0.78 : 1.18);
-          mm = smoothstep(ws * 1.5, ws * 0.1, dd);
-          if (mm > 0) {
-            const along = st * g.spineLen;
-            const crest = 0.5 + 0.5 * fbm2D(g.nRidge, along * 0.0048 + 3.1, 7.7, 3);
-            const ends = Math.sqrt(Math.sin(Math.PI * clamp(st, 0, 1)));
-            const spur = 1 - Math.abs(g.nSpur((along + 30 * wa) / 95, (dd + 30 * wb) / 170));
-            const flank = Math.sin(Math.PI * clamp(dd / (ws * 1.5), 0, 1));
-            let prof = Math.pow(mm, 1.25);
-            prof *= 1 - 0.38 * flank * (1 - spur * spur);
-            // Rough crags along the top.
-            const crag = mm * mm * mm * ridged2D(g.nCrag, wx * 0.0075, wz * 0.0075, 2);
-            mtn = (prof * (18 + 118 * (0.3 + 0.7 * crest) * ends) + 4.5 * crag) * smoothstep(0, 14, m);
-          }
-        }
+        mtn = this._mountain(g, x, z, wx, wz, sd, dd, st, side, w, wa, wb) * smoothstep(0, 14, m);
+        mm = f.mm;
+        rough = f.rough;
       }
 
       // Swampy lowlands: flatten toward just above sea level. Only ground
@@ -2281,6 +2508,7 @@ export class Terrain {
     f.mtn = mtn * (1 - edge);
     f.hm = hm;
     f.mm = mm;
+    f.rough = rough;
     f.sw = sw;
     f.cliff = cliff;
     f.cliffN = cliffN;
@@ -2288,6 +2516,823 @@ export class Terrain {
     f.pn = pn;
     f.mesaN = mesaN;
     return h;
+  }
+
+  /* --- Generation: caves -------------------------------------------------- */
+
+  /** Pick cave sites on the layout grid (see caves.js). */
+  _planCaves(g) {
+    const L = g.lgrid;
+    const LN = L.n;
+    const reach = this._layoutReach(g, true);
+    const avoid = [];
+    for (const o of g.lookouts) avoid.push({ x: o.x, z: o.z, r: 60 });
+    for (const p of g.passes) avoid.push({ x: p.x, z: p.z, r: 70 });
+    for (const rt of g.routes) {
+      if (rt.kind === "valley") continue;
+      for (let i = 0; i < rt.pts.length; i += 4) avoid.push({ x: rt.pts[i], z: rt.pts[i + 1], r: 22 });
+    }
+    g.caves = planCaves({
+      seed: this.seed,
+      half: g.dHalf,
+      ground: (x, z) => this._lsample(g, g.lH, x, z),
+      mountain: (x, z) => this._lsample(g, g.lMm, x, z),
+      coast: (x, z) => this._lsample(g, g.lC, x, z),
+      reach: (x, z) => {
+        const ix = Math.round((x - L.origin) / L.step);
+        const iz = Math.round((z - L.origin) / L.step);
+        for (let dz = -1; dz <= 1; dz++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const jx = ix + dx;
+            const jz = iz + dz;
+            if (jx >= 0 && jz >= 0 && jx < LN && jz < LN && reach[jz * LN + jx]) return true;
+          }
+        }
+        return false;
+      },
+      avoid,
+    });
+  }
+
+  /**
+   * Cut the caves into the physics heights and set up the render / top
+   * surfaces, the cells the mesh leaves out, and the runtime lookups.
+   */
+  _carveCaves(g) {
+    const k = g.k;
+    const res = carveCaves(g.caves, {
+      heights: this.heights,
+      n: this._n,
+      grid: g.vgrid,
+      cell: this.cellSize / k,
+      sample: (field, x, z) => this._sampleField(field, x * k, z * k),
+    });
+    this._surfH = res.surf;
+    this._topH = res.top;
+    this._caveHole = res.hole;
+    this._caveZone = res.zone;
+    this._caveIndex = new CaveIndex(g.caves, k, (x, z) => this._sampleField(this._topH, x, z));
+    /**
+     * Caves in world metres: [{ id, kind: "den"|"tunnel"|"cavern", label,
+     *   entrances: [{ x, z, y, outsideX, outsideZ, heading, width, height }],
+     *   height (lowest mouth clearance — who fits), maxHeight, maxWidth, length,
+     *   deep: { x, z, y } (a sheltered spot inside), skylights: [{ x, z, r }], path }]
+     */
+    this.caves = g.caves.map((c) => describeCave(c, k));
+    let holes = 0;
+    for (const h of res.hole) holes += h;
+    this.stats.caves = this.caves.length;
+    this.stats.caveHoleCells = holes;
+  }
+
+  /** The caves' own meshes (children of the terrain mesh, sharing its surface textures). */
+  _buildCaveMeshes(g) {
+    const k = g.k;
+    const sea = this.seaLevel;
+    const mat = createCaveMaterial(this.mesh.material);
+    const meshes = buildCaveMeshes(
+      g.caves,
+      {
+        k,
+        seed: this.seed,
+        cell: this.cellSize / k,
+        low: this.resolution < 400,
+        heights: this.heights,
+        top: this._topH,
+        sample: (field, x, z) => this._sampleField(field, x * k, z * k) - sea,
+        weights: (x, z) => this._weightsAt(x * k, z * k),
+        normalAt: (field, x, z) => this._fieldNormal(field, x * k, z * k),
+      },
+      mat
+    );
+    let tris = 0;
+    for (const m of meshes) {
+      m.position.y = sea;
+      m.updateMatrix();
+      this.mesh.add(m);
+      tris += m.geometry.index.count / 3;
+    }
+    this.caveMeshes = meshes;
+    this.stats.caveTriangles = tris;
+  }
+
+  /** Material weights at a world point (bilinear), as [[grass, dry, dirt, rock], [sand, mud, ao, macro]] 0..1. */
+  _weightsAt(x, z) {
+    const res = this.resolution;
+    const fx = clamp((x + this.half) / this.cellSize, 0, res);
+    const fz = clamp((z + this.half) / this.cellSize, 0, res);
+    let ix = fx | 0;
+    let iz = fz | 0;
+    if (ix >= res) ix = res - 1;
+    if (iz >= res) iz = res - 1;
+    const tx = fx - ix;
+    const tz = fz - iz;
+    const n = this._n;
+    const a = iz * n + ix;
+    const out = [[0, 0, 0, 0], [0, 0, 0, 0]];
+    const w = [(1 - tx) * (1 - tz), tx * (1 - tz), (1 - tx) * tz, tx * tz];
+    const v = [a, a + 1, a + n, a + n + 1];
+    for (let q = 0; q < 4; q++) {
+      const o = v[q] * 4;
+      for (let c = 0; c < 4; c++) {
+        out[0][c] += (this._matA[o + c] / 255) * w[q];
+        out[1][c] += (this._matB[o + c] / 255) * w[q];
+      }
+    }
+    return out;
+  }
+
+  /** Smoothed normal of any per-vertex height field (central differences over a cell). */
+  _fieldNormal(field, x, z) {
+    const e = this.cellSize;
+    const dx = this._sampleField(field, x - e, z) - this._sampleField(field, x + e, z);
+    const dz = this._sampleField(field, x, z - e) - this._sampleField(field, x, z + e);
+    const l = Math.hypot(dx, 2 * e, dz) || 1;
+    return [dx / l, (2 * e) / l, dz / l];
+  }
+
+  /* --- Generation: the massif --------------------------------------------- */
+
+  /** Point and unit tangent at normalised arc length `st` along the spine. */
+  _spineAt(g, st) {
+    const p = g.spine;
+    const cum = g.spineCum;
+    const s = clamp(st, 0, 1) * g.spineLen;
+    let i = 0;
+    while (i < cum.length - 2 && cum[i + 1] < s) i++;
+    const seg = cum[i + 1] - cum[i] || 1;
+    const u = (s - cum[i]) / seg;
+    const x0 = p[i * 2];
+    const z0 = p[i * 2 + 1];
+    const dx = p[i * 2 + 2] - x0;
+    const dz = p[i * 2 + 3] - z0;
+    const l = Math.hypot(dx, dz) || 1;
+    return { x: x0 + dx * u, z: z0 + dz * u, tx: dx / l, tz: dz / l };
+  }
+
+  /**
+   * Roll the massif on the spine: 3–4 horn peaks spread along it (one main
+   * summit) and 1–2 passes in the saddles between neighbours. Heights are
+   * metres of mountain above the highland they rise from.
+   */
+  _planMassif(g) {
+    const rng = makeRng(hash("underfern-massif", this.seed));
+    g.mrng = rng;
+    const cum = [0];
+    for (let i = 2; i < g.spine.length; i += 2) {
+      cum.push(cum[cum.length - 1] + Math.hypot(g.spine[i] - g.spine[i - 2], g.spine[i + 1] - g.spine[i - 1]));
+    }
+    g.spineCum = cum;
+    const count = randInt(rng, 3, 4);
+    const main = randInt(rng, 1, count - 2);
+    g.peaks = [];
+    for (let k = 0; k < count; k++) {
+      const st = lerp(0.17, 0.83, k / (count - 1)) + rand(rng, -0.04, 0.04);
+      const sp = this._spineAt(g, st);
+      const lat = rand(rng, -0.2, 0.2) * g.rangeWidth;
+      g.peaks.push({
+        st,
+        x: sp.x - sp.tz * lat,
+        z: sp.z + sp.tx * lat,
+        // Unit vector toward the steep flank (side +1 of the spine is (−tz, tx)).
+        sx: -sp.tz * g.steepSide,
+        sz: sp.tx * g.steepSide,
+        h: k === main ? 140 : rand(rng, 96, 120),
+        r: g.rangeWidth * rand(rng, 1.15, 1.45),
+        rot: rng() * TAU,
+        aretes: randInt(rng, 3, 4),
+        seed: rng() * 50,
+        main: k === main,
+      });
+    }
+    // Passes sit in the widest gaps between neighbouring peaks.
+    const gaps = [];
+    for (let k = 0; k < count - 1; k++) gaps.push({ k, w: g.peaks[k + 1].st - g.peaks[k].st });
+    gaps.sort((a, b) => b.w - a.w);
+    const passCount = count >= 4 && rng() < 0.6 ? 2 : 1;
+    g.passes = [];
+    for (let q = 0; q < passCount; q++) {
+      const { k } = gaps[q];
+      const st = lerp(g.peaks[k].st, g.peaks[k + 1].st, rand(rng, 0.42, 0.58));
+      g.passes.push({ st, along: st * g.spineLen, sigma: rand(rng, 40, 52), depth: 0.42 });
+    }
+  }
+
+  /**
+   * The mountain layer (metres) at a design point: a sharp-crested ridge with
+   * spurs and pass notches, horn peaks with arêtes and hollowed cirque faces,
+   * crags on top, and cliff bands where the rock is stepped into ledges.
+   * Leaves the mountain mask (0..1) in g.field.mm.
+   */
+  _mountain(g, x, z, wx, wz, sd, dd, st, side, w, wa, wb) {
+    const f = g.field;
+    const steep = side === g.steepSide;
+    const ws = w * (steep ? 0.74 : 1.22);
+    const reach = ws * 1.55;
+    // The warp that bends the range is faded out right at the spine, so the
+    // crest keeps a sharp edge instead of a flat top where the warp is negative.
+    const dc = sd + (dd - sd) * smoothstep(0, 70, sd);
+    let mm = dc < reach ? smoothstep(reach, ws * 0.1, dc) : 0;
+    let mtn = 0;
+    if (mm > 0) {
+      const along = st * g.spineLen;
+      const crestN = fbm2D(g.nRidge, along * 0.0048 + 3.1, 7.7, 3);
+      const ends = Math.sqrt(Math.sin(Math.PI * clamp(st, 0, 1)));
+      let notch = 0;
+      for (let p = 0; p < g.passes.length; p++) {
+        const ps = g.passes[p];
+        const q = (along - ps.along) / ps.sigma;
+        notch = Math.max(notch, ps.depth * Math.exp(-q * q));
+      }
+      const spur = 1 - Math.abs(g.nSpur((along + 30 * wa) / 95, (dc + 30 * wb) / 170));
+      const u = clamp(dc / reach, 0, 1);
+      const flank = Math.sin(Math.PI * u);
+      let prof = Math.pow(1 - u, 1.4);
+      prof *= 1 - 0.38 * flank * (1 - spur * spur);
+      mtn = 128 * (0.5 + 0.2 * crestN) * ends * (1 - notch) * prof;
+      // A serrated crest: towers and notches along the ridgeline.
+      const saw = ridged2D(g.nCrag, along * 0.021 + 5.3, dc * 0.012 - 2.1, 2);
+      mtn += 14 * saw * prof * prof * prof * ends * (1 - notch);
+    }
+    // Horn peaks rise out of the ridge.
+    let pk = 0;
+    let pkF = 0;
+    for (let k = 0; k < g.peaks.length; k++) {
+      const P = g.peaks[k];
+      const v = this._peak(g, P, x, z);
+      if (v > pk) {
+        pk = v;
+        pkF = v / P.h;
+      }
+    }
+    if (pk > 0) {
+      mtn = smax(mtn, pk, 16);
+      mm = Math.max(mm, Math.min(1, pk / 40));
+    }
+    let rough = 0;
+    if (mtn > 0.5) {
+      // Rough crags along crests and summits.
+      const crag = ridged2D(g.nCrag, wx * 0.0075, wz * 0.0075, 2);
+      mtn += (3.5 + 7 * pkF) * crag * Math.max(mm * mm * mm, pkF * pkF);
+      // Cliff bands: the rock steps into sheer risers and ledges on the steep
+      // flank, in patches elsewhere, and all over the upper peaks.
+      const band = smoothstep(-0.2, 0.3, g.nBand(x * 0.0065, z * 0.0065));
+      const faces = smoothstep(-0.35, 0.25, g.nBand(x * 0.011 + 31.7, z * 0.011 - 12.9));
+      const sideK = lerp(0.7, steep ? 1 : 0.4, smoothstep(0, 40, dc));
+      const zone = clamp(band * sideK * smoothstep(0.2, 0.55, mm) + 0.8 * smoothstep(0.3, 0.7, pkF) * faces, 0, 1);
+      // Where the rock is sheer (bands, the horns' faces) the vertices add crags.
+      rough = clamp(zone + smoothstep(0.3, 0.7, pkF), 0, 1) * smoothstep(6, 20, mtn);
+      if (zone > 0.01 && mtn > 6) {
+        const step = 15;
+        const wander = 5 * g.nBand(x * 0.019 + 7.7, z * 0.019 - 3.1) + 3 * band;
+        const tq = (mtn + wander) / step;
+        const fl = Math.floor(tq);
+        const terr = (fl + smoothstep(0.36, 0.64, tq - fl)) * step - wander;
+        mtn = lerp(mtn, terr, zone * 0.82);
+      }
+    }
+    f.mm = mm;
+    f.rough = rough;
+    return mtn;
+  }
+
+  /** One horn peak: a concave pyramid with 3–4 arêtes and hollowed faces between them. */
+  _peak(g, P, x, z) {
+    const dx = x - P.x;
+    const dz = z - P.z;
+    const r2 = dx * dx + dz * dz;
+    const R = P.r * 1.2;
+    if (r2 >= R * R) return 0;
+    const r = Math.sqrt(r2);
+    // The steep flank of the range is steeper on the peaks too (a smooth
+    // lean toward that side, so there is no seam along the spine).
+    const lean = r > 1e-3 ? (dx * P.sx + dz * P.sz) / r : 0;
+    const Rr = P.r * (1 - 0.18 * lean);
+    if (r >= Rr) return 0;
+    const u = r / Rr;
+    const a = Math.atan2(dz, dx) + P.rot + 0.55 * g.nPeak(x * 0.006 + P.seed, z * 0.006);
+    const ar = 0.5 + 0.5 * Math.cos(a * P.aretes);
+    const ridge = ar * ar * ar;
+    // Concave flanks, but a blunt, rugged summit block rather than a needle.
+    const base = Math.pow(1 - u, 1.5) * (1 - 0.16 * Math.exp(-u * u * 40));
+    const hollow = 1 - 0.32 * (1 - ridge) * Math.sin(Math.PI * Math.min(1, u * 1.2));
+    return P.h * base * hollow;
+  }
+
+  /** Publish the massif's landmarks and routes in world metres. */
+  _exportMassif(g) {
+    const k = g.k;
+    const line = (pts) => {
+      const out = [];
+      for (let i = 0; i < pts.length; i += 2) out.push({ x: pts[i] * k, z: pts[i + 1] * k });
+      return out;
+    };
+    this.peaks = g.peaks.map((p) => ({ x: p.x * k, z: p.z * k, h: 0, main: p.main }));
+    this.passes = g.passes.map((p) => ({ x: p.x * k, z: p.z * k, h: p.h * k }));
+    this.lookouts = g.lookouts.map((o) => ({ x: o.x * k, z: o.z * k, h: o.h * k }));
+    this.routes = g.routes
+      .filter((r) => r.kind !== "pad")
+      .map((r) => ({ kind: r.kind, width: r.fw * 2 * k, points: line(r.pts) }));
+    this.trails = this.routes.filter((r) => r.kind === "trail").map((r) => r.points);
+  }
+
+  /** Summits as built: the highest vertex near each planned peak. */
+  _refinePeaks() {
+    const n = this._n;
+    const cs = this.cellSize;
+    for (const p of this.peaks) {
+      let best = -Infinity;
+      let bx = p.x;
+      let bz = p.z;
+      const r = Math.ceil(45 / cs);
+      const cx = Math.round((p.x + this.half) / cs);
+      const cz = Math.round((p.z + this.half) / cs);
+      for (let iz = Math.max(0, cz - r); iz <= Math.min(n - 1, cz + r); iz++) {
+        for (let ix = Math.max(0, cx - r); ix <= Math.min(n - 1, cx + r); ix++) {
+          const h = this.heights[iz * n + ix];
+          if (h > best) {
+            best = h;
+            bx = -this.half + ix * cs;
+            bz = -this.half + iz * cs;
+          }
+        }
+      }
+      p.x = bx;
+      p.z = bz;
+      p.h = best; // generation works relative to the sea
+    }
+    this.peaks.sort((a, b) => b.h - a.h);
+  }
+
+  /** Bilinear sample of a layout-grid field at a design point. */
+  _lsample(g, field, x, z) {
+    const L = g.lgrid;
+    const n = L.n;
+    const fx = clamp((x - L.origin) / L.step, 0, n - 1.0001);
+    const fz = clamp((z - L.origin) / L.step, 0, n - 1.0001);
+    const ix = fx | 0;
+    const iz = fz | 0;
+    const tx = fx - ix;
+    const tz = fz - iz;
+    const a = iz * n + ix;
+    const top = field[a] + (field[a + 1] - field[a]) * tx;
+    const bot = field[a + n] + (field[a + n + 1] - field[a + n]) * tx;
+    return top + (bot - top) * tz;
+  }
+
+  /**
+   * A U-shaped valley through every pass, from foothills to foothills, floor
+   * graded ≤ ~1:5 (sheer walls, flat floor), decided on the layout grid. A
+   * route carries a centreline (design m, uniform spacing) and a floor height
+   * per point; _carveRoute turns that into terrain. The layout heights get
+   * the same carve.
+   */
+  _planPassValleys(g) {
+    const rng = g.mrng;
+    const H = g.lH;
+    g.routes = [];
+    const SPACING = ROUTE_SPACING;
+    const GRADE = 0.2;
+    const finish = (pts, floorAt, kind, opts) => finishRoute(pts, floorAt, kind, opts);
+
+    for (const ps of g.passes) {
+      const sp = this._spineAt(g, ps.st);
+      const nx = -sp.tz;
+      const nz = sp.tx;
+      const arms = [];
+      for (const s of [-1, 1]) {
+        // Walk out of the range, leaning toward lower ground and turning gently.
+        let x = sp.x;
+        let z = sp.z;
+        let hx = nx * s;
+        let hz = nz * s;
+        const arm = [];
+        const STEP = 10;
+        for (let i = 0; i < 40; i++) {
+          x += hx * STEP;
+          z += hz * STEP;
+          arm.push(x, z);
+          const h = this._lsample(g, H, x, z);
+          const c = this._lsample(g, g.lC, x, z);
+          // Out of the mountains (onto the highland or the plains): done.
+          if (i > 6 && (this._lsample(g, g.lMm, x, z) < 0.04 || h < 12 || c < 0.12)) break;
+          let best = Infinity;
+          let bx = hx;
+          let bz = hz;
+          for (const da of [-0.22, 0, 0.22]) {
+            const ca = Math.cos(da);
+            const sa = Math.sin(da);
+            const tx = hx * ca - hz * sa;
+            const tz = hx * sa + hz * ca;
+            const hh = this._lsample(g, H, x + tx * 40, z + tz * 40) + Math.abs(da) * 6;
+            if (hh < best) {
+              best = hh;
+              bx = tx;
+              bz = tz;
+            }
+          }
+          // Stay roughly perpendicular to the spine for the first stretch so the
+          // valley actually cuts across the range.
+          const keep = i < 10 ? 0.75 : 0.25;
+          hx = hx * keep + bx * (1 - keep);
+          hz = hz * keep + bz * (1 - keep);
+          const hl = Math.hypot(hx, hz) || 1;
+          hx /= hl;
+          hz /= hl;
+        }
+        arms.push(arm);
+      }
+      // One centreline: arm A reversed → pass → arm B.
+      const a = arms[0];
+      let pts = [];
+      for (let i = a.length - 2; i >= 0; i -= 2) pts.push(a[i], a[i + 1]);
+      pts.push(sp.x, sp.z);
+      pts.push(...arms[1]);
+      // Meander: a lateral swing that is zero at the saddle (the valley must
+      // thread the notch) and at both ends.
+      pts = resample(chaikin(pts, 2), SPACING);
+      {
+        const np = pts.length / 2;
+        let ipass = 0;
+        let bd = Infinity;
+        for (let i = 0; i < np; i++) {
+          const d = Math.hypot(pts[i * 2] - sp.x, pts[i * 2 + 1] - sp.z);
+          if (d < bd) {
+            bd = d;
+            ipass = i;
+          }
+        }
+        const total = (np - 1) * SPACING;
+        const seed = rng() * 40;
+        const amp = rand(rng, 16, 26);
+        const out = [];
+        for (let i = 0; i < np; i++) {
+          const s = i * SPACING;
+          const i0 = Math.max(0, i - 1);
+          const i1 = Math.min(np - 1, i + 1);
+          const tx = pts[i1 * 2] - pts[i0 * 2];
+          const tz = pts[i1 * 2 + 1] - pts[i0 * 2 + 1];
+          const tl = Math.hypot(tx, tz) || 1;
+          const taper = smoothstep(0, 70, Math.abs(s - ipass * SPACING)) * smoothstep(0, 60, s) * smoothstep(0, 60, total - s);
+          const off = amp * g.nMeander(s / 150 + seed, 3.7) * taper;
+          out.push(pts[i * 2] - (tz / tl) * off, pts[i * 2 + 1] + (tx / tl) * off);
+        }
+        pts = out;
+      }
+      const route = finish(pts, (x, z) => this._lsample(g, H, x, z), "valley", { fw: rand(rng, 9, 12), soft: 3, bank: 0.55, shelf: 3, cliff: 2.3, reach: 80, rough: 0.35 });
+      // Floor: a straight grade from each end up to the pass, never above the
+      // ground by more than a few metres, then graded and smoothed.
+      const prof = route.prof;
+      const n = prof.length;
+      let ip = 0;
+      let bestD = Infinity;
+      for (let i = 0; i < n; i++) {
+        const d = Math.hypot(route.pts[i * 2] - sp.x, route.pts[i * 2 + 1] - sp.z);
+        if (d < bestD) {
+          bestD = d;
+          ip = i;
+        }
+      }
+      // Width: a narrow gorge through the saddle, opening out below, breathing along the way.
+      route.fwArr = new Float32Array(n);
+      const wseed = rng() * 40;
+      for (let i = 0; i < n; i++) {
+        const s = Math.abs(i - ip) * SPACING;
+        route.fwArr[i] = route.fw * (0.8 + 0.4 * (0.5 + 0.5 * g.nMeander(i * SPACING / 90 + wseed, 9.1))) * lerp(0.5, 1, smoothstep(10, 90, s));
+      }
+      const ground = Float32Array.from(prof);
+      const endA = Math.max(1.5, ground[0]);
+      const endB = Math.max(1.5, ground[n - 1]);
+      const crestAtPass = ground[ip];
+      const P = Math.min(crestAtPass - 9, endA + GRADE * 0.9 * ip * SPACING, endB + GRADE * 0.9 * (n - 1 - ip) * SPACING);
+      for (let i = 0; i < n; i++) {
+        const lin = i <= ip ? lerp(endA, P, i / Math.max(1, ip)) : lerp(P, endB, (i - ip) / Math.max(1, n - 1 - ip));
+        prof[i] = Math.min(lin, ground[i] + 3);
+      }
+      smoothProf(prof, 3);
+      gradeLimit(prof, SPACING, GRADE);
+      route.passIndex = ip;
+      route.passHeight = prof[ip];
+      ps.x = sp.x;
+      ps.z = sp.z;
+      ps.h = prof[ip];
+      ps.route = route;
+      g.routes.push(route);
+    }
+    this._applyRoutesToLayout(g, (k) => k === "valley");
+  }
+
+  /**
+   * Lookout ledges high on the ridge near the peaks, each joined to a walkable
+   * route by a switchback trail found by a grade-limited search. Planned
+   * after the lakes and rivers, on layout heights that include their valleys,
+   * so a trail is never undercut by a river carved later.
+   */
+  _planLookouts(g) {
+    const rng = g.mrng;
+    const L = g.lgrid;
+    const LN = L.n;
+    // From here on the layout heights carry lake basins and river valleys too.
+    g.lH = g.lHc.slice();
+    this._carveRiverValleys(g, L, g.lH);
+    const H = g.lH;
+    const SPACING = ROUTE_SPACING;
+    const finish = (pts, floorAt, kind, opts) => finishRoute(pts, floorAt, kind, opts);
+    g.lookouts = [];
+    const reachable = this._layoutReach(g);
+    const cands = [];
+    for (let t = 0; t < 3000; t++) {
+      const ix = randInt(rng, 4, LN - 5);
+      const iz = randInt(rng, 4, LN - 5);
+      const i = iz * LN + ix;
+      const h = H[i];
+      if (h < 92 || h > 150 || g.lMm[i] < 0.3) continue;
+      const x = L.origin + ix * L.step;
+      const z = L.origin + iz * L.step;
+      // Not on a summit horn, not on the pass routes.
+      let ok = true;
+      for (const P of g.peaks) if (Math.hypot(x - P.x, z - P.z) < P.r * 0.3) ok = false;
+      for (const ps of g.passes) if (Math.hypot(x - ps.x, z - ps.z) < 90) ok = false;
+      if (!ok) continue;
+      // View: how far the ground falls away around the spot.
+      let drop = 0;
+      for (let k = 0; k < 8; k++) {
+        const a = (k / 8) * TAU;
+        drop += h - this._lsample(g, H, x + Math.cos(a) * 70, z + Math.sin(a) * 70);
+      }
+      cands.push({ x, z, h, score: drop / 8 + h * 0.25 + rng() * 6 });
+    }
+    cands.sort((a, b) => b.score - a.score);
+    this.stats.lookoutCands = cands.length;
+    this.stats.trailTries = 0;
+    for (const c of cands) {
+      if (g.lookouts.length >= 2 || this.stats.trailTries >= 12) break;
+      if (g.lookouts.some((o) => Math.hypot(o.x - c.x, o.z - c.z) < 220)) continue;
+      this.stats.trailTries++;
+      const trail = this._trailSearch(g, c.x, c.z, reachable, 0.22);
+      if (!trail) continue;
+      // The ledge itself: a flat pad a little below the spot.
+      let padH = c.h - 1.5;
+      const pts = trail.pts;
+      const tr = finish(pts, (x, z) => this._lsample(g, H, x, z), "trail", { fw: 3.2, soft: 2.2, bank: 0.45, shelf: 1.2, cliff: 1.5, reach: 38, rough: 0.2 });
+      // Trail floor: the ground along it, smoothed, then graded (which only
+      // ever cuts — a ramp notched through any cliff band on the way). The
+      // ledge sits wherever the graded trail arrives.
+      smoothProf(tr.prof, 2);
+      // The first stretch of the trail crosses the ledge itself: keep it level.
+      const padN = Math.min(tr.prof.length - 1, Math.ceil(12 / SPACING));
+      for (let i = 0; i <= padN; i++) tr.prof[i] = padH;
+      gradeLimit(tr.prof, SPACING, 0.22);
+      for (let i = 0; i <= padN; i++) padH = Math.min(padH, tr.prof[i]);
+      for (let i = 0; i <= padN; i++) tr.prof[i] = padH;
+      gradeLimit(tr.prof, SPACING, 0.22);
+      if (padH < 70) continue;
+      const pad = { kind: "pad", pts: [c.x, c.z, c.x + 0.01, c.z], prof: Float32Array.from([padH, padH]), length: 0.01, fw: 10, soft: 3, bank: 0.35, shelf: 2, cliff: 1.2, reach: 46, rough: 0.25 };
+      g.routes.push(tr, pad);
+      g.lookouts.push({ x: c.x, z: c.z, h: padH, trail: tr });
+    }
+    g.trailBuf = null; // the search's state buffers are big: let them go
+    g.trailHeur = null;
+    this._applyRoutesToLayout(g, (k) => k !== "valley");
+  }
+
+  /** Carve the routes whose kind passes `want` into the layout heights. */
+  _applyRoutesToLayout(g, want) {
+    const L = g.lgrid;
+    const LN = L.n;
+    const H = g.lH;
+    const dist = new Float32Array(LN * LN);
+    const param = new Float32Array(LN * LN);
+    for (let r = 0; r < g.routes.length; r++) {
+      const rt = g.routes[r];
+      if (!want(rt.kind)) continue;
+      dist.fill(1e9);
+      rasterPolyline(rt.pts, rt.reach, L, dist, param);
+      for (let i = 0; i < LN * LN; i++) {
+        if (dist[i] >= rt.reach) continue;
+        H[i] = this._carveRoute(g, rt, H[i], dist[i], param[i], 0);
+      }
+    }
+  }
+
+  /**
+   * A route's terrain at distance `d` from its centreline (nearest point at
+   * normalised arc length `param`): the floor (cut and fill) in the core,
+   * banks that only ever cut — a gentle shelf, then a cliff — outside.
+   */
+  _carveRoute(g, rt, h, d, param, fine) {
+    const prof = rt.prof;
+    const fpos = param * (prof.length - 1);
+    const i0 = Math.min(prof.length - 2, Math.max(0, fpos | 0));
+    const tt = fpos - i0;
+    const fl = prof.length < 2 ? prof[0] : prof[i0] + (prof[i0 + 1] - prof[i0]) * tt;
+    const W = rt.fwArr;
+    const fw = W ? W[i0] + (W[i0 + 1] - W[i0]) * tt : rt.fw;
+    const o = d - fw;
+    let wall = fl;
+    if (o > 0) wall += o * rt.bank + Math.max(0, o - rt.shelf) * rt.cliff;
+    const cut = Math.min(h, wall);
+    const k = smoothstep(fw - rt.soft, fw + rt.soft * 0.4, d);
+    let out = lerp(fl + rt.rough * fine, cut, k);
+    if (d > rt.reach - 16) out = lerp(out, h, smoothstep(rt.reach - 16, rt.reach, d));
+    return out;
+  }
+
+  /**
+   * Layout nodes reachable on foot from the lowlands (grade ≤ 0.45 between
+   * neighbours), plus every pass-valley floor (and, with `withTrails`, the
+   * trails and lookout ledges). Goals for the trail search; cave mouths must
+   * sit on one.
+   */
+  _layoutReach(g, withTrails = false) {
+    const L = g.lgrid;
+    const LN = L.n;
+    const H = g.lH;
+    const reach = new Uint8Array(LN * LN);
+    const q = new Int32Array(LN * LN);
+    let qh = 0;
+    let qt = 0;
+    for (let i = 0; i < LN * LN; i++) {
+      if (H[i] > 1 && H[i] < 20 && g.lC[i] > 0.05) {
+        reach[i] = 1;
+        q[qt++] = i;
+      }
+    }
+    const lim = 0.45 * L.step;
+    while (qh < qt) {
+      const i = q[qh++];
+      const x = i % LN;
+      for (const j of [i - 1, i + 1, i - LN, i + LN]) {
+        if (j < 0 || j >= LN * LN || reach[j]) continue;
+        if ((j === i - 1 && x === 0) || (j === i + 1 && x === LN - 1)) continue;
+        if (H[j] < 0.5 || Math.abs(H[j] - H[i]) > lim) continue;
+        reach[j] = 1;
+        q[qt++] = j;
+      }
+    }
+    // The gullies and crags added per vertex roughen mountain slopes the
+    // layout grid can't see, so only trust low ground and carved routes.
+    for (let i = 0; i < LN * LN; i++) if (reach[i] && H[i] > 45 && g.lMm[i] > 0.15) reach[i] = 0;
+    const dist = new Float32Array(LN * LN);
+    for (const rt of g.routes) {
+      if (rt.kind !== "valley" && !withTrails) continue;
+      dist.fill(1e9);
+      const r = Math.max(rt.fw, L.step * 0.8);
+      rasterPolyline(rt.pts, r, L, dist, null);
+      for (let i = 0; i < LN * LN; i++) if (dist[i] < r * 0.85) reach[i] = 2;
+    }
+    return reach;
+  }
+
+  /**
+   * Grade-limited Dijkstra on the layout grid (16 directions) from (x, z) to
+   * the nearest reachable node; returns { pts } (design m) or null. Uphill
+   * legs longer than the grade allows become switchbacks on their own.
+   */
+  _trailSearch(g, x0, z0, reachable, gmax) {
+    // Long legs and few hairpins keep switchback legs apart (each is carved as
+    // its own bench); if two legs still crowd each other, search again with a
+    // stiffer turning penalty.
+    for (const turnCost of [22, 50, 110]) {
+      const res = this._trailSearchOnce(g, x0, z0, reachable, gmax, turnCost);
+      if (!res) return null;
+      const p = res.pts;
+      const np = p.length / 2;
+      let crowded = false;
+      for (let i = 0; i < np && !crowded; i++) {
+        for (let j = i + 5; j < np; j++) {
+          if (Math.hypot(p[i * 2] - p[j * 2], p[i * 2 + 1] - p[j * 2 + 1]) < 11) {
+            crowded = true;
+            break;
+          }
+        }
+      }
+      if (!crowded) return res;
+    }
+    return null;
+  }
+
+  /**
+   * Lower bound on a trail's cost from every layout node: the plain path
+   * length (metres, same 16 moves) to the nearest reachable node. Every leg
+   * costs at least its length, so this is a consistent A* heuristic and the
+   * search finds an equally cheap trail while visiting a fraction of the states.
+   */
+  _trailHeuristic(g, reachable) {
+    if (g.trailHeur && g.trailHeur.src === reachable) return g.trailHeur.h;
+    const L = g.lgrid;
+    const LN = L.n;
+    const h = new Float64Array(LN * LN).fill(Infinity);
+    const heap = new MinHeap();
+    for (let i = 0; i < LN * LN; i++) {
+      if (reachable[i]) {
+        h[i] = 0;
+        heap.push(0, i);
+      }
+    }
+    while (heap.size) {
+      const key = heap.keys[0];
+      const i = heap.pop();
+      if (key > h[i]) continue;
+      const x = i % LN;
+      const z = (i / LN) | 0;
+      for (let k = 0; k < TD_N; k++) {
+        const mx = x + TD_X[k];
+        const mz = z + TD_Z[k];
+        if (mx < 0 || mz < 0 || mx >= LN || mz >= LN) continue;
+        const m = mz * LN + mx;
+        const nd = key + TD_LEN[k] * L.step;
+        if (nd < h[m]) {
+          h[m] = nd;
+          heap.push(nd, m);
+        }
+      }
+    }
+    // A hair under the exact length so rounding never overestimates.
+    for (let i = 0; i < LN * LN; i++) h[i] *= 0.9999;
+    g.trailHeur = { src: reachable, h };
+    return h;
+  }
+
+  /** One direction-aware A* pass (state = node × heading) for _trailSearch. */
+  _trailSearchOnce(g, x0, z0, reachable, gmax, turnCost) {
+    const L = g.lgrid;
+    const LN = L.n;
+    const H = g.lH;
+    const step = L.step;
+    const sx = clamp(Math.round((x0 - L.origin) / step), 1, LN - 2);
+    const sz = clamp(Math.round((z0 - L.origin) / step), 1, LN - 2);
+    const start = sz * LN + sx;
+    const ND = TD_N;
+    const est = this._trailHeuristic(g, reachable);
+    // One pair of big state buffers per island, reused by every search.
+    if (!g.trailBuf) g.trailBuf = { dist: new Float64Array(LN * LN * ND), prev: new Int32Array(LN * LN * ND) };
+    const { dist, prev } = g.trailBuf;
+    dist.fill(Infinity);
+    prev.fill(-1);
+    const heap = new MinHeap();
+    // State ND·node + dir; the start may leave in any direction.
+    for (let d = 0; d < ND; d++) {
+      dist[start * ND + d] = 0;
+      heap.push(est[start], start * ND + d);
+    }
+    let goal = -1;
+    let visited = 0;
+    while (heap.size) {
+      const key = heap.keys[0];
+      const state = heap.pop();
+      const node = (state / ND) | 0;
+      const d0 = dist[state];
+      if (key > d0 + est[node]) continue; // a stale entry: this state was reached cheaper since
+      if (++visited > 260000) break;
+      const dir = state - node * ND;
+      if (reachable[node] && node !== start) {
+        goal = state;
+        break;
+      }
+      const nx = node % LN;
+      const nz = (node / LN) | 0;
+      const h0 = H[node];
+      const turns = dir * ND;
+      const first = node === start;
+      for (let k = 0; k < ND; k++) {
+        const mx = nx + TD_X[k];
+        const mz = nz + TD_Z[k];
+        if (mx < 1 || mz < 1 || mx >= LN - 1 || mz >= LN - 1) continue;
+        const m = mz * LN + mx;
+        const h1 = H[m];
+        if (h1 < 0.8) continue;
+        const len = TD_LEN[k] * step;
+        const gr = Math.abs(h1 - h0) / len;
+        // Midpoint check so knight moves don't hop over a crest or a gully.
+        const hmid = H[(nz + TD_MZ[k]) * LN + nx + TD_MX[k]];
+        const bump = Math.abs(hmid - (h0 + h1) * 0.5) / len;
+        // Gentle legs are cheap; anything steeper than the trail may be is a
+        // cliff the carve will have to cut a ramp through — only as a last resort.
+        const r = Math.max(gr, bump * 2) / gmax;
+        if (r > 12) continue;
+        const cost = len * (1 + 1.5 * r * r + (r > 1 ? 40 * (r - 1) * (r - 1) : 0)) + (first ? 0 : TD_TURN[turns + k] * turnCost);
+        const nd = d0 + cost;
+        const ms = m * ND + k;
+        if (nd < dist[ms]) {
+          dist[ms] = nd;
+          prev[ms] = state;
+          heap.push(nd + est[m], ms);
+        }
+      }
+    }
+    if (goal < 0) return null;
+    const pts = [];
+    for (let s = goal; s >= 0; s = prev[s]) {
+      const p = (s / ND) | 0;
+      pts.push(L.origin + (p % LN) * step, L.origin + ((p / LN) | 0) * step);
+      if (p === start) break;
+    }
+    // pts runs goal → start; flip so a trail starts at its lookout.
+    const out = [];
+    for (let i = pts.length - 2; i >= 0; i -= 2) out.push(pts[i], pts[i + 1]);
+    if (out.length < 4) return null;
+    return { pts: out };
   }
 
   /** Normalised lake distance: < 1 inside the basin (lobed, noise-warped ellipses). */
@@ -2625,6 +3670,10 @@ export class Terrain {
     const deepC = -190 / g.R;
     const isletNear = (x, z) => g.islets.some((o) => Math.hypot(x - o.x, z - o.z) < o.r * 2.5 + 40);
     const gullyMinL = 2.6 * V.step;
+    // Trails and lookout ledges follow the (smoother) layout heights: keep the
+    // gullies and fine relief off them so the bench they carve sits on ground.
+    const quiet = new Float32Array(N).fill(1e9);
+    for (const rt of g.routes) if (rt.kind !== "valley") rasterPolyline(rt.pts, rt.fw + 26, V, quiet, null);
 
     for (let iz = 0; iz < n; iz++) {
       const z = V.origin + iz * V.step;
@@ -2679,7 +3728,7 @@ export class Terrain {
         g.swamp[i] = f.sw;
         g.cliff[i] = f.cliff;
         if (f.m > 0) {
-          const fall = smoothstep(0, 48, f.m);
+          const fall = smoothstep(0, 48, f.m) * smoothstep(4, 24, quiet[i]);
           // Fine relief: slope-damped so it settles in hollows and on flats.
           h += fall * (0.55 - 0.35 * f.sw) * erodedFbm2D(g.nFine, x * 0.03, z * 0.03, 3, 2, 0.5, 1.6);
           // Erosion gullies down every real slope, deepest in the mountains.
@@ -2694,12 +3743,57 @@ export class Terrain {
           const zone = 0.4 + 6.5 * f.mm * f.mm + 1.6 * f.hm + 1.3 * f.cliff;
           const amp = zone * region * smoothstep(0.15, 0.7, slope) * fall * smoothstep(1.5, 9, h);
           if (amp > 0.04) h += gullies(x, z, gx, gz, amp, gullyMinL);
+          // Crags on the sheer rock (cliff bands, the horns' faces): mid-
+          // frequency relief breaks up their big flat facets. Never near the
+          // trails and ledges (fall), so they keep their footing.
+          const crag = f.rough * fall;
+          if (crag > 0.02) h += crag * (3 + 3 * f.mm) * (ridged2D(g.nCrag, x * 0.03 + 9.1, z * 0.03 - 3.7, 3) - 0.45);
         }
         H[i] = h;
       }
     }
     g.usePre = false;
+    this._carveRoutes(g);
     g.base = H.slice();
+  }
+
+  /**
+   * Pass valleys, switchback trails and lookout ledges at the vertices (the
+   * same carve the layout grid got). Also leaves per-vertex masks for paint:
+   * g.trail (worn path) and g.valley (pass-valley floor). With `again`, only
+   * the trails and ledges are re-applied (after the lakes and rivers, which
+   * may undercut them) and water is never filled.
+   */
+  _carveRoutes(g, again = false) {
+    const n = this._n;
+    const N = n * n;
+    const H = this.heights;
+    const V = g.vgrid;
+    if (!again) {
+      g.trail = new Float32Array(N);
+      g.valley = new Float32Array(N);
+    }
+    const dist = new Float32Array(N);
+    const param = new Float32Array(N);
+    for (const rt of g.routes) {
+      if (again && rt.kind === "valley") continue;
+      dist.fill(1e9);
+      rasterPolyline(rt.pts, rt.reach, V, dist, param);
+      const mask = rt.kind === "trail" || rt.kind === "pad" ? g.trail : g.valley;
+      const coreW = rt.kind === "pad" ? rt.fw * 0.75 : rt.fw;
+      for (let i = 0; i < N; i++) {
+        const d = dist[i];
+        if (d >= rt.reach) continue;
+        if (again && H[i] < 0.3) continue;
+        const x = V.origin + (i % n) * V.step;
+        const z = V.origin + ((i / n) | 0) * V.step;
+        const fine = g.nDetail(x * 0.09 + 3.3, z * 0.09 - 1.7);
+        H[i] = this._carveRoute(g, rt, H[i], d, param[i], fine);
+        if (again) continue;
+        const m = 1 - smoothstep(coreW * 0.55, coreW + 0.6, d);
+        if (m > mask[i]) mask[i] = m;
+      }
+    }
   }
 
   /** Carve lake basins and river valleys into the vertex heights. */
@@ -2726,15 +3820,26 @@ export class Terrain {
       }
     }
 
-    // Rivers: a channel below sea level inside a smooth valley. A spring-fed
-    // river starts as a shallow dry gully that deepens over RIVER_HEAD metres,
-    // so its head never ends in a carved bowl.
+    // Rivers: a channel below sea level inside a smooth valley.
+    g.channel = new Float32Array(N); // 1 on a centreline … 0 at the channel edge
+    this._carveRiverValleys(g, V, H, g.channel);
+  }
+
+  /**
+   * River valleys on any grid (the vertices, or the layout grid when later
+   * planning needs to see them). A spring-fed river starts as a shallow dry
+   * gully that deepens over RIVER_HEAD metres, so its head never ends in a
+   * carved bowl. `channel` (optional) receives 1 on a centreline … 0 at the
+   * channel edge.
+   */
+  _carveRiverValleys(g, grid, H, channel = null) {
+    const n = grid.n;
+    const N = n * n;
     const dist = new Float32Array(N);
     const param = new Float32Array(N);
-    g.channel = new Float32Array(N); // 1 on a centreline … 0 at the channel edge
     for (const seg of g.riverSegs) {
       dist.fill(1e9);
-      rasterPolyline(seg.pts, RIVER_REACH, V, dist, param);
+      rasterPolyline(seg.pts, RIVER_REACH, grid, dist, param);
       const total = seg.length;
       for (let i = 0; i < N; i++) {
         const d = dist[i];
@@ -2747,12 +3852,12 @@ export class Terrain {
         let T;
         if (d < hw) {
           T = -depth * (1 - (d / hw) * (d / hw)) - 0.15 + lift;
-          g.channel[i] = Math.max(g.channel[i], 1 - d / hw);
+          if (channel) channel[i] = Math.max(channel[i], 1 - d / hw);
         } else {
           // Wobble the bank distance so valley sides aren't perfect offsets of the channel.
           const ix = i % n;
           const iz = (i / n) | 0;
-          const wob = g.nDetail((V.origin + ix * V.step) * 0.012 + 91, (V.origin + iz * V.step) * 0.012);
+          const wob = g.nDetail((grid.origin + ix * grid.step) * 0.012 + 91, (grid.origin + iz * grid.step) * 0.012);
           T = bankProfile((d - hw) * (1 + 0.25 * wob), 20) + lift;
         }
         if (d > RIVER_REACH - 25) T = lerp(T, 1e4, smoothstep(RIVER_REACH - 25, RIVER_REACH, d));
@@ -2879,7 +3984,8 @@ export class Terrain {
   _paint(g) {
     const n = this._n;
     const N = n * n;
-    const H = this.heights;
+    // Paint what is drawn: over a cave that is the hillside, not its floor.
+    const H = this._surfH;
     const cs = this.cellSize;
     const V = g.vgrid;
     const wc = this._waterClass;
@@ -2992,18 +4098,23 @@ export class Terrain {
           // along the dry heads of creeks; sand on beaches and some lake
           // shores; mud in swamps and at the fresh-water edge; the rest is
           // grass, drier where the ground is dry, high or near the sea.
-          const rock = wRock;
+          // Mountain trails are worn to dirt and grit; pass-valley floors
+          // hold turf between their rock walls.
+          const trail = g.trail[i];
+          const vfloor = g.valley[i];
+          const rock = wRock * (1 - 0.9 * trail) * (1 - 0.65 * vfloor);
           const midN = lerpL(g.lMid);
           const creek = g.channel[i] * smoothstep(0.3, 1.2, h);
           const freshShore = (1 - smoothstep(2.5, 8, freshD)) * (1 - smoothstep(0.8, 2.4, h));
           const sandyShore = smoothstep(0.05, 0.3, patch);
-          const sand = Math.max(wBeach, freshShore * sandyShore * 0.7, creek * 0.25);
+          const sand = Math.max(wBeach, freshShore * sandyShore * 0.7, creek * 0.25, trail * 0.18);
           const mud = Math.max(wSwamp * (0.4 + 0.25 * patch + 0.15 * midN), freshShore * (1 - sandyShore) * 0.85, creek * 0.35);
           const dirt = Math.max(
             smoothstep(0.13, 0.26, slope) * 0.7,
             wForest * (0.62 + 0.25 * patch + 0.15 * midN),
             creek * 0.6,
-            rock > 0.25 && rock < 0.9 ? 0.3 * (1 - Math.abs(rock - 0.55) * 3) : 0
+            rock > 0.25 && rock < 0.9 ? 0.3 * (1 - Math.abs(rock - 0.55) * 3) : 0,
+            trail * 0.85
           ) * (1 - rock * 0.6);
           const used = rock + dirt + sand + mud;
           const veg = Math.max(0, 1 - used);
@@ -3145,7 +4256,9 @@ export class Terrain {
     const n = this._n;
     const res = this.resolution;
     const N = n * n;
-    const H = this.heights;
+    // The drawn surface: the physics heights, except over caves (the hillside).
+    const H = this._surfH;
+    const hole = this._caveHole;
     const cs = this.cellSize;
     const half = this.half;
     const pos = new Float32Array(N * 3);
@@ -3194,6 +4307,8 @@ export class Terrain {
         fineStart[ch] = p;
         for (let iz = z0; iz < z1; iz++) {
           for (let ix = x0; ix < x1; ix++) {
+            // Cells at cave mouths and skylights are drawn by the caves' own meshes.
+            if (hole && hole[iz * res + ix]) continue;
             const a = iz * n + ix;
             const b = a + 1;
             const c = a + n;
@@ -3259,12 +4374,13 @@ export class Terrain {
     geo.setAttribute("aMatA", new THREE.BufferAttribute(this._matA, 4, true));
     geo.setAttribute("aMatB", new THREE.BufferAttribute(this._matB, 4, true));
     geo.setIndex(new THREE.BufferAttribute(index, 1));
+    geo.setDrawRange(0, p); // cave holes leave the tail of the buffer unused
     // Bounds are known; skip scanning the vertices again.
     geo.boundingBox = new THREE.Box3(new THREE.Vector3(-half, minH, -half), new THREE.Vector3(half, maxH, half));
     geo.boundingSphere = geo.boundingBox.getBoundingSphere(new THREE.Sphere());
     this.stats.minHeight = minH;
     this.stats.maxHeight = maxH;
-    this.stats.triangles = res * res * 2;
+    this.stats.triangles = p / 3;
     this.stats.vertices = N;
 
     const mesh = new THREE.Mesh(geo, createTerrainMaterial(textures, this.seaLevel));
@@ -3454,6 +4570,165 @@ export class Terrain {
           ctx.stroke();
         }
       }
+    }
+    ctx.restore();
+  }
+
+  /**
+   * The high country and its caves, engraved like a survey plate: routes
+   * through the passes and up to the lookouts as dashed paths, passes as
+   * ")(" marks, lookouts as small sunbursts, summits as triangles with their
+   * heights, and caves as dashed passage outlines with a dark arch at each mouth.
+   */
+  _mapLandmarks(ctx, px) {
+    const mpp = this.size / px;
+    const u = px / 768;
+    const P = (x) => (x + this.half) / mpp;
+    const INK = "rgba(52, 46, 36, 0.9)";
+    const PAPER = "rgba(244, 238, 222, 0.92)";
+    const ROUTE = "rgba(150, 62, 34, 0.85)";
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    // Routes: through the passes (bolder) and up to the lookouts.
+    for (const r of this.routes || []) {
+      const pts = r.points;
+      if (pts.length < 2) continue;
+      const valley = r.kind === "valley";
+      ctx.setLineDash(valley ? [4.5 * u, 3 * u] : [2.6 * u, 2.4 * u]);
+      ctx.lineWidth = (valley ? 1.8 : 1.3) * u;
+      // A paper halo first so the path reads over the hillshade.
+      for (const [col, extra] of [[PAPER, 1.6 * u], [ROUTE, 0]]) {
+        ctx.strokeStyle = col;
+        ctx.lineWidth = (valley ? 1.8 : 1.3) * u + extra;
+        ctx.beginPath();
+        ctx.moveTo(P(pts[0].x), P(pts[0].z));
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(P(pts[i].x), P(pts[i].z));
+        ctx.stroke();
+      }
+    }
+    ctx.setLineDash([]);
+
+    // Caves: the passage, dashed like an underground survey line…
+    for (const c of this.caves || []) {
+      const pts = c.path;
+      const w = Math.max(1.4 * u, Math.min(c.maxWidth / mpp, 7 * u));
+      ctx.setLineDash([2 * u, 1.6 * u]);
+      ctx.strokeStyle = "rgba(40, 34, 28, 0.55)";
+      ctx.lineWidth = w;
+      ctx.beginPath();
+      ctx.moveTo(P(pts[0].x), P(pts[0].z));
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(P(pts[i].x), P(pts[i].z));
+      ctx.stroke();
+      ctx.setLineDash([]);
+      for (const s of c.skylights) {
+        ctx.fillStyle = PAPER;
+        ctx.strokeStyle = INK;
+        ctx.lineWidth = 1 * u;
+        ctx.beginPath();
+        ctx.arc(P(s.x), P(s.z), 2.2 * u, 0, TAU);
+        ctx.fill();
+        ctx.stroke();
+      }
+      // …and a dark arch at every mouth, open side facing out.
+      for (const e of c.entrances) {
+        const r = (c.kind === "cavern" ? 6 : c.kind === "tunnel" ? 5 : 4.2) * u;
+        const ox = Math.sin(e.heading);
+        const oz = Math.cos(e.heading);
+        const a = Math.atan2(oz, ox); // outward, in canvas angle
+        const cx = P(e.x) - ox * r * 0.3;
+        const cy = P(e.z) - oz * r * 0.3;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, a + Math.PI / 2, a - Math.PI / 2);
+        ctx.closePath();
+        ctx.fillStyle = PAPER;
+        ctx.strokeStyle = PAPER;
+        ctx.lineWidth = 2.4 * u;
+        ctx.stroke();
+        ctx.fillStyle = "rgba(30, 26, 22, 0.92)";
+        ctx.fill();
+      }
+    }
+
+    // Passes: ")(" — two banks of the saddle, across the route.
+    for (const p of this.passes || []) {
+      const r = this.routes?.find((q) => q.kind === "valley" && q.points.some((pt) => Math.hypot(pt.x - p.x, pt.z - p.z) < 12));
+      let a = 0;
+      if (r) {
+        let k = 0;
+        let best = Infinity;
+        r.points.forEach((pt, i) => {
+          const d = Math.hypot(pt.x - p.x, pt.z - p.z);
+          if (d < best) {
+            best = d;
+            k = i;
+          }
+        });
+        const p0 = r.points[Math.max(0, k - 2)];
+        const p1 = r.points[Math.min(r.points.length - 1, k + 2)];
+        a = Math.atan2(p1.z - p0.z, p1.x - p0.x);
+      }
+      const cx = P(p.x);
+      const cy = P(p.z);
+      const s = 4.2 * u;
+      for (const [col, lw] of [[PAPER, 3.6 * u], [INK, 1.6 * u]]) {
+        ctx.strokeStyle = col;
+        ctx.lineWidth = lw;
+        for (const side of [-1, 1]) {
+          const nx = -Math.sin(a) * side;
+          const ny = Math.cos(a) * side;
+          ctx.beginPath();
+          ctx.arc(cx + nx * s * 2.1, cy + ny * s * 2.1, s * 1.4, Math.atan2(-ny, -nx) - 0.75, Math.atan2(-ny, -nx) + 0.75);
+          ctx.stroke();
+        }
+      }
+    }
+
+    // Lookouts: a small sunburst.
+    for (const o of this.lookouts || []) {
+      const cx = P(o.x);
+      const cy = P(o.z);
+      for (const [col, lw] of [[PAPER, 3 * u], [ROUTE, 1.3 * u]]) {
+        ctx.strokeStyle = col;
+        ctx.lineWidth = lw;
+        ctx.beginPath();
+        for (let k = 0; k < 8; k++) {
+          const a = (k / 8) * TAU;
+          ctx.moveTo(cx + Math.cos(a) * 3.4 * u, cy + Math.sin(a) * 3.4 * u);
+          ctx.lineTo(cx + Math.cos(a) * 5.6 * u, cy + Math.sin(a) * 5.6 * u);
+        }
+        ctx.stroke();
+      }
+      ctx.fillStyle = ROUTE;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 2.2 * u, 0, TAU);
+      ctx.fill();
+    }
+
+    // Summits: a triangle and the height, in the plate's italic.
+    ctx.textBaseline = "middle";
+    for (const p of this.peaks || []) {
+      const cx = P(p.x);
+      const cy = P(p.z);
+      const s = (p.main ? 6 : 4.8) * u;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - s);
+      ctx.lineTo(cx + s * 0.95, cy + s * 0.65);
+      ctx.lineTo(cx - s * 0.95, cy + s * 0.65);
+      ctx.closePath();
+      ctx.lineWidth = 2.4 * u;
+      ctx.strokeStyle = PAPER;
+      ctx.stroke();
+      ctx.fillStyle = INK;
+      ctx.fill();
+      ctx.font = `italic ${Math.round((p.main ? 12 : 10.5) * u)}px "Fraunces", Georgia, serif`;
+      const label = `${Math.round(p.h)}`;
+      ctx.lineWidth = 3 * u;
+      ctx.strokeStyle = PAPER;
+      ctx.strokeText(label, cx + s * 1.3, cy + 0.5 * u);
+      ctx.fillStyle = INK;
+      ctx.fillText(label, cx + s * 1.3, cy + 0.5 * u);
     }
     ctx.restore();
   }

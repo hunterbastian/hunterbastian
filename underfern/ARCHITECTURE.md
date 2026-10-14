@@ -77,6 +77,7 @@ underfern/
   src/core/screen.js    (shared)   the app frame: forced landscape on phones held upright (see below)
   src/core/noise.js     TERRAIN
   src/world/terrain.js  TERRAIN
+  src/world/caves.js    TERRAIN     caves: planning, carving, rock vault meshes, the clearance index
   src/world/water.js    ATMOSPHERE
   src/world/sky.js      ATMOSPHERE
   src/world/vegetation.js VEGETATION
@@ -240,14 +241,76 @@ export class Terrain {
                       // near = { x, z, minR, maxR } restricts to a ring
   nearestFreshWater(x, z, maxRadius = 400) // → { x, z, dist } | null — a LAND point on the shore
                       // of fresh water (stand there, face the water, drink). Precompute & bucket.
-  mapCanvas(px = 512) // → HTMLCanvasElement: shaded-relief overview map (water, biomes, hillshade)
+  mapCanvas(px = 512) // → HTMLCanvasElement: shaded-relief overview map (water, biomes, hillshade,
+                      //   summits, passes, trails, lookouts, cave mouths)
+
+  // The massif (see "Mountains & caves" below) — all world metres, decided on the layout grid.
+  peaks;              // [{ x, z, h, main }] highest first
+  passes;             // [{ x, z, h }] saddles a pass valley crosses
+  lookouts;           // [{ x, z, h }] flat pads high on the ridge, each reached by a trail
+  routes;             // [{ kind: "valley" | "trail" | "pad", width, points: [{ x, z }] }]
+  trails;             // routes of kind "trail", as point lists
+
+  // Caves.
+  caves;              // [{ id, kind: "den" | "tunnel" | "cavern", label, entrances: [{ x, z, y,
+                      //   outsideX, outsideZ, heading /* outward */, width, height }], height /* lowest
+                      //   mouth clearance */, maxHeight, maxWidth, length, deep: { x, z, y } /* resting spot */,
+                      //   skylights: [{ x, z, r }], path: [{ x, z }] }]
+  ceilingAt(x, z)     // world y of the rock overhead; Infinity in the open (≤ floor inside the rock beside a vault)
+  clearanceAt(x, z)   // ceilingAt − heightAt: headroom; Infinity in the open, ≤ 0 in the rock
+  shelterAt(x, z)     // 0 in the open … 1 deep in a cave where no daylight reaches
+  inCave(x, z)        // under a cave's roof
+  caveAt(x, z)        // the `caves` entry whose roof covers (x, z), or null
+  nearCave(x, z)      // in, at the mouth of, or just around a cave — keep spawns/plants/props out
+  surfaceAt(x, z)     // the highest walkable surface: the hillside on top of a cave, else heightAt
+  groundAt(x, z, y)   // ground under something at height y: the cave floor below the middle of
+                      //   its roof, the hillside above it, heightAt elsewhere
 }
 ```
+`heights` (and `heightAt`, `slopeAt`, `isWater`, …) is the **physics floor**: inside a
+cave it is the cave's floor, under the hillside that roofs it (under a roof `heightAt`
+reads the floor from the cave index, so it is the same at any mesh resolution and
+matches the floor mesh). Anything that stands on
+the ground and may be on top of a cave uses `groundAt(x, z, y)` (creatures, the camera)
+or `surfaceAt` (props, flyover); spawning code uses `findSpawnPoint`, which skips
+`nearCave`. `biomeAt` is `"rock"` on a cave floor.
 
 Island shape: one main landmass (~0.42 × size radius) with a noisy coastline and
-beaches; a ridged mountain range with highlands and rock on steep faces; rolling
+beaches; a central massif (below) with highlands and rock on steep faces; rolling
 plains; forest bands; swampy lowlands; **3–5 freshwater lakes** and **1–2 rivers**
 carved below sea level (fresh). A few small offshore islets are welcome.
+
+**Mountains & caves.** Layout decisions are made on the fixed coarse layout grid
+(256², 6.25 m) from their own seed streams (`"underfern-massif"`, `"underfern-caves"`),
+so the same seed gives the same island at any mesh resolution.
+- *Massif* (`_mountain`, `_peak`): 3–4 horn peaks (main ≈ `maxHeight` 190 m) — concave
+  pyramids with arêtes and cirque hollows — joined by a serrated ridge (smooth max),
+  with terraced cliff bands on the faces and per-vertex crags on the sheer rock.
+  Cliffs (slope > the creature's block grade 0.39) are barriers; the way up is elsewhere.
+- *Passes* (`_planPassValleys`): 1–2 notches in the ridge; a U-shaped, meandering valley
+  runs from the saddle down both sides to the foot of the range (cut-and-fill floor,
+  cut-only banks), graded so every animal can cross.
+- *Lookouts* (`_planLookouts`, after the rivers): up to two flat pads high on the ridge,
+  each reached from walkable ground by a switchback trail found by a direction-aware
+  A* on the layout grid (grade-limited, turn-penalised; the heuristic is the plain
+  distance to walkable ground) and carved as a ledge.
+  Trails paint as worn dirt, valley floors stay grassy.
+- *Caves* (`caves.js`): `planCaves` scores candidate mouths (gentle ground under a
+  rise, reachable, clear of passes/trails/lookouts) and designs a **cavern** (a great
+  chamber, ≈ 7.5 m mouth, a skylight when its roof is thin), a U-shaped **tunnel** with
+  two mouths and up to three small **dens** (≈ 3.2 m mouths: raptors yes, an adult
+  Allosaurus no). `carveCaves` sinks the floor into `heights`, keeps the original
+  hillside (plus a skin over the vault) as the render surface with holes at the mouths
+  and skylights, and fills a `CaveIndex` (1 m grids: ceiling, darkness, zone).
+  `buildCaveMeshes` makes one mesh per cave (floor + superellipse vault tube, mouth
+  aprons/faces/skirts, skylight shaft) — children of `terrain.mesh`, one shared
+  material (the terrain shader with `TER_CAVE` and per-vertex baked cave light,
+  cache key `"underfern-cave-v1"`); after lighting, the baked light scales the colour
+  and a dim fill from the hemisphere light keeps deep walls readable.
+  ≈ 20–25k triangles for all caves.
+- Who fits: a creature's `standHeight` (hip height × a species factor) must fit under
+  `clearanceAt`; the AI treats a too-low ceiling as a hazard and never picks a
+  destination `nearCave`; the ecosystem never spawns there; vegetation skips them.
 
 **Terrain look.** Resolution comes from the constructor (`WORLD.resolution` = 512 on
 high ≈ 3.1 m cells; `quality.terrainResolution` may lower it on phones) — heights come
@@ -284,6 +347,8 @@ export class Sky {
   sunDirection;             // THREE.Vector3 unit vector toward the sun (may be below horizon)
   sunColor; skyColor; fogColor; // THREE.Color
   daylight;                 // 0 (night) .. 1 (full day)
+  shelter;                  // 0..1 set each frame by World from terrain.shelterAt at the camera when under
+                            // a cave roof (damped): dims sun ×(1 − 0.5·sh) and hemi light, pushes fog back
   update(dt, focus, camera) // advance time, move lights/shadow box to focus, dome follows camera, set scene.fog
   setPhase(p)
   isNight()                 // daylight < 0.25
@@ -391,6 +456,7 @@ export class DinoModel {
   getHeadPosition(target) // world position of the mouth/snout tip (after scale & parent transforms)
   getTailPosition(target) // world position near the tail tip
   setTint(color, amount)  // e.g. darken a rotting carcass
+  setShade(v)             // 0..1 light multiplier (1 in the open; darker deep in a cave)
   getHitSpheres(out = []) // → [{ x, y, z, r, part }] WORLD-space spheres approximating the body, following the
                           //   current animation (bone world positions); melee strikes measure their reach against them.
                           //   part: "head" | "neck" | "body" | "tail" | "leg". ~8–14 spheres; head sphere(s) tight.
@@ -455,9 +521,13 @@ export class Creature {
 ```
 Movement: creatures turn toward the desired direction at `turnRate` (juveniles
 turn faster) and move along their heading (no strafing); acceleration is smoothed;
-snapped to `terrain.heightAt`; uphill slows, slope > ~0.7 blocks; circle collisions
+snapped to `terrain.groundAt(x, z, y)` (a cave floor or the hillside above it); uphill
+slows, slope > ~0.39 (`BLOCK_GRADE`) blocks; circle collisions
 against `vegetation.collidersNear` and other creatures; clamped inside the island
 tile. NPC metabolism ×0.35.
+Caves: `standHeight` (hip height × 1.35; sail 1.9, plates 1.75, sauropods 1.28) is the
+headroom a creature needs — it can't walk where `terrain.clearanceAt` is lower (it can
+always back out). Under a roof `model.setShade(1 − 0.7 · shelterAt)` darkens it.
 
 ### `creatures/ecosystem.js` (SIMULATION)
 
@@ -568,6 +638,9 @@ export class ThirdPersonCamera {
   shake(amount)
 }
 ```
+In a cave the follow camera never rises above the focus, pulls in at once when rock
+blocks the view, and is clamped `CEILING_CLEARANCE` (0.75 m) under `terrain.ceilingAt`:
+it never shows the outside through the roof. On top of a cave it rides the hillside.
 
 ### `player/player.js` (PLAYER)
 
@@ -633,6 +706,8 @@ Everything synthesised with Web Audio (no files): ambient beds crossfaded by
 water near lakes), player footsteps scaled by mass and gait, spatialised species
 calls (distance attenuation + stereo pan vs. listener yaw; smaller = higher
 pitch), bites/hits, eating/drinking, growth chime, low-health heartbeat.
+Under a cave roof (listener below `terrain.ceilingAt`) the outdoor beds fade (× 1 − 0.82·cave),
+effects are sent into a short multi-tap cave echo and water drips fall now and then.
 
 ### `world/world.js` & `main.js` (INTEGRATION)
 

@@ -298,6 +298,7 @@ uniform vec4 uScales;  // x fine tiles/m, y coarse tiles/m, z bump, w crevice da
 uniform vec3 uSeed;
 uniform vec4 uTint;
 uniform float uWet;
+uniform float uShade;  // 1 in the open … dark inside a cave (creature.js sets it from terrain.shelterAt)
 varying vec4 vSkin;    // x skin palette amount, y pattern mask, z accent, w scale detail
 varying vec2 vSurf;    // x roughness, y eye glint
 varying vec3 vRestPos;
@@ -345,6 +346,7 @@ vec3 albedo = mix( vColor, skin, vSkin.x );
 albedo *= 1.0 - 0.3 * uWet;
 float sLum = dot( albedo, vec3( 0.299, 0.587, 0.114 ) );
 albedo = mix( albedo, uTint.rgb * ( 0.45 + 2.0 * sLum ), uTint.a );
+albedo *= uShade;
 diffuseColor.rgb *= albedo;
 `;
 
@@ -366,7 +368,7 @@ const SKIN_FRAGMENT_NORMAL = /* glsl */ `
 const SKIN_FRAGMENT_GLINT = /* glsl */ `
 float sLight = dot( reflectedLight.directDiffuse + reflectedLight.indirectDiffuse, vec3( 0.3333 ) ) / max( dot( diffuseColor.rgb, vec3( 0.3333 ) ), 0.03 );
 vec3 sGlintH = normalize( vec3( 0.35, 0.5, 1.0 ) );
-outgoingLight += vSurf.y * pow( max( dot( normal, sGlintH ), 0.0 ), 70.0 ) * min( sLight, 2.5 ) * 0.55;
+outgoingLight += vSurf.y * pow( max( dot( normal, sGlintH ), 0.0 ), 70.0 ) * min( sLight, 2.5 ) * 0.55 * uShade;
 `;
 
 function patchSkinShader(shader, uniforms) {
@@ -398,6 +400,7 @@ function createSkinUniforms() {
     uSeed: { value: new THREE.Vector3() },
     uTint: { value: new THREE.Vector4(0, 0, 0, 0) },
     uWet: { value: 0 },
+    uShade: { value: 1 },
   };
 }
 
@@ -2822,6 +2825,15 @@ export class DinoModel {
   setTint(color, amount) {
     _col.set(color ?? 0x000000);
     this._uniforms.uTint.value.set(_col.r, _col.g, _col.b, clamp(amount || 0, 0, 1));
+  }
+
+  /**
+   * How much daylight reaches the body (1 open air … ~0.15 deep in a cave):
+   * darkens the skin, independent of setTint.
+   * @param {number} v
+   */
+  setShade(v) {
+    this._uniforms.uShade.value = clamp(v, 0, 1);
   }
 
   /**

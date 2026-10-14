@@ -84,6 +84,13 @@ export class World {
   update(dt, focus) {
     this.time += dt;
     if (this.wind) this.wind.update(dt);
+    // How deep in a cave the camera is: the sky dims its light to match.
+    const t = this.terrain;
+    const cam = this.camera?.position;
+    if (cam && t && t.shelterAt) {
+      const ceil = t.ceilingAt(cam.x, cam.z);
+      this.sky.shelter = ceil !== Infinity && cam.y < ceil + 0.5 ? t.shelterAt(cam.x, cam.z) : 0;
+    }
     this.sky.update(dt, focus, this.camera);
     if (this.vegetation) this.vegetation.update(dt, focus);
     this.ecosystem.update(dt, focus);

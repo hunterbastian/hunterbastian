@@ -2443,6 +2443,7 @@ class GrassField {
       if (!T.inBounds(x, z, 2)) continue;
       const h = T.heightAt(x, z);
       if (h < sea + 0.15) continue;
+      if (T.nearCave && T.nearCave(x, z)) continue; // bare rock in and around caves
       const biome = T.biomeAt(x, z);
       let p;
       if (under) p = ((UNDER_DENSITY[biome] || 0) * GRASS_CHUNK * GRASS_CHUNK) / UNDER_TRIES;
@@ -3007,6 +3008,9 @@ export class Vegetation {
     const sea = T.seaLevel ?? 0;
     const d = this.density;
     const nz = this._noise;
+    // Nothing grows (or lies about) in a cave, in the cut before its mouth or
+    // on the rock over it (heightAt there is the cave's floor, far below).
+    const inCave = typeof T.nearCave === "function" ? (x, z) => T.nearCave(x, z) : () => false;
     const hasMoist = typeof T.moistureAt === "function";
     const hasFresh = typeof T.isFreshWater === "function";
     const freshNear = (x, z) => {
@@ -3059,6 +3063,7 @@ export class Vegetation {
         if (!T.inBounds(x, z, 10)) continue;
         const h = T.heightAt(x, z);
         if (h < sea + 0.3) continue;
+        if (inCave(x, z)) continue;
         const biome = T.biomeAt(x, z);
         if (roll >= (LOG_P[biome] || 0) * d) continue;
         if (T.slopeAt(x, z) > 0.3) continue;
@@ -3101,6 +3106,7 @@ export class Vegetation {
         if (h < sea + 0.25) continue;
         const slope = T.slopeAt(x, z);
         if (slope > 0.6) continue;
+        if (inCave(x, z)) continue;
         const biome = T.biomeAt(x, z);
         let p = TREE_P[biome] || 0;
         const shore = h < sea + 2.2 && biome !== "beach" && freshNear(x, z);
@@ -3194,6 +3200,7 @@ export class Vegetation {
     if (!T.inBounds(x, z, 6)) return;
     const h = T.heightAt(x, z);
     if (h < (T.seaLevel ?? 0) + 0.2) return;
+    if (T.nearCave && T.nearCave(x, z)) return;
     const slope = T.slopeAt(x, z);
     if (slope > 0.75) return;
     if (this._solid.any(x, z, size * 0.6)) return;
@@ -3229,6 +3236,7 @@ export class Vegetation {
     if (!T.inBounds(x, z, 4)) return;
     const h = T.heightAt(x, z);
     if (h < (T.seaLevel ?? 0) + 0.12) return;
+    if (T.nearCave && T.nearCave(x, z)) return;
     const slope = T.slopeAt(x, z);
     if (slope > 0.55) return;
     if (this._colliders.any(x, z, 0.7)) return;

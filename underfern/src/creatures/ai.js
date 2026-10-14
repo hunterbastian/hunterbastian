@@ -1599,6 +1599,7 @@ export class Brain {
       if (t) {
         if (!t.inBounds(x, z, EDGE_MARGIN + 30)) continue;
         if (t.heightAt(x, z) < num(t.seaLevel, 0) + 0.3) continue;
+        if (t.nearCave && t.nearCave(x, z)) continue; // caves: never a place to wander to
         const slope = t.slopeAt(x, z);
         if (slope > SLOPE_SOFT) continue;
         if (biomes.includes(t.biomeAt(x, z))) score += 1;
@@ -2462,6 +2463,11 @@ export class Brain {
   _hazard(x, z, h0, dist) {
     const t = this.world.terrain;
     if (!t.inBounds(x, z, EDGE_MARGIN)) return 1;
+    // Caves: rock too low for this animal (or the rock beside a cave's vault) is a wall.
+    if (t.ceilingAt) {
+      const ceil = t.ceilingAt(x, z);
+      if (ceil !== Infinity && ceil - t.heightAt(x, z) < num(this.creature.standHeight, hipOf(this.creature) * 1.35)) return 1;
+    }
     const h = t.heightAt(x, z);
     const depth = num(t.seaLevel, 0) - h;
     if (depth > 0) {

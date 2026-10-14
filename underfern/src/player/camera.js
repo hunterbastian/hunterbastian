@@ -26,6 +26,7 @@ const TELEPORT_DIST = 30; // m jump between frames → snap instead of smoothing
 const BLEND_MAX_TRAVEL = 700; // m — title flight → follow swoop only when closer than this
 const COLLIDER_QUERY_RADIUS = 4; // m around the camera searched for trunks / boulders
 const COLLIDER_CLEARANCE = 0.45; // m kept between the camera and a trunk
+const CEILING_CLEARANCE = 0.75; // m kept under a cave's rock (its vault is rough by about this much)
 
 const DEAD_ORBIT_SPEED = 0.14; // rad/s
 const DEAD_PITCH = 0.55;
@@ -48,6 +49,11 @@ const _look = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 
 const FALLBACK_SPECIES = { length: 4, height: 1.4, speed: { sprint: 10 } };
+
+/** The top surface: over a cave, the hillside on its roof rather than the cave floor. */
+function topAt(terrain, x, z) {
+  return terrain.surfaceAt ? terrain.surfaceAt(x, z) : terrain.heightAt(x, z);
+}
 
 /* --- Smooth 1D noise for shake (sum of incommensurate sines, allocation-free) --- */
 
@@ -224,23 +230,42 @@ export class ThirdPersonCamera {
       f.y = damp(f.y, _goal.y, 6, dt);
     }
 
+    /* Inside a cave the orbit has a lid: the focus stays under the rock, the
+       camera never lifts over it, pulls in instead and is clamped below it. */
+    const roof = this._roofAt(f.x, f.z, f.y);
+    const inCave = roof !== Infinity;
+    if (inCave && f.y > roof - CEILING_CLEARANCE) f.y = Math.max(roof - CEILING_CLEARANCE, p.y + 0.2);
+
     /* Ideal orbit position. */
     const cp = Math.cos(this.pitch);
     _offset.set(-Math.sin(this.yaw) * cp, Math.sin(this.pitch), -Math.cos(this.yaw) * cp);
 
     /* Collision: lift over terrain between focus and camera, then pull in. */
-    const liftGoal = this._requiredLift(f, _offset, dist);
-    this._lift = snap ? liftGoal : damp(this._lift, liftGoal, liftGoal > this._lift ? 14 : 2.2, dt);
+    const liftGoal = inCave ? 0 : this._requiredLift(f, _offset, dist);
+    this._lift = snap ? liftGoal : damp(this._lift, liftGoal, liftGoal > this._lift ? 14 : inCave ? 12 : 2.2, dt);
     _pos.copy(f).addScaledVector(_offset, dist);
     _pos.y += this._lift;
+    if (inCave) {
+      // Flatten the orbit to the cave's height before testing the line of sight.
+      const lid = this._roofAt(_pos.x, _pos.z, _pos.y);
+      const cap = (lid !== Infinity ? lid : roof) - CEILING_CLEARANCE;
+      if (_pos.y > cap) _pos.y = Math.max(cap, f.y - 0.5);
+    }
     const pullGoal = this._clearFraction(f, _pos);
-    this._pull = snap ? pullGoal : damp(this._pull, pullGoal, pullGoal < this._pull ? 18 : 2.4, dt);
+    // In a cave, pull in at once (rock is never allowed between us and the animal).
+    this._pull = snap || (inCave && pullGoal < this._pull) ? pullGoal : damp(this._pull, pullGoal, pullGoal < this._pull ? 18 : 2.4, dt);
     _pos.sub(f).multiplyScalar(this._pull).add(f);
 
     this._avoidColliders(_pos);
     // Hard floor at the camera itself — never inside the ground or under water.
-    const floor = this._surface(_pos.x, _pos.z) + GROUND_CLEARANCE;
+    const floor = this._surface(_pos.x, _pos.z, _pos.y) + GROUND_CLEARANCE;
     if (_pos.y < floor) _pos.y = floor;
+    // Hard ceiling under a cave's rock; if there's no room at all, sit at the focus.
+    const lid = this._roofAt(_pos.x, _pos.z, _pos.y);
+    if (lid !== Infinity && _pos.y > lid - CEILING_CLEARANCE) {
+      _pos.y = lid - CEILING_CLEARANCE;
+      if (_pos.y < floor) _pos.copy(f);
+    }
 
     cam.position.copy(_pos);
     _look.set(f.x, f.y + dist * 0.07, f.z); // creature sits a touch below centre
@@ -306,13 +331,38 @@ export class ThirdPersonCamera {
     out.length = 0;
   }
 
-  /** Ground or water surface height under a point (water counts as surface). */
-  _surface(x, z) {
+  /**
+   * Ground or water surface height under a point (water counts as surface).
+   * Near a cave, `y` picks the layer: its floor from inside, the hillside over
+   * it from above (terrain.groundAt).
+   */
+  _surface(x, z, y = -Infinity) {
     const t = this.terrain;
     const sea = t?.seaLevel ?? 0;
-    const h = t ? t.heightAt(x, z) : sea;
+    const h = t ? (t.groundAt ? t.groundAt(x, z, y) : t.heightAt(x, z)) : sea;
     // Water floor + 0.6 clearance lands exactly WATER_CLEARANCE above the surface.
     return Math.max(h, sea + WATER_CLEARANCE - GROUND_CLEARANCE);
+  }
+
+  /**
+   * The rock overhead if the point is inside a cave (below its ceiling, or
+   * in the rock right around it), else Infinity.
+   */
+  _roofAt(x, z, y) {
+    const t = this.terrain;
+    if (!t || !t.ceilingAt) return Infinity;
+    const c = t.ceilingAt(x, z);
+    if (c === Infinity) return c;
+    // Over the roof (on the hillside above) the cave doesn't matter.
+    const top = t.surfaceAt ? t.surfaceAt(x, z) : c;
+    return y < (c + top) * 0.5 ? c : Infinity;
+  }
+
+  /** Is (x, y, z) inside the ground, or inside the rock of a cave's roof / walls? */
+  _solid(x, y, z, clr) {
+    if (y < this._surface(x, z, y) + clr) return true;
+    const roof = this._roofAt(x, z, y);
+    return roof !== Infinity && y > roof - CEILING_CLEARANCE * 0.8;
   }
 
   /**
@@ -327,8 +377,8 @@ export class ThirdPersonCamera {
       const t = i / RAY_SAMPLES;
       const x = f.x + dir.x * dist * t;
       const z = f.z + dir.z * dist * t;
-      const req = this._surface(x, z) + lerp(0.3, GROUND_CLEARANCE, t);
       const rayY = f.y + dir.y * dist * t;
+      const req = this._surface(x, z, rayY) + lerp(0.3, GROUND_CLEARANCE, t);
       if (rayY < req) {
         // Camera height that lifts this sample of the segment to `req`.
         const y = f.y + (req - f.y) / t;
@@ -347,21 +397,23 @@ export class ThirdPersonCamera {
     const dy = c.y - f.y;
     const dz = c.z - f.z;
     let prev = 0;
-    for (let i = 1; i <= RAY_SAMPLES; i++) {
-      const t = i / RAY_SAMPLES;
+    // Caves are tight: sample the line finely and allow a closer camera.
+    const caves = this._roofAt(f.x, f.z, f.y) !== Infinity || this._roofAt(c.x, c.z, c.y) !== Infinity;
+    const N = caves ? RAY_SAMPLES * 2 : RAY_SAMPLES;
+    const minPull = caves ? 0.08 : 0.15;
+    for (let i = 1; i <= N; i++) {
+      const t = i / N;
       const y = f.y + dy * t;
-      const req = this._surface(f.x + dx * t, f.z + dz * t) + lerp(0.1, GROUND_CLEARANCE * 0.8, t);
-      if (y < req) {
+      if (this._solid(f.x + dx * t, y, f.z + dz * t, lerp(0.1, GROUND_CLEARANCE * 0.8, t))) {
         // Refine between the last clear sample and this one.
         let lo = prev;
         let hi = t;
         for (let k = 0; k < 4; k++) {
           const m = (lo + hi) * 0.5;
-          const ym = f.y + dy * m;
-          if (ym < this._surface(f.x + dx * m, f.z + dz * m) + lerp(0.1, GROUND_CLEARANCE * 0.8, m)) hi = m;
+          if (this._solid(f.x + dx * m, f.y + dy * m, f.z + dz * m, lerp(0.1, GROUND_CLEARANCE * 0.8, m))) hi = m;
           else lo = m;
         }
-        return Math.max(0.15, lo - 0.04);
+        return Math.max(minPull, lo - 0.04);
       }
       prev = t;
     }
@@ -396,7 +448,7 @@ export class ThirdPersonCamera {
     _pos.lerpVectors(b.from, cam.position, k);
     // Arc upward so the swoop clears hills between the two poses.
     _pos.y += Math.sin(Math.PI * k) * Math.min(50, b.travel * 0.2);
-    const floor = this._surface(_pos.x, _pos.z) + GROUND_CLEARANCE;
+    const floor = this._surface(_pos.x, _pos.z, _pos.y) + GROUND_CLEARANCE;
     if (_pos.y < floor) _pos.y = floor;
     cam.position.copy(_pos);
     _q.copy(cam.quaternion);
@@ -452,11 +504,11 @@ export class ThirdPersonCamera {
     c.s = (((c.s + CINE_SPEED * dt) % c.length) + c.length) % c.length;
     c.sample(c.s, _pos);
     // Safety net for terrain detail finer than the baked samples (rarely engages).
-    const minY = Math.max(terrain.seaLevel ?? 0, terrain.heightAt(_pos.x, _pos.z)) + CINE_MIN_AGL;
+    const minY = Math.max(terrain.seaLevel ?? 0, topAt(terrain, _pos.x, _pos.z)) + CINE_MIN_AGL;
     if (_pos.y < minY) _pos.y = minY;
     c.sample(c.s + CINE_LOOK_AHEAD, _look);
     // Aim between the ground and the flight line ahead → a slight downward gaze.
-    const groundAhead = Math.max(terrain.seaLevel ?? 0, terrain.heightAt(_look.x, _look.z));
+    const groundAhead = Math.max(terrain.seaLevel ?? 0, topAt(terrain, _look.x, _look.z));
     _look.y = lerp(groundAhead, _look.y, 0.5);
 
     const ease = jump ? 1 : 1 - Math.exp(-1.1 * dt);
@@ -507,7 +559,8 @@ export class ThirdPersonCamera {
 function buildCinePath(terrain) {
   const sea = terrain.seaLevel ?? 0;
   const half = terrain.half ?? (terrain.size ?? 1600) / 2;
-  const H = (x, z) => terrain.heightAt(x, z);
+  // The top surface: over a cave, the hillside on its roof (not the cave floor).
+  const H = (x, z) => (terrain.surfaceAt ? terrain.surfaceAt(x, z) : terrain.heightAt(x, z));
 
   /* Island centre = centroid of land on a coarse grid. */
   let cx = 0;

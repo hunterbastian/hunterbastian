@@ -20,7 +20,7 @@
 import * as THREE from "three";
 import { TIME } from "../config.js";
 import { makeRng } from "../core/rng.js";
-import { TAU, clamp, lerp, smoothstep } from "../core/math.js";
+import { TAU, clamp, lerp, smoothstep, damp } from "../core/math.js";
 
 /* --- Celestial geometry --- */
 
@@ -657,6 +657,13 @@ export class Sky {
     this.daylight = 0;
     /** 0..1 how much of the moon is above the horizon. */
     this.moonlight = 0;
+    /**
+     * 0 (open sky) … 1 (deep in a cave): how sheltered the viewer is. World
+     * sets it from terrain.shelterAt at the camera; it eases in and out and
+     * dims the key and fill light and pushes the haze back while inside.
+     */
+    this.shelter = 0;
+    this._shelter = 0;
 
     this._key = makeKeyState();
     this._time = 0; // cosmetic clock for twinkle / cloud drift (runs while paused)
@@ -784,6 +791,9 @@ export class Sky {
       const r = FOG_ALTITUDE_RANGE;
       this._fogScale = 1 + FOG_ALTITUDE_BOOST * smoothstep(r[0], r[1], camera.position.y);
     }
+    // Eyes adjust over a second or two going in or out of a cave.
+    const sTarget = clamp(+this.shelter || 0, 0, 1);
+    this._shelter = dt > 0 ? damp(this._shelter, sTarget, 2.2, dt) : sTarget;
 
     this._apply();
 
@@ -908,11 +918,21 @@ export class Sky {
     this.hemiLight.groundColor.copy(K.hemiGround);
     this.hemiLight.intensity = K.hemi;
 
+    // In a cave: the rock blocks most of the sky's fill and the direct light
+    // (the cave surfaces carry their own baked darkness on top of this).
+    const sh = this._shelter;
+    if (sh > 0.001) {
+      this.sunLight.intensity *= 1 - 0.5 * sh;
+      this.hemiLight.intensity *= 1 - 0.5 * sh;
+    }
+
     /* Fog */
     const vd = this.viewDistance * this._fogScale;
     this.fog.color.copy(K.horizon);
-    this.fog.near = K.near * vd;
-    this.fog.far = Math.max(this.fog.near + 1, K.far * vd);
+    // The haze is an outdoor thing: inside a cave push it back so its colour
+    // (bright at dawn) never glows on the rock walls.
+    this.fog.near = K.near * vd + 50 * sh;
+    this.fog.far = Math.max(this.fog.near + 1, K.far * vd + 50 * sh);
     if (this._background) this._background.copy(K.horizon);
 
     /* Dome uniforms */

@@ -9,6 +9,7 @@ import { clamp } from "../core/math.js";
 import { icon } from "./menu.js";
 
 const MAP_PX = 768; // relief resolution (shown at up to ~720 CSS px)
+const MATE_COLOR = "#c08a2e"; // your herd / pack on the plate
 const GRID_M = 200; // matches the graticule terrain.mapCanvas engraves
 const TRAIL_STEP = 12; // metres between breadcrumbs
 const TRAIL_MAX = 360;
@@ -199,8 +200,12 @@ export class MapView {
             <li><span class="lg lg--dot" style="--c:${MARKER_COLOR.water}"></span>Sniffed fresh water</li>
             <li><span class="lg lg--dot" style="--c:${MARKER_COLOR.plant}"></span>Food</li>
             <li><span class="lg lg--dot" style="--c:${MARKER_COLOR.threat}"></span>Threat</li>
+            <li><span class="lg lg--dot" style="--c:${MATE_COLOR}"></span>Your herd or pack</li>
             <li><span class="lg lg--sw lg--fresh"></span>Lakes &amp; rivers — drinkable</li>
             <li><span class="lg lg--sw lg--sea"></span>Sea — salt</li>
+            <li><span class="lg lg--peak"></span>Summit · height in metres</li>
+            <li><span class="lg lg--route"></span>Pass &amp; trail to a lookout</li>
+            <li><span class="lg lg--cave"></span>Cave mouth &amp; passage</li>
           </ul>
           <p class="map__hint"><span class="map__hint-keys"><kbd class="kbd">M</kbd> or <kbd class="kbd">Esc</kbd> to close</span><span class="map__hint-touch">Tap anywhere to close</span></p>
         </aside>
@@ -354,7 +359,7 @@ export class MapView {
     // Your herd / pack: small ochre dots.
     const mates = player?.group?.members;
     if (mates) {
-      ctx.fillStyle = "#c08a2e";
+      ctx.fillStyle = MATE_COLOR;
       ctx.strokeStyle = "rgba(244, 238, 222, 0.95)";
       ctx.lineWidth = 1.2 * u;
       for (const m of mates) {
@@ -442,6 +447,11 @@ export class MapView {
       const h = t.heightAt(pos.x, pos.z) - (t.seaLevel || 0);
       set("elev", h < 0 ? `${Math.round(-h * 10) / 10} m deep` : `${Math.round(h)} m`);
     }
-    if (t && typeof t.biomeAt === "function") set("biome", BIOME_NAME[t.biomeAt(pos.x, pos.z)] || "—");
+    if (t && typeof t.biomeAt === "function") {
+      // Under a cave roof (and not walking on top of it): name the cave.
+      const cave = t.caveAt ? t.caveAt(pos.x, pos.z) : null;
+      const inside = cave && Number.isFinite(pos.y) && pos.y < t.ceilingAt(pos.x, pos.z);
+      set("biome", inside ? cave.label : BIOME_NAME[t.biomeAt(pos.x, pos.z)] || "—");
+    }
   }
 }

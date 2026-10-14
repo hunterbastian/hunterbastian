@@ -53,6 +53,20 @@ const CAUSES = {
   fall: "A fatal fall",
 };
 
+/** Standing height in hip heights, from the body plan (cached per species). */
+const _standK = new Map();
+function standFactor(sp) {
+  let k = _standK.get(sp);
+  if (k !== undefined) return k;
+  const f = sp.body?.features || {};
+  if (f.sail) k = 1.9;
+  else if (f.plates) k = 1.75;
+  else if (sp.length > 18) k = 1.28; // a sauropod lowers its neck to get in
+  else k = 1.35;
+  _standK.set(sp, k);
+  return k;
+}
+
 /* --- Scratch (module-level so hot paths never allocate) ----------------- */
 
 const _head = new THREE.Vector3();
@@ -212,6 +226,8 @@ export class Creature {
     this._prevGround = 0;
     this._lastX = x;
     this._lastZ = z;
+    this._caveY = -Infinity; // height that picks a cave's floor or the hillside over it (terrain.groundAt)
+    this._shade = 1; // cave darkness applied to the model (1 = open air)
     this._kx = 0; // knockback / lunge velocity (m/s), decays
     this._kz = 0;
     this._grade = 0;
@@ -297,6 +313,16 @@ export class Creature {
   /** Hip height in metres at the current size. */
   get hipHeight() {
     return this.species.height * this.scale;
+  }
+
+  /**
+   * How tall this animal stands (m) at its current size — the headroom it
+   * needs to get into a cave or along a tunnel: a little over the hips for
+   * most, more for a Stegosaurus's plates or a Spinosaurus's sail; sauropods
+   * duck their necks.
+   */
+  get standHeight() {
+    return this.species.height * this.scale * standFactor(this.species);
   }
 
   // Plain coordinate accessors so AI code can treat Creatures, Carcasses and
@@ -442,7 +468,25 @@ export class Creature {
     }
     this._stealth(dt);
     this._orient(dt, false);
+    this._caveShade();
     this._animate(dt);
+  }
+
+  // Inside a cave the body darkens like the rock around it (terrain.shelterAt);
+  // a carcass keeps the shade it died in.
+  _caveShade() {
+    const t = this.world.terrain;
+    const m = this.model;
+    if (!t || !t.shelterAt || !m || typeof m.setShade !== "function") return;
+    const p = this.position;
+    let sh = 0;
+    const ceil = t.ceilingAt(p.x, p.z);
+    if (ceil !== Infinity && p.y < ceil) sh = t.shelterAt(p.x, p.z);
+    const v = 1 - 0.7 * sh;
+    if (Math.abs(v - this._shade) > 0.01) {
+      this._shade = v;
+      m.setShade(v);
+    }
   }
 
   _timers(dt) {
@@ -462,6 +506,8 @@ export class Creature {
 
     // Teleported since last frame (spawn, ?pos=, respawn): re-seat, no fall.
     if (Math.abs(pos.x - this._lastX) + Math.abs(pos.z - this._lastZ) > 8) this._snapToGround();
+    // Which surface we're on near a cave (its floor or the hillside over it) follows our height.
+    this._caveY = pos.y;
 
     let mx = +intent.moveX || 0;
     let mz = +intent.moveZ || 0;
@@ -555,11 +601,16 @@ export class Creature {
     if (terrain && !this.swimming) {
       // Look further ahead for bigger animals so small bumps don't stop them.
       const probe = clamp(hip * 1.2, 1, 4);
-      const grade = (terrain.heightAt(pos.x + fx * probe, pos.z + fz * probe) - terrain.heightAt(pos.x, pos.z)) / probe;
+      const grade = (this._ground(pos.x + fx * probe, pos.z + fz * probe) - this._ground(pos.x, pos.z)) / probe;
       this._grade = grade;
       if (grade > 0) {
         blocked = grade >= BLOCK_GRADE;
         target *= blocked ? 0 : 1 - 0.7 * clamp((grade - SLOW_GRADE) / (BLOCK_GRADE - SLOW_GRADE), 0, 1);
+      }
+      // Caves: an animal too tall for the rock ahead can't go on (it can
+      // always back out toward more room).
+      if (!blocked && moving && this._caveBlocked(pos.x + fx * (probe * 0.5 + this.radius * 0.6), pos.z + fz * (probe * 0.5 + this.radius * 0.6))) {
+        blocked = true;
       }
     }
 
@@ -651,15 +702,39 @@ export class Creature {
     if (!t) return 0;
     const r = clamp(hip * 0.35, 0.3, 1.5);
     return (
-      t.heightAt(x, z) * 0.4 +
-      (t.heightAt(x + r, z) + t.heightAt(x - r, z) + t.heightAt(x, z + r) + t.heightAt(x, z - r)) * 0.15
+      this._ground(x, z) * 0.4 +
+      (this._ground(x + r, z) + this._ground(x - r, z) + this._ground(x, z + r) + this._ground(x, z - r)) * 0.15
     );
+  }
+
+  // The surface under this animal: a cave's floor while it's inside one, the
+  // hillside while it walks over one (terrain.groundAt), else heightAt.
+  _ground(x, z) {
+    const t = this.world.terrain;
+    return t.groundAt ? t.groundAt(x, z, this._caveY) : t.heightAt(x, z);
+  }
+
+  // Would stepping to (x, z) wedge this animal under a cave roof? Moving to
+  // somewhere with more headroom than it has now is always allowed.
+  _caveBlocked(x, z) {
+    const t = this.world.terrain;
+    if (!t.ceilingAt) return false;
+    const ceil = t.ceilingAt(x, z);
+    // Open sky, or walking over the roof rather than under it.
+    if (ceil === Infinity || this.position.y > ceil + 0.5) return false;
+    const room = ceil - t.heightAt(x, z);
+    const need = this.standHeight;
+    if (room >= need) return false;
+    const here = t.clearanceAt(this.position.x, this.position.z);
+    return room < here - 0.01 || room < need * 0.5;
   }
 
   _snapToGround() {
     const pos = this.position;
     const t = this.world.terrain;
     const hip = Math.max(0.05, this.species.height * this.scale);
+    // Dropped somewhere new: inside a cave if it's over one (nothing spawns on cave roofs).
+    this._caveY = -Infinity;
     const ground = this._groundHeight(pos.x, pos.z, hip);
     const depth = t ? t.waterDepthAt(pos.x, pos.z) : 0;
     this.swimming = depth > 0.8 * hip;
@@ -755,10 +830,10 @@ export class Creature {
       const fz = Math.cos(this.heading);
       const s = this.scale;
       const half = Math.max(0.35, this.species.length * 0.3 * s);
-      const pitch = Math.atan2(t.heightAt(x - fx * half, z - fz * half) - t.heightAt(x + fx * half, z + fz * half), 2 * half);
+      const pitch = Math.atan2(this._ground(x - fx * half, z - fz * half) - this._ground(x + fx * half, z + fz * half), 2 * half);
       // Right-hand side of a body facing +Z is −X: right = (−cos, 0, sin).
       const w = Math.max(0.3, this.radius);
-      const roll = Math.atan2(t.heightAt(x + fz * w, z - fx * w) - t.heightAt(x - fz * w, z + fx * w), 2 * w);
+      const roll = Math.atan2(this._ground(x + fz * w, z - fx * w) - this._ground(x - fz * w, z + fx * w), 2 * w);
       const dead = !this.alive;
       const quad = this._t.quadruped;
       pitchT = pitch * (dead ? 1 : quad ? 0.85 : 0.45);
