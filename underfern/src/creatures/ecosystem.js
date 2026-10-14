@@ -542,7 +542,8 @@ export class Ecosystem {
   _validGround(x, z) {
     const t = this.world.terrain;
     return (
-      t.inBounds(x, z, 40) && t.heightAt(x, z) - (t.seaLevel ?? 0) >= 0.6 && t.slopeAt(x, z) <= 0.4
+      t.inBounds(x, z, 40) && t.heightAt(x, z) - (t.seaLevel ?? 0) >= 0.6 && t.slopeAt(x, z) <= 0.4 &&
+      !(t.nearCave && t.nearCave(x, z)) // caves: nothing spawns in or at the mouth of one
     );
   }
 

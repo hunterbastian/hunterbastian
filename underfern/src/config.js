@@ -6,7 +6,7 @@ export const WORLD = {
   size: 1600, // metres, square island tile centred on the origin
   resolution: 512, // terrain grid segments per side (~3.1 m cells); phones may lower it
   seaLevel: 0, // y of every body of water (ocean, lakes, rivers)
-  maxHeight: 140, // tallest peaks
+  maxHeight: 190, // tallest peak of the central massif
 };
 
 export const TIME = {

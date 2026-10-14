@@ -475,7 +475,8 @@ export class AudioEngine {
     this._S = { gain: 0, pan: 0, cutoff: 20000, wet: 0, dist: 0 }; // scratch for _spatial
     this._surf = { kind: "grass", depth: 0 };
     this.L = { x: 0, y: 0, z: 0, fx: 0, fz: -1, rx: 1, rz: 0, ok: false };
-    this.env = { ocean: 600, lake: 600, oceanDx: 0, oceanDz: 1, lakeDx: 0, lakeDz: 1, forest: 0.3, swamp: 0, agl: 2, alt: 0, oceanNear: 0, lakeNear: 0 };
+    // cave: 0 out in the open … 1 deep inside a cave (the listener's shelter).
+    this.env = { ocean: 600, lake: 600, oceanDx: 0, oceanDz: 1, lakeDx: 0, lakeDz: 1, forest: 0.3, swamp: 0, agl: 2, alt: 0, oceanNear: 0, lakeNear: 0, cave: 0 };
     this._probe = { ring: 0, ocean: Infinity, lake: Infinity, ox: 0, oz: 0, lx: 0, lz: 0, forest: 0, swamp: 0, n: 0, targets: null };
     this._player = null;
 
@@ -490,9 +491,11 @@ export class AudioEngine {
     this._birdRate = 0;
     this._frogRate = 0;
     this._plipRate = 0;
+    this._dripRate = 0;
     this._birdT = 1;
     this._frogT = 2;
     this._plipT = 3;
+    this._dripT = 2;
     this._waveT = 0;
     this._lapT = 0;
     this._stepPhase = 0.6;
@@ -792,6 +795,7 @@ export class AudioEngine {
     conv.connect(this._g(0.5, this.master));
 
     this._buildEcho();
+    this._buildCaveEcho();
     this._buildBeds();
 
     // Pin channel counts on everything shared. Otherwise a voice's stereo noise
@@ -853,6 +857,38 @@ export class AudioEngine {
     panB.connect(out);
     dC.connect(lpC);
     lpC.connect(this._g(0.45, out));
+  }
+
+  /**
+   * Cave echo: inside a cave, every sound on the sfx bus (steps, calls, bites,
+   * drips) also rings off the rock — three short reflections, one fed back
+   * through a lowpass so the ring dies away dull. The send stays at zero
+   * outdoors; update() opens it with the listener's shelter.
+   */
+  _buildCaveEcho() {
+    const ctx = this.ctx;
+    this.caveSend = this._g(0);
+    this.sfxBus.connect(this.caveSend);
+    const out = this._g(0.55, this.master);
+    const hp = this._f("highpass", 170, 0.7);
+    this.caveSend.connect(hp);
+    const mk = (time) => {
+      const d = this._p(ctx.createDelay(0.5));
+      d.delayTime.value = time;
+      return d;
+    };
+    const dA = mk(0.043);
+    const dB = mk(0.077);
+    const dC = mk(0.119);
+    const lp = this._f("lowpass", 2400, 0.5);
+    const fb = this._g(0.42);
+    for (const d of [dA, dB, dC]) {
+      hp.connect(d);
+      d.connect(lp);
+    }
+    lp.connect(out);
+    lp.connect(fb);
+    fb.connect(dB);
   }
 
   /** Continuous ambient layers. Built once; update() only moves their levels. */
@@ -1436,6 +1472,13 @@ export class AudioEngine {
       env.forest = damp(env.forest, tg.forest, 0.8, CONTROL_DT);
       env.swamp = damp(env.swamp, tg.swamp, 0.8, CONTROL_DT);
     }
+    // Inside a cave (under its rock, not walking on top of it)?
+    let cave = 0;
+    if (typeof terrain.ceilingAt === "function") {
+      const ceil = terrain.ceilingAt(L.x, L.z);
+      if (ceil !== Infinity && L.y < ceil + 0.5) cave = 0.45 + 0.55 * num(terrain.shelterAt?.(L.x, L.z), 0);
+    }
+    env.cave = damp(env.cave, cave, 2.5, CONTROL_DT);
     const ground = num(terrain.heightAt?.(L.x, L.z), 0);
     const maxH = num(terrain.maxHeight, 140) || 140;
     env.agl = Math.max(0, L.y - Math.max(ground, num(terrain.seaLevel, 0)));
@@ -1466,25 +1509,29 @@ export class AudioEngine {
     const windStrength = world?.wind ? clamp(num(world.wind.strength, 0.5), 0, 1) : 0.5;
     const gust = this._gust;
     const exposure = clamp(0.3 + env.alt * 0.55 + lift * 0.5 + (1 - env.forest) * 0.12 + env.oceanNear * 0.15, 0, 1.3);
-    const windLevel = (0.35 + 0.65 * windStrength) * (0.4 + 0.6 * gust) * exposure;
+    // Inside a cave the outdoors is a muffled murmur from the mouth, and the
+    // rock rings with whatever happens in here.
+    const open = 1 - 0.82 * env.cave;
+    glideIf(this.caveSend.gain, 0.6 * env.cave, now, 0.25);
+    const windLevel = (0.35 + 0.65 * windStrength) * (0.4 + 0.6 * gust) * exposure * open;
     const w = this.wind;
-    glideIf(w.gain.gain, 0.05 + 0.32 * windLevel, now, 0.3);
+    glideIf(w.gain.gain, (0.05 + 0.32 * windLevel) * open, now, 0.3);
     glideIf(w.bp.frequency, 220 + 520 * gust + 260 * env.alt, now, 0.45);
     glideIf(w.whistle.gain, 0.05 * smoothstep(0.3, 0.85, windLevel) * (0.35 + env.alt + lift), now, 0.35);
     glideIf(w.wbp.frequency, 620 + 700 * gust + 380 * env.alt, now, 0.6);
     glideIf(w.wpan.pan, Math.sin(now * 0.07) * 0.5, now, 0.5);
-    const leaves = env.forest * grounded * (0.3 + 0.7 * gust) * (0.4 + 0.6 * windStrength);
+    const leaves = env.forest * grounded * (0.3 + 0.7 * gust) * (0.4 + 0.6 * windStrength) * open;
     glideIf(w.leaves.gain, 0.06 * leaves, now, 0.3);
     glideIf(w.flutterDepth.gain, 0.12 + 0.2 * gust, now, 0.4);
 
     // Water beds, panned toward where the probes found water.
-    glideIf(this.surf.level.gain, 0.42 * env.oceanNear * (0.6 + 0.4 * grounded), now, 0.5);
+    glideIf(this.surf.level.gain, 0.42 * env.oceanNear * (0.6 + 0.4 * grounded) * open, now, 0.5);
     glideIf(this.surf.pan.pan, 0.8 * clamp(env.oceanDx * L.rx + env.oceanDz * L.rz, -1, 1) * smoothstep(5, 40, env.ocean), now, 0.3);
-    glideIf(this.lake.level.gain, 0.3 * env.lakeNear * grounded, now, 0.5);
+    glideIf(this.lake.level.gain, 0.3 * env.lakeNear * grounded * open, now, 0.5);
     glideIf(this.lake.pan.pan, 0.75 * clamp(env.lakeDx * L.rx + env.lakeDz * L.rz, -1, 1) * smoothstep(3, 25, env.lake), now, 0.3);
 
     // Insects: night chorus, thinner by the open sea.
-    const insects = night * grounded * (0.55 + 0.45 * (1 - env.oceanNear));
+    const insects = night * grounded * (0.55 + 0.45 * (1 - env.oceanNear)) * open;
     glideIf(this.insects.level.gain, 0.085 * insects, now, 1.2);
     this._insectT -= CONTROL_DT;
     if (this._insectT <= 0) {
@@ -1502,9 +1549,10 @@ export class AudioEngine {
     // Rates for the scheduled critters.
     const phase = num(sky?.phase, 0.4);
     const dawn = 1 + 1.3 * clamp(1 - Math.abs(phase - 0.285) / 0.06, 0, 1);
-    this._birdRate = Math.pow(smoothstep(0.15, 0.7, day), 1.4) * grounded * (0.3 + 0.7 * env.forest) * dawn * (1 - 0.45 * env.oceanNear) * 0.5;
-    this._frogRate = (0.2 + 0.8 * night) * grounded * Math.max(env.lakeNear, env.swamp * 1.5) * 0.85;
-    this._plipRate = env.lakeNear * grounded * 0.45;
+    this._birdRate = Math.pow(smoothstep(0.15, 0.7, day), 1.4) * grounded * (0.3 + 0.7 * env.forest) * dawn * (1 - 0.45 * env.oceanNear) * 0.5 * open;
+    this._frogRate = (0.2 + 0.8 * night) * grounded * Math.max(env.lakeNear, env.swamp * 1.5) * 0.85 * open;
+    this._plipRate = env.lakeNear * grounded * 0.45 * open;
+    this._dripRate = smoothstep(0.5, 0.9, env.cave) * 0.55;
   }
 
   _scheduleAmbience(dt, now) {
@@ -1533,6 +1581,14 @@ export class AudioEngine {
       const r = this._plipRate;
       this._plipT = r > 0.01 ? rnd(0.5, 1.5) / r : 3;
       if (r > 0.01) this._plip();
+    }
+
+    // Water dripping from a cave's roof (rings in the cave echo).
+    this._dripT -= dt;
+    if (this._dripT <= 0) {
+      const r = this._dripRate;
+      this._dripT = r > 0.01 ? rnd(0.6, 2.4) / r : 2;
+      if (r > 0.01) this._drip();
     }
 
     // Surf: each wave is one scheduled swell → crash → wash on the continuous bed.
@@ -1674,6 +1730,23 @@ export class AudioEngine {
     const f = rnd(550, 900);
     sweep(o.frequency, t, f, f * rnd(1.8, 2.4), 0.04);
     pluck(g.gain, t, 0.002, 1, 0.07);
+  }
+
+  /** A drop of water falling from a cave roof: a high, bright plink (on the sfx bus, so it echoes). */
+  _drip() {
+    const v = this._voice(0.02);
+    if (!v) return;
+    v.out.gain.value = rnd(0.05, 0.11);
+    const pn = v.panner();
+    if (pn.pan) pn.pan.value = rnd(-0.8, 0.8);
+    v.out.connect(pn);
+    pn.connect(this.sfxBus);
+    const t = this.ctx.currentTime + LOOKAHEAD;
+    const g = v.gain(0, v.out);
+    const f = rnd(1300, 2300);
+    const o = v.osc("sine", f, t, t + 0.12, g);
+    sweep(o.frequency, t, f, f * rnd(1.6, 2.1), 0.035);
+    pluck(g.gain, t, 0.001, 1, 0.06);
   }
 
   _dawnCheck(sky) {

@@ -201,6 +201,9 @@ export class MapView {
             <li><span class="lg lg--dot" style="--c:${MARKER_COLOR.threat}"></span>Threat</li>
             <li><span class="lg lg--sw lg--fresh"></span>Lakes &amp; rivers — drinkable</li>
             <li><span class="lg lg--sw lg--sea"></span>Sea — salt</li>
+            <li><span class="lg lg--peak"></span>Summit · height in metres</li>
+            <li><span class="lg lg--route"></span>Pass &amp; trail to a lookout</li>
+            <li><span class="lg lg--cave"></span>Cave mouth &amp; passage</li>
           </ul>
           <p class="map__hint"><span class="map__hint-keys"><kbd class="kbd">M</kbd> or <kbd class="kbd">Esc</kbd> to close</span><span class="map__hint-touch">Tap anywhere to close</span></p>
         </aside>
@@ -427,6 +430,11 @@ export class MapView {
       const h = t.heightAt(pos.x, pos.z) - (t.seaLevel || 0);
       set("elev", h < 0 ? `${Math.round(-h * 10) / 10} m deep` : `${Math.round(h)} m`);
     }
-    if (t && typeof t.biomeAt === "function") set("biome", BIOME_NAME[t.biomeAt(pos.x, pos.z)] || "—");
+    if (t && typeof t.biomeAt === "function") {
+      // Under a cave roof (and not walking on top of it): name the cave.
+      const cave = t.caveAt ? t.caveAt(pos.x, pos.z) : null;
+      const inside = cave && Number.isFinite(pos.y) && pos.y < t.ceilingAt(pos.x, pos.z);
+      set("biome", inside ? cave.label : BIOME_NAME[t.biomeAt(pos.x, pos.z)] || "—");
+    }
   }
 }

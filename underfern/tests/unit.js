@@ -17,6 +17,7 @@ import { Wind } from "../src/world/wind.js";
 import { World } from "../src/world/world.js";
 import { isRotated, appSize, toApp, onAppResize } from "../src/core/screen.js";
 import { Input } from "../src/player/input.js";
+import { ThirdPersonCamera } from "../src/player/camera.js";
 import { speciesSilhouette } from "../src/ui/menu.js";
 
 /* --- Tiny harness --------------------------------------------------------- */
@@ -369,6 +370,350 @@ test("terrain: findSpawnPoint honours biomes / height / slope / ring and is dete
     assert.range(Math.hypot(p.x - near.x, p.z - near.z), near.minR - 1e-6, near.maxR + 1e-6, "ring distance");
   }
   assert.equal(t.findSpawnPoint(r, { biomes: ["no-such-biome"], tries: 50 }), null, "impossible filter:");
+});
+
+/* --- world/terrain.js: the massif and its caves ---------------------------- */
+
+// A finer island for the mountain / cave checks: trails and cave floors are a
+// few metres wide, which the 12.5 m cells above can only sketch.
+const HI_RES = 256;
+let hiTerrain = null;
+const getHiTerrain = () =>
+  (hiTerrain ||= new Terrain({ size: WORLD.size, resolution: HI_RES, seed: WORLD.seed, seaLevel: WORLD.seaLevel, maxHeight: WORLD.maxHeight }));
+
+/**
+ * Ground reachable on foot from the lowlands: a flood fill over a `step` m grid
+ * where neighbours may differ by at most `grade` rise/run (creatures stall at
+ * 1.3) and caves only count where the rock leaves `stand` metres of headroom.
+ */
+function walkable(t, { step = 3, grade = 1.0, stand = 2.2 } = {}) {
+  const n = Math.floor(t.size / step);
+  const H = new Float32Array(n * n);
+  const ok = new Uint8Array(n * n);
+  const reach = new Uint8Array(n * n);
+  const q = new Int32Array(n * n);
+  let qt = 0;
+  const pos = (i) => [-t.half + ((i % n) + 0.5) * step, -t.half + (((i / n) | 0) + 0.5) * step];
+  for (let i = 0; i < n * n; i++) {
+    const [x, z] = pos(i);
+    H[i] = t.heightAt(x, z);
+    ok[i] = H[i] > t.seaLevel + 0.1 && t.clearanceAt(x, z) >= stand ? 1 : 0;
+    if (ok[i] && H[i] < t.seaLevel + 8 && t.slopeAt(x, z) < 0.15) {
+      reach[i] = 1;
+      q[qt++] = i;
+    }
+  }
+  const lim = grade * step;
+  for (let qh = 0; qh < qt; qh++) {
+    const i = q[qh];
+    const x = i % n;
+    for (const j of [x > 0 ? i - 1 : -1, x < n - 1 ? i + 1 : -1, i - n, i + n]) {
+      if (j < 0 || j >= n * n || reach[j] || !ok[j]) continue;
+      if (Math.abs(H[j] - H[i]) > lim) continue;
+      reach[j] = 1;
+      q[qt++] = j;
+    }
+  }
+  return {
+    reach,
+    H,
+    ok,
+    n,
+    /** Reachable within `r` metres of (x, z)? */
+    at(x, z, r = 6) {
+      const k = Math.ceil(r / step);
+      const cx = Math.floor((x + t.half) / step);
+      const cz = Math.floor((z + t.half) / step);
+      for (let dz = -k; dz <= k; dz++) {
+        for (let dx = -k; dx <= k; dx++) {
+          const ix = cx + dx;
+          const iz = cz + dz;
+          if (ix >= 0 && iz >= 0 && ix < n && iz < n && reach[iz * n + ix]) return true;
+        }
+      }
+      return false;
+    },
+  };
+}
+
+test("massif: horn peaks near maxHeight, 1–2 passes, lookouts high on the ridge", () => {
+  const t = getHiTerrain();
+  assert.range(t.peaks.length, 3, 4, "peaks");
+  assert.range(t.peaks[0].h, t.maxHeight * 0.85, t.maxHeight * 1.08, "main summit height");
+  for (const p of t.peaks) assert.range(p.h, 90, t.maxHeight * 1.08, "every summit stands well above the highland");
+  assert.range(t.passes.length, 1, 2, "passes");
+  for (const p of t.passes) {
+    assert.range(p.h, 25, 110, "a pass sits well below the crest");
+    assert(t.peaks.every((k) => k.h > p.h + 40), "the summits tower over the pass");
+  }
+  assert(t.lookouts.length >= 1, "at least one lookout");
+  for (const o of t.lookouts) assert(o.h >= 70, `lookout at ${o.h.toFixed(0)} m should give a big view`);
+  assert(t.routes.some((r) => r.kind === "valley") && t.trails.length === t.lookouts.length, "a valley per pass, a trail per lookout");
+});
+
+test("massif: cliffs are barriers, not everywhere — a sane slope mix with sheer faces up high", () => {
+  const t = getHiTerrain();
+  const n = t.resolution + 1;
+  let land = 0;
+  let steep = 0;
+  let high = 0;
+  let highSteep = 0;
+  for (let iz = 1; iz < n - 1; iz++) {
+    for (let ix = 1; ix < n - 1; ix++) {
+      const x = -t.half + ix * t.cellSize;
+      const z = -t.half + iz * t.cellSize;
+      const h = t.heightAt(x, z);
+      if (h < t.seaLevel + 0.5 || t.nearCave(x, z)) continue;
+      land++;
+      const s = t.slopeAt(x, z) > 0.39; // creatures stall about here
+      if (s) steep++;
+      if (h > t.seaLevel + 90) {
+        high++;
+        if (s) highSteep++;
+      }
+    }
+  }
+  assert.range(steep / land, 0.015, 0.15, "share of land too steep to walk");
+  assert(high > 0, "there is high country");
+  assert.range(highSteep / high, 0.12, 0.85, "share of the high country (>90 m) that is cliff");
+});
+
+test("massif: walkable from the lowlands to every pass, lookout and cave mouth", () => {
+  const t = getHiTerrain();
+  const w = walkable(t);
+  let land = 0;
+  let reached = 0;
+  let top = -Infinity;
+  for (let i = 0; i < w.n * w.n; i++) {
+    if (!w.ok[i]) continue;
+    land++;
+    if (w.reach[i]) {
+      reached++;
+      top = Math.max(top, w.H[i]);
+    }
+  }
+  assert(reached / land > 0.85, `most of the island is walkable (${(reached / land).toFixed(3)})`);
+  assert(top > t.seaLevel + 100, `you can climb above 100 m (highest reached ${top.toFixed(0)} m)`);
+  for (const p of t.passes) assert(w.at(p.x, p.z), `pass at ${p.x.toFixed(0)}, ${p.z.toFixed(0)} is reachable`);
+  for (const o of t.lookouts) assert(w.at(o.x, o.z), `lookout at ${o.x.toFixed(0)}, ${o.z.toFixed(0)} (${o.h.toFixed(0)} m) is reachable`);
+  for (const c of t.caves) {
+    for (const e of c.entrances) assert(w.at(e.outsideX, e.outsideZ), `${c.kind} ${c.id}: the ground outside its mouth is reachable`);
+    assert(w.at(c.deep.x, c.deep.z, 4), `${c.kind} ${c.id}: you can walk right into it`);
+  }
+});
+
+test("caves: 3–6 of different sizes — dens, a tunnel with two mouths, a cavern with a skylight; same at any resolution", () => {
+  const t = getHiTerrain();
+  const lo = getTerrain();
+  assert.range(t.caves.length, 3, 6, "cave count");
+  const kinds = t.caves.map((c) => c.kind);
+  assert(kinds.includes("cavern"), "a great cavern");
+  assert(kinds.includes("den"), "at least one small den");
+  assert(t.caves.some((c) => c.entrances.length === 2 || c.skylights.length), "some cave has two mouths or a skylight");
+  const cavern = t.caves.find((c) => c.kind === "cavern");
+  for (const c of t.caves) {
+    if (c.kind === "den") {
+      assert.range(c.height, 2.4, 3.45, "a den's mouth admits raptors, not an adult Allosaurus");
+      assert(c.height < cavern.height - 2, "the cavern's mouth is far bigger than a den's");
+    }
+    assert(c.maxHeight >= c.height, "inside is at least as tall as the mouth");
+  }
+  assert(cavern.maxHeight > 10 && cavern.maxWidth > 25, "the cavern opens into a great chamber");
+  // Layout is decided on the fixed coarse grid: identical caves at 128 and 256.
+  assert.equal(lo.caves.length, t.caves.length, "same number of caves at another resolution:");
+  for (let i = 0; i < t.caves.length; i++) {
+    const a = t.caves[i];
+    const b = lo.caves[i];
+    assert.equal(a.kind, b.kind, "same kind:");
+    for (let k = 0; k < a.entrances.length; k++) {
+      assert.near(a.entrances[k].x, b.entrances[k].x, 1e-6, "same mouth x:");
+      assert.near(a.entrances[k].z, b.entrances[k].z, 1e-6, "same mouth z:");
+    }
+  }
+});
+
+test("caves: clearanceAt / ceilingAt / shelterAt / groundAt inside, outside and in the rock", () => {
+  const t = getHiTerrain();
+  for (const c of t.caves) {
+    const d = c.deep;
+    assert(t.inCave(d.x, d.z) && t.nearCave(d.x, d.z), `${c.kind} ${c.id}: deep point is inside`);
+    const clr = t.clearanceAt(d.x, d.z);
+    assert.range(clr, c.height * 0.8, c.maxHeight + 1.5, `${c.kind} ${c.id}: headroom inside`);
+    assert.near(t.ceilingAt(d.x, d.z) - t.heightAt(d.x, d.z), clr, 1e-4, "clearance = ceiling − floor:");
+    assert(t.shelterAt(d.x, d.z) > 0.4, `${c.kind} ${c.id}: dark deep inside (shelter ${t.shelterAt(d.x, d.z).toFixed(2)})`);
+    assert.equal(t.biomeAt(d.x, d.z), "rock", "a cave floor is bare rock:");
+    // From inside the floor, from above the hillside on the roof.
+    const top = t.surfaceAt(d.x, d.z);
+    assert(top > t.ceilingAt(d.x, d.z), "the hillside lies above the vault");
+    assert.near(t.groundAt(d.x, d.z, t.heightAt(d.x, d.z) + 1), t.heightAt(d.x, d.z), 1e-6, "groundAt from inside:");
+    assert.near(t.groundAt(d.x, d.z, top + 1), top, 0.05, "groundAt from on top:");
+    for (const e of c.entrances) {
+      assert.equal(t.clearanceAt(e.outsideX + Math.sin(e.heading) * 4, e.outsideZ + Math.cos(e.heading) * 4), Infinity, "open sky outside a mouth:");
+      assert(t.shelterAt(e.outsideX, e.outsideZ) < 0.2, "daylight at the mouth");
+    }
+    // Beside the vault is solid rock: no headroom at all.
+    const p = c.path[Math.floor(c.path.length / 2)];
+    const q = c.path[Math.floor(c.path.length / 2) + 1] || p;
+    const tl = Math.hypot(q.x - p.x, q.z - p.z) || 1;
+    const nx = -(q.z - p.z) / tl;
+    const nz = (q.x - p.x) / tl;
+    if (t.inCave(p.x, p.z)) {
+      const side = c.maxWidth / 2 + 3;
+      assert(t.clearanceAt(p.x + nx * side, p.z + nz * side) <= 0.2, `${c.kind} ${c.id}: rock beside the vault`);
+    }
+  }
+  // Far from any cave everything is open.
+  assert.equal(t.ceilingAt(-t.half + 30, -t.half + 30), Infinity, "open sea corner:");
+  assert.equal(t.shelterAt(-t.half + 30, -t.half + 30), 0, "no shelter in the open:");
+});
+
+test("caves: findSpawnPoint and the vegetation keep out of caves", () => {
+  const t = getHiTerrain();
+  const r = makeRng(5);
+  for (let i = 0; i < 300; i++) {
+    const c = t.caves[i % t.caves.length];
+    const e = c.entrances[0];
+    const p = t.findSpawnPoint(r, { near: { x: e.x, z: e.z, minR: 0, maxR: 60 }, tries: 50 });
+    if (p) assert(!t.nearCave(p.x, p.z), `spawn point ${p.x.toFixed(1)}, ${p.z.toFixed(1)} is in a cave`);
+  }
+  const w = getWorld();
+  const wt = w.terrain;
+  for (const p of w.vegetation.plants) assert(!wt.nearCave(p.x, p.z), `a ${p.kind} grows in a cave at ${p.x.toFixed(1)}, ${p.z.toFixed(1)}`);
+  for (const c of wt.caves) {
+    for (const q of c.path) {
+      const cols = w.vegetation.collidersNear(q.x, q.z, 4, []);
+      for (const k of cols) assert(!wt.inCave(k.x, k.z), `a ${k.kind} stands in a cave at ${k.x.toFixed(1)}, ${k.z.toFixed(1)}`);
+    }
+  }
+});
+
+/** Steer a creature along waypoints for `seconds` (no brain): what the player would do. */
+function walkAlong(c, pts, seconds, dt = 0.05) {
+  let k = 0;
+  for (let s = 0; s < seconds; s += dt) {
+    while (k < pts.length - 1 && Math.hypot(pts[k].x - c.position.x, pts[k].z - c.position.z) < 2.5) k++;
+    const dx = pts[k].x - c.position.x;
+    const dz = pts[k].z - c.position.z;
+    const l = Math.hypot(dx, dz) || 1;
+    c.intent.moveX = (dx / l) * 0.5;
+    c.intent.moveZ = (dz / l) * 0.5;
+    c.update(dt);
+  }
+  c.intent.moveX = c.intent.moveZ = 0;
+}
+
+/** The waypoints from just outside a cave's (first) mouth to its deepest point. */
+function intoCave(c) {
+  const e = c.entrances[0];
+  let iDeep = 0;
+  let best = Infinity;
+  c.path.forEach((p, i) => {
+    const d = Math.hypot(p.x - c.deep.x, p.z - c.deep.z);
+    if (d < best) {
+      best = d;
+      iDeep = i;
+    }
+  });
+  let iMouth = 0;
+  best = Infinity;
+  c.path.forEach((p, i) => {
+    const d = Math.hypot(p.x - e.x, p.z - e.z);
+    if (d < best) {
+      best = d;
+      iMouth = i;
+    }
+  });
+  const pts = [{ x: e.outsideX, z: e.outsideZ }];
+  const dir = iDeep >= iMouth ? 1 : -1;
+  for (let i = iMouth; i !== iDeep + dir; i += dir) pts.push(c.path[i]);
+  pts.push(c.deep);
+  return pts;
+}
+
+test("caves: a raptor walks into a den; a Brontosaurus (and an adult Allosaurus) can't fit", () => {
+  const w = getWorld();
+  const eco = w.ecosystem;
+  const t = w.terrain;
+  const den = t.caves.find((c) => c.kind === "den");
+  const e = den.entrances[0];
+  const made = [];
+  const at = (id) => {
+    const c = eco.spawn(id, e.outsideX + Math.sin(e.heading) * 6, e.outsideZ + Math.cos(e.heading) * 6, { growth: 1, heading: e.heading + Math.PI });
+    if (c.brain) c.brain.update = () => {}; // we steer
+    made.push(c);
+    return c;
+  };
+  try {
+    const raptor = at("utahraptor");
+    assert(raptor.standHeight < den.height, `an adult raptor (${raptor.standHeight.toFixed(2)} m) fits a den (${den.height.toFixed(2)} m)`);
+    walkAlong(raptor, intoCave(den), 25);
+    assert(t.inCave(raptor.position.x, raptor.position.z), "the raptor made it inside");
+    assert(raptor.position.y < t.ceilingAt(raptor.position.x, raptor.position.z), "…and stands under the roof, on the floor");
+    assert(raptor._shade < 0.9, "the den darkens it");
+    eco.remove(raptor);
+    for (const id of ["brontosaurus", "allosaurus"]) {
+      const big = at(id);
+      assert(big.standHeight > den.height, `${id} stands taller than the den's mouth`);
+      walkAlong(big, intoCave(den), 25);
+      assert(!t.inCave(big.position.x, big.position.z), `the ${id} stayed outside`);
+      eco.remove(big);
+    }
+  } finally {
+    for (const c of made) eco.remove(c);
+  }
+});
+
+test("caves: the ecosystem never spawns an animal inside one", () => {
+  const w = getWorld();
+  const eco = w.ecosystem;
+  const t = w.terrain;
+  const spawned = capture("spawn", () => {
+    for (const c of t.caves) {
+      const e = c.entrances[0];
+      const f = { x: e.x, y: 0, z: e.z };
+      for (let i = 0; i < 40; i++) eco._safeSpawnAt?.(f, 0, 90, 4, null);
+    }
+  });
+  assert(spawned.length > 0, "something spawned near the caves");
+  for (const ev of spawned) {
+    const p = ev.creature.position;
+    assert(!t.nearCave(p.x, p.z), `a ${ev.creature.species.id} spawned in a cave at ${p.x.toFixed(1)}, ${p.z.toFixed(1)}`);
+  }
+  for (const ev of spawned) eco.remove(ev.creature);
+});
+
+test("camera: inside a cave it stays under the rock and never in it, whatever the orbit", () => {
+  const t = getHiTerrain();
+  const cam = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 2000);
+  const tpc = new ThirdPersonCamera(cam, t);
+  for (const c of t.caves) {
+    for (const id of ["dryosaurus", "utahraptor"]) {
+      const sp = getSpecies(id);
+      const p = c.deep;
+      const creature = {
+        species: sp,
+        scale: 1,
+        alive: true,
+        speed: 0,
+        heading: 0,
+        gait: "idle",
+        velocity: new THREE.Vector3(),
+        position: new THREE.Vector3(p.x, t.heightAt(p.x, p.z), p.z),
+      };
+      tpc.snap();
+      for (let k = 0; k < 8; k++) {
+        tpc.yaw = (k / 8) * Math.PI * 2;
+        tpc.pitch = k % 2 ? 1.2 : 0.3;
+        tpc.zoom = 2.2;
+        for (let i = 0; i < 30; i++) tpc.update(0.05, creature);
+        const q = cam.position;
+        const ceil = t.ceilingAt(q.x, q.z);
+        assert(ceil !== Infinity, `${c.kind} ${c.id} (${id}, yaw ${k}): camera left the cave (${q.x.toFixed(1)}, ${q.y.toFixed(1)}, ${q.z.toFixed(1)})`);
+        assert(q.y < ceil - 0.2, `${c.kind} ${c.id} (${id}, yaw ${k}): camera at ${q.y.toFixed(2)} pokes into the roof (${ceil.toFixed(2)})`);
+        assert(q.y > t.heightAt(q.x, q.z) + 0.15, `${c.kind} ${c.id} (${id}, yaw ${k}): camera below the floor`);
+      }
+    }
+  }
 });
 
 /* --- creatures/species.js ------------------------------------------------- */
