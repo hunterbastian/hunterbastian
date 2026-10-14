@@ -1,10 +1,12 @@
 // The island. A seeded heightfield shaped into one main landmass (noisy coast,
-// bays, sandy beaches and rocky headlands, an off-centre ridged mountain range
-// carved by erosion gullies, terraced highland plateaus, rolling plains,
-// forest belts, swampy lowlands), a few offshore islets, freshwater lakes and
-// rivers carved below sea level. Rendered as one smooth, indexed mesh whose
-// material blends procedural grass / dry grass / dirt / rock / sand / mud
-// detail textures, and queried by everything that walks on it.
+// bays and rocky headlands, an off-centre ridged mountain range carved by
+// erosion gullies, upland plateaus, rolling plains, forest belts, wet wooded
+// lowlands), a few offshore islets, freshwater lakes and rivers carved below
+// sea level. Three living biomes cover the land — a coastal belt of beach,
+// dunes and salt grass, plains, and forest — around the massif's bare rock.
+// Rendered as one smooth, indexed mesh whose material blends procedural
+// grass / dry grass / dirt / rock / sand / mud detail textures, and queried by
+// everything that walks on it.
 //
 // Heights come from a continuous function of world position, sampled at the
 // mesh vertices. Layout decisions (lake sites, river routes, how tall the
@@ -17,17 +19,26 @@ import { makeRng, rand, randInt, hash } from "../core/rng.js";
 import { clamp, lerp, smoothstep, TAU } from "../core/math.js";
 import { createNoise2D, createNoise2DGrad, fbm2D, ridged2D, erodedFbm2D } from "../core/noise.js";
 import { planCaves, carveCaves, buildCaveMeshes, describeCave, CaveIndex } from "./caves.js";
+import { patchLook } from "./look.js";
 
-export const BIOMES = ["ocean", "lake", "beach", "plains", "forest", "swamp", "highland", "rock"];
+// Three living biomes — coast, plains, forest — plus the massif's bare rock
+// and the two kinds of water. Swampy lowlands are wet forest, the highland
+// plateaus upland meadow (plains), and the beach widens into a coastal belt.
+export const BIOMES = ["ocean", "lake", "coast", "plains", "forest", "rock"];
+/** The biomes things live in (BIOMES minus water and the massif's rock). */
+export const LIVING_BIOMES = ["coast", "plains", "forest"];
 
 const B_OCEAN = 0;
 const B_LAKE = 1;
-const B_BEACH = 2;
+const B_COAST = 2;
 const B_PLAINS = 3;
 const B_FOREST = 4;
-const B_SWAMP = 5;
-const B_HIGHLAND = 6;
-const B_ROCK = 7;
+const B_ROCK = 5;
+
+// The coastal belt, in metres from the open sea: sand to about BEACH_W, dunes
+// behind it, salt grass and scrub out to about COAST_W, wobbling with noise.
+const BEACH_W = 26;
+const COAST_W = 100;
 
 // Per-vertex water classification.
 const W_LAND = 0;
@@ -476,6 +487,8 @@ const L_MUD = 5;
 const LAYERS = 6;
 // World metres covered by one repeat of each layer (near scale).
 const LAYER_TILE = [2.6, 2.8, 3.0, 6.5, 3.6, 4.2];
+/** Metres above the sea where the massif's snow caps begin (a dusting reaches lower). */
+export const SNOW_LINE = 145;
 // Detail normal strength per layer (height units → slope).
 const LAYER_BUMP = [5, 5, 5, 8, 4, 3];
 
@@ -788,16 +801,16 @@ function synthGrass(T) {
   const broad = T.fbm(2, 5, 0.55);
   const tone = T.fbm(6, 3, 0.5);
   const cl = T.worley(14, 0.9);
-  const soil = [0.15, 0.14, 0.085];
-  const deep = [0.19, 0.25, 0.1];
-  const mid = [0.28, 0.35, 0.14];
-  const yel = [0.4, 0.42, 0.19];
+  const soil = [0.17, 0.16, 0.09];
+  const deep = [0.19, 0.3, 0.1];
+  const mid = [0.3, 0.45, 0.14];
+  const yel = [0.48, 0.54, 0.2];
   const c = [0, 0, 0];
   for (let i = 0; i < N; i++) {
     mixInto(c, deep, mid, 0.5 + 0.5 * broad[i]);
     mixInto(c, c, yel, smoothstep(0.2, 0.95, 0.5 + 0.5 * tone[i]) * 0.35);
     const clump = 1 - smoothstep(0.2, 0.95, cl.f1[i]);
-    mixInto(c, soil, c, 0.45 + 0.55 * clump);
+    mixInto(c, soil, c, 0.62 + 0.38 * clump);
     col[i * 3] = c[0];
     col[i * 3 + 1] = c[1];
     col[i * 3 + 2] = c[2];
@@ -841,11 +854,12 @@ function synthDryGrass(T) {
   const broad = T.fbm(2, 5, 0.55);
   const flow = T.fbm(2, 2, 0.5);
   const tone = T.fbm(8, 3, 0.5);
-  const soil = [0.3, 0.25, 0.15];
-  const soilD = [0.21, 0.17, 0.1];
-  const straw = [0.52, 0.45, 0.27];
-  const pale = [0.63, 0.56, 0.37];
-  const olive = [0.37, 0.37, 0.19];
+  // Golden-olive rather than brown: a dry meadow, not a stubble field.
+  const soil = [0.29, 0.26, 0.14];
+  const soilD = [0.2, 0.18, 0.09];
+  const straw = [0.53, 0.48, 0.25];
+  const pale = [0.63, 0.58, 0.35];
+  const olive = [0.38, 0.41, 0.18];
   const c = [0, 0, 0];
   for (let i = 0; i < N; i++) {
     mixInto(c, soilD, soil, 0.5 + 0.5 * broad[i]);
@@ -862,7 +876,7 @@ function synthDryGrass(T) {
     const idx = ((y | 0) & m) * S + ((x | 0) & m);
     const a = flow[idx] * 3.2 + (rng() - 0.5) * 1.3;
     const len = (0.02 + 0.028 * rng()) * S;
-    if (rng() < 0.2) mixInto(c, olive, straw, rng() * 0.5);
+    if (rng() < 0.38) mixInto(c, olive, straw, rng() * 0.5);
     else mixInto(c, straw, pale, rng() * rng());
     const v = 0.78 + 0.36 * rng() + broad[idx] * 0.08;
     c[0] *= v;
@@ -979,7 +993,8 @@ function synthRock(T) {
   const warp = T.fbm(2, 3, 0.5);
   const lichenN = T.fbm(5, 3, 0.55);
   // Jointing: the rock face splits into irregular plates (~1.3 m), each a
-  // slightly different shade and height, so faces read as hard stone.
+  // slightly different shade and height. Kept faint — strong, dark joints read
+  // as cracked mud; the shader's crags and strata carry the stone at scale.
   const blocks = T.worley(5, 0.85);
   const gap = new Float32Array(S * S);
   for (let i = 0; i < gap.length; i++) gap[i] = blocks.f2[i] - blocks.f1[i];
@@ -1008,19 +1023,19 @@ function synthRock(T) {
       const pl = plate[i] - 0.5;
       mixInto(c, grey, warm, clamp(0.5 + 0.6 * broad[i], 0, 1));
       mixInto(c, c, dark, smoothstep(0.1, -0.8, relief) * 0.32);
-      const g = 1 + 0.07 * grain[i] + 0.08 * relief + 0.16 * pl;
+      const g = 1 + 0.07 * grain[i] + 0.1 * relief + 0.07 * pl;
       c[0] *= g;
       c[1] *= g;
       c[2] *= g;
       const lm = smoothstep(0.28, 0.55, lichenN[i]) * (1 - cr) * (1 - jt) * smoothstep(-0.2, 0.35, relief);
       mixInto(c, c, broad[i] > 0.3 ? ochre : lichen, lm * 0.45);
-      mixInto(c, c, moss, Math.max(cr, jt * 0.6) * smoothstep(-0.2, 0.3, lichenN[i]) * 0.35);
-      mixInto(c, c, dark, Math.max(cr * 0.6, jt * 0.42, parting * 0.3));
+      mixInto(c, c, moss, Math.max(cr * 0.6, jt * 0.25) * smoothstep(-0.2, 0.3, lichenN[i]) * 0.3);
+      mixInto(c, c, dark, Math.max(cr * 0.32, jt * 0.13, parting * 0.22));
       col[i * 3] = c[0];
       col[i * 3 + 1] = c[1];
       col[i * 3 + 2] = c[2];
       hgt[i] = clamp(
-        0.5 + 0.24 * relief + 0.1 * broad[i] + 0.1 * pl + 0.03 * grain[i] - 0.26 * cr - 0.16 * jt - 0.07 * parting,
+        0.5 + 0.26 * relief + 0.12 * broad[i] + 0.05 * pl + 0.03 * grain[i] - 0.16 * cr - 0.06 * jt - 0.06 * parting,
         0,
         1
       );
@@ -1281,11 +1296,24 @@ const float TER_FAR = 0.23;
 const float TER_FAR_BLUR = 5.0;
 const float TER_CONTRAST = 0.55; // how much texture height sways the blend
 const float TER_DEPTH = 0.18;    // blend softness (height units)
+const float TER_SNOW_LINE = ${SNOW_LINE.toFixed(1)}; // metres above the sea
 
+// Sedimentary bands, painterly: cool grey, warm buff, the odd rust band —
+// soft colour, never a dark line (thin dark seams read as stair-steps).
 vec3 terStrataTint(float layer) {
   float h = fract(sin(layer * 12.9898 + 4.1) * 43758.5453);
-  vec3 t = mix(vec3(0.84, 0.84, 0.86), vec3(1.06, 1.0, 0.88), h);
-  return mix(t, vec3(1.04, 0.85, 0.76), step(0.8, h));
+  vec3 t = mix(vec3(0.8, 0.83, 0.9), vec3(1.12, 1.03, 0.86), h);
+  t = mix(t, vec3(1.16, 0.88, 0.72), step(0.8, h));
+  return mix(t, vec3(1.22, 1.18, 1.08), step(h, 0.12));
+}
+
+// Bump a world-space normal by a height field's screen derivatives.
+vec3 terPerturb(vec3 n, vec3 dpdx, vec3 dpdy, float dhx, float dhy) {
+  vec3 r1 = cross(dpdy, n);
+  vec3 r2 = cross(n, dpdx);
+  float det = dot(dpdx, r1);
+  vec3 grad = sign(det) * (dhx * r1 + dhy * r2);
+  return normalize(abs(det) * n - grad);
 }
 `;
 
@@ -1299,15 +1327,41 @@ float terDist = length(vViewPosition);
 // with distance; the rotated far sample and the per-vertex macro tint carry
 // the variation from there.
 float terNearFade = smoothstep(45.0, 190.0, terDist) * 0.8;
-// Strata bands in world height (~4.8 m thick), wavering gently; each band
-// gets its own tint and the switch between bands is filtered by its screen
-// footprint so distant cliffs don't shimmer (especially in the pixel style).
-float terSy = vTerPos.y * 0.21 + vTerB.w * 1.6 + sin(vTerPos.x * 0.031 + vTerPos.z * 0.023) * 0.35;
-float terSyW = max(fwidth(terSy) * 1.5, 0.08);
+// Strata bands in world height (~8 m thick), wavering and dipping gently;
+// each band gets its own tint, blended softly into the next (the blend widens
+// with the screen footprint, so distant cliffs never shimmer or stripe).
+float terSy = vTerPos.y * 0.125 + vTerB.w * 1.6 + sin(vTerPos.x * 0.031 + vTerPos.z * 0.023) * 0.45 + sin(vTerPos.z * 0.011 - vTerPos.x * 0.007) * 0.6;
+float terSyW = max(fwidth(terSy) * 2.0, 0.3);
 float terLayer = floor(terSy);
 float terLf = terSy - terLayer;
 vec3 terStrata = mix(terStrataTint(terLayer), terStrataTint(terLayer + 1.0), smoothstep(1.0 - terSyW, 1.0, terLf));
-terStrata *= 1.0 - 0.14 * (1.0 - smoothstep(0.0, terSyW, terLf)) * (1.0 - smoothstep(0.3, 1.2, terSyW * 4.0));
+// Thinner beds inside each band (~2.5 m), fainter, gone before they could shimmer.
+float terSy2 = vTerPos.y * 0.4 + sin(vTerPos.x * 0.05 - vTerPos.z * 0.04) * 0.5 + terLayer * 0.37;
+float terBed = fract(sin(floor(terSy2) * 78.233 + 1.7) * 43758.5453);
+terStrata *= 1.0 + (terBed - 0.5) * 0.16 * (1.0 - smoothstep(0.25, 0.6, fwidth(terSy2)));
+// Crags (shading only): vertical ribs and gullies across steep faces — the
+// buttresses and chutes that break the massif's big planar facets into rock.
+// Projected on the two vertical planes and blended by the normal (so the
+// field is continuous over any face), stretched tall; taken outside the loop
+// below (derivatives need uniform control flow).
+vec2 terSideW = pow(abs(terN.xz) + 1e-3, vec2(3.0));
+terSideW /= terSideW.x + terSideW.y;
+float terSteepK = 1.0 - smoothstep(0.5, 0.88, terN.y);
+float terRib =
+  (lookNoise(vec2(vTerPos.z * 0.14, vTerPos.y * 0.028)) * 0.62 + lookNoise(vec2(vTerPos.z * 0.44 + 13.1, vTerPos.y * 0.075)) * 0.38) * terSideW.x +
+  (lookNoise(vec2(vTerPos.x * 0.14 + 41.0, vTerPos.y * 0.028)) * 0.62 + lookNoise(vec2(vTerPos.x * 0.44 - 7.7, vTerPos.y * 0.075)) * 0.38) * terSideW.y;
+// The broad part of the ribs alone: the couloirs that hold snow follow it
+// (the fine part would cut them into stripes that crawl when pixelated).
+float terRibLo =
+  lookNoise(vec2(vTerPos.z * 0.14, vTerPos.y * 0.028)) * terSideW.x + lookNoise(vec2(vTerPos.x * 0.14 + 41.0, vTerPos.y * 0.028)) * terSideW.y;
+float terStreak = smoothstep(0.6, 0.92,
+  lookNoise(vec2(vTerPos.z * 0.75 + 3.3, vTerPos.y * 0.014)) * terSideW.x + lookNoise(vec2(vTerPos.x * 0.75 - 9.1, vTerPos.y * 0.014)) * terSideW.y);
+// Broad swells over all bare rock, steep or not (shading only): the massif's
+// big planar facets turn softly instead of reading as folded paper.
+float terSwell = (lookNoise(vTerPos.xz * 0.07 + 5.1) * 0.65 + lookNoise(vTerPos.xz * 0.19 - 2.3) * 0.35) * 2.6;
+float terRibH = (terRib * 3.4 * terSteepK + terSwell) * (1.0 - smoothstep(160.0, 420.0, terDist));
+float terRibDx = dFdx(terRibH);
+float terRibDy = dFdy(terRibH);
 float terW[6];
 terW[0] = vTerA.x; terW[1] = vTerA.y; terW[2] = vTerA.z; terW[3] = vTerA.w; terW[4] = vTerB.x; terW[5] = vTerB.y;
 vec3 terCol[6];
@@ -1374,10 +1428,15 @@ for (int i = 0; i < 6; i++) {
     far /= bs;
     terRg[i] = rg / bs;
     terRockN = normalize(nW);
-    // Sedimentary strata on steep faces: grey, buff and the odd rust band.
-    alb.rgb *= mix(vec3(1.0), terStrata, (1.0 - bl.y) * 0.9);
-    alb.rgb = mix(alb.rgb, terAvg[i], terNearFade * 0.7);
-    alb.rgb *= mix(vec3(1.0), far.rgb / terAvg[i], 0.6);
+    // Painterly stone: most of the texture's grain over a warm-grey base
+    // (cooler up high), the far mottling faint, and soft sedimentary strata
+    // on steep faces — the light does the rest.
+    alb.rgb = mix(alb.rgb, terAvg[i], 0.15 + terNearFade * 0.65);
+    alb.rgb *= mix(vec3(1.0), far.rgb / terAvg[i], 0.3);
+    float terHi = smoothstep(40.0, 170.0, vTerPos.y - terSea);
+    vec3 terPaint = mix(vec3(0.27, 0.21, 0.15), vec3(0.25, 0.24, 0.24), terHi);
+    alb.rgb = mix(alb.rgb, terPaint * (alb.rgb / max(terAvg[i], vec3(0.01))), 0.5);
+    alb.rgb *= mix(vec3(1.0), terStrata, (1.0 - bl.y));
   } else {
     far = textureGrad(terAlbedo, vec3(TER_ROT * vTerPos.xz * farK + 0.37, layer), TER_ROT * gx * (TER_FAR * TER_FAR_BLUR), TER_ROT * gy * (TER_FAR * TER_FAR_BLUR));
     alb = textureGrad(terAlbedo, vec3(uv, layer), gx, gy);
@@ -1408,6 +1467,7 @@ for (int i = 0; i < 6; i++) {
 }
 float terRockB = terB[3] / terSum;
 terTopN /= max(1.0 - terRockB, 0.001);
+terRockN = terPerturb(terRockN, terDx, terDy, terRibDx, terRibDy);
 
 // Detail normals: full strength underfoot, softer far away (mips average them
 // anyway; this keeps distant grazing slopes from glittering).
@@ -1418,6 +1478,53 @@ vec3 terNormW = normalize(mix(terTopW, normalize(mix(terN, terRockN, terNs)), te
 // Macro variation (per-vertex low-frequency noise) and cavity occlusion.
 float terAO = vTerB.z;
 terAlb *= (0.86 + 0.28 * vTerB.w) * mix(1.0, terAO, 0.45);
+
+// Painterly rock: gullies shade darker and buttresses catch the light, rain
+// streaks stain the faces, and ledges that face up take a lighter, warmer
+// crust of lichen and grit.
+float terRockK = terRockB * terSteepK;
+terAlb *= mix(1.0, 0.76 + 0.46 * terRib, terRockK);
+terAlb *= 1.0 - 0.15 * terStreak * terRockK;
+terAlb = mix(terAlb, terAlb * vec3(1.1, 1.08, 0.94), smoothstep(0.72, 0.94, terNormW.y) * terRockB * 0.6);
+
+// Wind gusts rolling over the turf: travelling bands of lighter, warmer
+// grass (the same field bends the grass blades, look.js lookGust).
+float terGrassK = (terB[0] + terB[1]) / terSum;
+float terGust = lookGust(vTerPos.xz) * terGrassK * (1.0 - 0.5 * smoothstep(60.0, 260.0, terDist));
+terAlb *= 1.0 + 0.22 * terGust;
+terAlb = mix(terAlb, terAlb * vec3(1.1, 1.08, 0.84), terGust * 0.55);
+
+// Snow on the high massif: caps above the snow line, patches on the ledges
+// below it. It settles on what faces up and slides off the sheer faces —
+// except down the gullies, which hold it in couloirs. Cover comes in patches
+// (white on rock, never a grey wash), averaged out with distance so it never
+// shimmers; its edge wanders with noise and the rock's own relief.
+float terSnow = 0.0;
+#ifndef TER_CAVE
+{
+  float alt = vTerPos.y - terSea;
+  float wob = (vTerB.w - 0.5) * 20.0 + (lookNoise(vTerPos.xz * 0.04) - 0.5) * 18.0;
+  float cap = smoothstep(TER_SNOW_LINE - 24.0, TER_SNOW_LINE + 16.0, alt + wob);
+  float up = normalize(mix(terN, terNormW, 0.6)).y;
+  float hold = smoothstep(0.55 - 0.15 * cap, 0.8 - 0.1 * cap, up);
+  float couloir = (1.0 - smoothstep(0.3, 0.42, terRibLo)) * smoothstep(0.32, 0.55, up) * smoothstep(0.5, 0.9, cap);
+  float amount = cap * max(hold, couloir * 0.9);
+  float patches = lookNoise(vTerPos.xz * 0.3 + 1.7) * 0.5 + lookNoise(vTerPos.xz * 0.9 - 4.1) * 0.25 + terRibLo * 0.25;
+  // A clean edge a pixel or two wide (by its screen derivative), never a
+  // smear, and never so sharp that it crawls in the pixel style.
+  float edge = amount * 1.15 - 0.05 - patches;
+  float edgeW = clamp(fwidth(edge) * 1.5, 0.03, 0.1);
+  float crisp = smoothstep(-edgeW, edgeW, edge);
+  terSnow = mix(crisp, smoothstep(0.15, 0.85, amount), smoothstep(45.0, 170.0, terDist));
+  // Not paper white: sunlit snow still reads bright, and the light can model
+  // its drifts (wind-packed, slightly uneven) and turn it blue in shade.
+  vec3 snowCol = vec3(0.58, 0.62, 0.7) * (0.9 + 0.1 * terRib) * (0.93 + 0.14 * lookNoise(vTerPos.xz * 0.6 + 3.3));
+  terAlb = mix(terAlb, snowCol, terSnow);
+  terRough = mix(terRough, 0.7, terSnow);
+  terAO = mix(terAO, 1.0, terSnow * 0.3);
+  terNormW = normalize(mix(terNormW, terN, terSnow * 0.15));
+}
+#endif
 
 // Wet band at the waterline: darker, glossier.
 float terAbove = vTerPos.y - terSea;
@@ -1439,7 +1546,8 @@ diffuseColor.rgb *= terAlb;
 // Caves only: the baked light (aCave — how much daylight reaches this far from
 // a mouth or skylight) scales the lit colour, and a dim fill from the sky's
 // hemisphere light stands in for light bouncing in, so deep walls stay
-// readable instead of black (and follow day and night).
+// readable instead of black (and follow day and night). Where no daylight
+// reaches, patches of glowing lichen speckle the rock, softly blue-green.
 const FRAG_CAVE_LIGHT = /* glsl */ `
 #ifdef TER_CAVE
 {
@@ -1449,6 +1557,11 @@ const FRAG_CAVE_LIGHT = /* glsl */ `
   vec3 terFill = vec3(0.4);
 #endif
   outgoingLight = outgoingLight * vCave + diffuseColor.rgb * terFill * (0.8 * (1.0 - vCave));
+  // Sparse colonies (broad patches) of small specks, not a wash.
+  float terPatch = smoothstep(0.58, 0.78, lookNoise(vTerPos.xz * 0.21 + vTerPos.y * 0.17));
+  float terSpeck = smoothstep(0.66, 0.86, lookNoise(vTerPos.xz * 3.7 + vTerPos.y * 2.3));
+  float terGlow = terPatch * terSpeck * (1.0 - smoothstep(0.15, 0.6, vCave));
+  outgoingLight += mix(vec3(0.05, 0.32, 0.26), vec3(0.12, 0.2, 0.45), lookNoise(vTerPos.xz * 0.2)) * terGlow * 0.5;
 }
 #endif
 `;
@@ -1484,6 +1597,7 @@ function createTerrainMaterial(textures, seaLevel) {
         "reflectedLight.indirectDiffuse *= terAO;\nreflectedLight.indirectSpecular *= mix(1.0, terAO, 0.7);"
       )
       .replace("#include <opaque_fragment>", `${FRAG_CAVE_LIGHT}\n#include <opaque_fragment>`);
+    patchLook(shader, { wrap: 0.5, rim: 0, fill: 1 });
   };
   mat.customProgramCacheKey = () => "sauria-terrain-v3";
   return mat;
@@ -1521,7 +1635,8 @@ const MAP = {
   shadowTint: [70, 78, 96],
   lightTint: [255, 244, 214],
   forest: [72, 92, 60],
-  swamp: [104, 112, 82],
+  coast: [222, 208, 164],
+  snow: [246, 247, 250],
   // Per material layer: grass, dry grass, dirt, rock, sand, mud.
   layers: [
     [124, 136, 82],
@@ -1565,6 +1680,8 @@ export class Terrain {
     this.rivers = [];
     /** Generation statistics (timings, land fraction, counts) for debugging. */
     this.stats = {};
+    /** Circles findSpawnPoint keeps out of (landmarks): [{ x, z, r }]. */
+    this._keepOut = [];
 
     const g = this._createContext();
     const timings = {};
@@ -1589,6 +1706,7 @@ export class Terrain {
     this._carveRoutes(g, true);
     this._carveCaves(g);
     this._classifyWater(g);
+    this._raiseDunes(g);
     timings.water = now() - t;
     t = now();
     this._paint(g);
@@ -1824,6 +1942,16 @@ export class Terrain {
   }
 
   /**
+   * How far into the coastal belt a point lies: 1 on the open sand at the
+   * sea's edge, about 0.5 among the dunes, falling to 0 where the salt grass
+   * gives way to plains or forest (and 0 everywhere inland). Not in the core
+   * contract — vegetation and footsteps read it.
+   */
+  coastAt(x, z) {
+    return this._sampleField(this._coast, x, z);
+  }
+
+  /**
    * Random dry-land point that satisfies the filters, or null.
    * @param {() => number} rng seeded generator from makeRng
    * @param {{ biomes?: string[], minHeight?: number, maxSlope?: number,
@@ -1852,12 +1980,29 @@ export class Terrain {
       }
       if (this.heightAt(x, z) - this.seaLevel < minHeight) continue;
       if (this.slopeAt(x, z) > maxSlope) continue;
-      // Nothing ever spawns in (or in the mouth of) a cave.
+      // Nothing ever spawns in (or in the mouth of) a cave, or inside a landmark.
       if (this.nearCave(x, z)) continue;
+      if (this._keepOut.length && this.keptOut(x, z)) continue;
       if (biomes && biomes.length && !biomes.includes(this.biomeAt(x, z))) continue;
       return { x, z };
     }
     return null;
+  }
+
+  /**
+   * Keep spawns out of a circle (World adds every landmark's footprint).
+   * @param {number} x
+   * @param {number} z
+   * @param {number} r metres
+   */
+  addKeepOut(x, z, r) {
+    this._keepOut.push({ x, z, r });
+  }
+
+  /** True inside any keep-out circle (see addKeepOut). */
+  keptOut(x, z) {
+    for (const k of this._keepOut) if ((x - k.x) * (x - k.x) + (z - k.z) * (z - k.z) < k.r * k.r) return true;
+    return false;
   }
 
   /**
@@ -2006,6 +2151,9 @@ export class Terrain {
           // Gentle hypsometric lift so the high country reads lighter.
           const lift = smoothstep(30, 140, h) * 0.28;
           for (let c = 0; c < 3; c++) col[c] = lerp(col[c], paper[c] + 10, lift);
+          // Snowfields on the peaks (as the terrain shader lays them: high and not sheer).
+          const snow = smoothstep(SNOW_LINE - 16, SNOW_LINE + 12, h) * (1 - smoothstep(0.7, 1.6, Math.hypot(gx, gz)));
+          for (let c = 0; c < 3; c++) col[c] = lerp(col[c], MAP.snow[c], snow * 0.85);
 
           const nx = -gx * exaggerate;
           const nz = -gz * exaggerate;
@@ -2126,6 +2274,7 @@ export class Terrain {
       nPeak: createNoise2D(hash("underfern-massif", "peak", this.seed)),
       nBand: createNoise2D(hash("underfern-massif", "band", this.seed)),
       nCave: createNoise2D(hash("underfern-caves", "shape", this.seed)),
+      nRib: createNoise2D(hash("underfern-massif", "rib", this.seed)),
       // The vertex grid in design metres.
       vgrid: { n: this._n, origin: -this.half / k, step: this.cellSize / k },
       lgrid: { n: LAYOUT_RES + 1, origin: -DESIGN_SIZE / 2, step: DESIGN_SIZE / LAYOUT_RES },
@@ -2787,8 +2936,8 @@ export class Terrain {
         const wander = 5 * g.nBand(x * 0.019 + 7.7, z * 0.019 - 3.1) + 3 * band;
         const tq = (mtn + wander) / step;
         const fl = Math.floor(tq);
-        const terr = (fl + smoothstep(0.36, 0.64, tq - fl)) * step - wander;
-        mtn = lerp(mtn, terr, zone * 0.82);
+        const terr = (fl + smoothstep(0.22, 0.78, tq - fl)) * step - wander;
+        mtn = lerp(mtn, terr, zone * 0.66);
       }
     }
     f.mm = mm;
@@ -3747,7 +3896,31 @@ export class Terrain {
           // frequency relief breaks up their big flat facets. Never near the
           // trails and ledges (fall), so they keep their footing.
           const crag = f.rough * fall;
-          if (crag > 0.02) h += crag * (3 + 3 * f.mm) * (ridged2D(g.nCrag, x * 0.03 + 9.1, z * 0.03 - 3.7, 3) - 0.45);
+          if (crag > 0.02) {
+            h += crag * (3 + 3 * f.mm) * (ridged2D(g.nCrag, x * 0.03 + 9.1, z * 0.03 - 3.7, 3) - 0.45);
+            // Ribs and gullies straight down the sheer rock — rounded
+            // buttresses and chutes, broken up by noise, that turn big planar
+            // facets into a mountainside. On the ridge's flanks they run
+            // across the spine; on the horns they radiate from the summit.
+            // Both fields are continuous; crests stay round (sharp creases
+            // would just make smaller facets).
+            const along = st[i] * g.spineLen;
+            let rib = g.nRib(along * 0.06 + 3.7, sd[i] * 0.012 - 1.3) * 0.65 + g.nRib(along * 0.15 - 8.1, sd[i] * 0.03 + 2.2) * 0.35;
+            let near = 0;
+            for (let k = 0; k < g.peaks.length; k++) {
+              const P = g.peaks[k];
+              const dx = x - P.x;
+              const dz = z - P.z;
+              const w = 1 - smoothstep(P.r * 0.55, P.r * 1.05, Math.hypot(dx, dz));
+              if (w <= near) continue;
+              near = w;
+              const a = Math.atan2(dz, dx) + 0.9 * g.nRib(dx * 0.016 + P.seed, dz * 0.016);
+              const radial = Math.sin(a * 9 + P.seed) * 0.6 + Math.sin(a * 23 + P.seed * 2.3) * 0.4;
+              rib = lerp(rib, radial, w);
+            }
+            const amp = 0.55 + 0.45 * g.nRib(x * 0.02 - 5.5, z * 0.02 + 9.1);
+            h += crag * (2.4 + 2.8 * f.mm) * amp * rib;
+          }
         }
         H[i] = h;
       }
@@ -3977,6 +4150,58 @@ export class Terrain {
   }
 
   /**
+   * Dunes behind the beaches: low sand ridges running along the shore (their
+   * phase is the distance from the sea, warped by noise), highest in the
+   * middle of the coastal belt, only on gentle ground away from rivers, caves
+   * and trails. They only ever add height, so no new water appears.
+   */
+  _raiseDunes(g) {
+    const n = this._n;
+    const N = n * n;
+    const H = this.heights;
+    const S = this._surfH;
+    const T = this._topH;
+    const V = g.vgrid;
+    const cs = this.cellSize;
+    const k = g.k;
+    const wc = this._waterClass;
+    const nD = createNoise2D(hash("underfern-coast", "dunes", this.seed));
+    const add = new Float32Array(N);
+    for (let iz = 1; iz < n - 1; iz++) {
+      for (let ix = 1; ix < n - 1; ix++) {
+        const i = iz * n + ix;
+        if (wc[i] !== W_LAND || this._caveZone[i]) continue;
+        const od = g.oceanDist[i];
+        if (od < 6 || od > COAST_W + 20 || g.freshDist[i] < 30 || g.trail[i] > 0.05) continue;
+        const h = H[i];
+        if (h < 0.6 || h > 16) continue;
+        const sx = (H[i + 1] - H[i - 1]) / (2 * cs);
+        const sz = (H[i + n] - H[i - n]) / (2 * cs);
+        const slope = Math.hypot(sx, sz);
+        if (slope > 0.3) continue;
+        // Design-space position, so dunes sit in the same place at any resolution.
+        const x = (V.origin + ix * V.step) * k;
+        const z = (V.origin + iz * V.step) * k;
+        const wob = nD(x * 0.011, z * 0.011);
+        const belt = smoothstep(6, 20, od) * (1 - smoothstep(48, 92, od + wob * 18));
+        if (belt <= 0) continue;
+        const ridge = 0.5 + 0.5 * Math.sin((od + wob * 9) * (TAU / 24));
+        const along = 0.55 + 0.45 * nD(x * 0.024 + 31.7, z * 0.024 - 8.3);
+        add[i] = 1.9 * belt * along * Math.pow(ridge, 1.6) * (1 - smoothstep(0.12, 0.3, slope));
+      }
+    }
+    // A light blur rounds the crests on coarse meshes.
+    const soft = boxBlur(add, n, 1);
+    for (let i = 0; i < N; i++) {
+      const d = soft[i];
+      if (d <= 0.01 || wc[i] !== W_LAND || this._caveZone[i]) continue;
+      H[i] += d;
+      S[i] += d;
+      T[i] += d;
+    }
+  }
+
+  /**
    * Biome per vertex, plus what the mesh needs: six material weights
    * (grass, dry grass, dirt, rock, sand, mud), a cavity/AO term and a
    * macro brightness, all as normalised bytes.
@@ -3991,6 +4216,7 @@ export class Terrain {
     const wc = this._waterClass;
     const biome = new Uint8Array(N);
     const moisture = new Float32Array(N);
+    const coast = new Float32Array(N);
     const matA = new Uint8Array(N * 4);
     const matB = new Uint8Array(N * 4);
     const counts = new Uint32Array(BIOMES.length);
@@ -4055,6 +4281,7 @@ export class Terrain {
           }
           biome[i] = fresh ? B_LAKE : B_OCEAN;
           moisture[i] = 1;
+          coast[i] = fresh ? 0 : 1;
         } else {
           const moistN = lerpL(g.lMoist);
           const forestN = lerpL(g.lForest);
@@ -4072,17 +4299,21 @@ export class Terrain {
           moist = clamp(moist, 0, 1);
           moisture[i] = moist;
 
-          // Biome weights.
+          // Biome weights. Swampy lowlands are wet forest; the coastal belt
+          // (sea shores only, not lakes) wins over both within its reach.
+          const midN = lerpL(g.lMid);
           const wForest =
             smoothstep(0.5, 0.58, 0.5 + 0.7 * forestN + 0.45 * (moist - 0.5) + 0.22 * Math.sin(Math.PI * clamp(hm * 1.6, 0, 1))) *
             (1 - smoothstep(40, 52, h)) *
             (1 - smoothstep(0.2, 0.32, slope));
           const wSwamp = smoothstep(0.66, 0.74, moist) * (1 - smoothstep(4.5, 7, h)) * (1 - smoothstep(0.03, 0.08, slope));
-          const wHigh = smoothstep(36, 46, h + patch * 10);
-          const wBeach =
-            wc[i] !== W_FRESH && freshD > 25
-              ? (1 - smoothstep(2.4, 4, h + patch * 0.8)) * (1 - smoothstep(24, 56, oceanD + patch * 14)) * (1 - smoothstep(0.1, 0.22, slope))
-              : 0;
+          const od = oceanD + patch * 14 + midN * 10;
+          const wCoast =
+            wc[i] !== W_FRESH && freshD > 25 ? (1 - smoothstep(COAST_W - 25, COAST_W + 15, od)) * (1 - smoothstep(13, 20, h + patch * 3)) : 0;
+          const wWood = Math.max(wForest, wSwamp) * (1 - smoothstep(0.35, 0.75, wCoast));
+          // Open sand at the sea's edge, then the dunes.
+          const beach = wCoast * (1 - smoothstep(BEACH_W * 0.6, BEACH_W * 1.4, od)) * (1 - smoothstep(3.5, 6.5, h));
+          const dunes = wCoast * smoothstep(BEACH_W * 0.5, BEACH_W, od) * (1 - smoothstep(55, 88, od));
           const outcrop = (hm * 0.8 + g.mountain[i]) * smoothstep(0.62, 0.8, lerpL(g.lOutcrop));
           // High ground is bare rock except on ledges and saddles, which
           // hold thin, dry alpine turf.
@@ -4095,34 +4326,37 @@ export class Terrain {
           );
 
           // Materials. Rock wins on steep faces; dirt on banks, in forests and
-          // along the dry heads of creeks; sand on beaches and some lake
-          // shores; mud in swamps and at the fresh-water edge; the rest is
+          // along the dry heads of creeks; sand on the beaches and dunes, a
+          // sandy soil under the coastal grass, and on some lake shores; mud
+          // on wet forest floors and at the fresh-water edge; the rest is
           // grass, drier where the ground is dry, high or near the sea.
           // Mountain trails are worn to dirt and grit; pass-valley floors
           // hold turf between their rock walls.
           const trail = g.trail[i];
           const vfloor = g.valley[i];
           const rock = wRock * (1 - 0.9 * trail) * (1 - 0.65 * vfloor);
-          const midN = lerpL(g.lMid);
           const creek = g.channel[i] * smoothstep(0.3, 1.2, h);
           const freshShore = (1 - smoothstep(2.5, 8, freshD)) * (1 - smoothstep(0.8, 2.4, h));
           const sandyShore = smoothstep(0.05, 0.3, patch);
-          const sand = Math.max(wBeach, freshShore * sandyShore * 0.7, creek * 0.25, trail * 0.18);
-          const mud = Math.max(wSwamp * (0.4 + 0.25 * patch + 0.15 * midN), freshShore * (1 - sandyShore) * 0.85, creek * 0.35);
+          // Marram grass holds the dune crests; the troughs blow bare.
+          const duneSand = dunes * (0.62 + 0.3 * patch - 0.25 * smoothstep(0.1, 0.6, midN));
+          const sand = Math.max(beach, duneSand, wCoast * 0.22, freshShore * sandyShore * 0.7, creek * 0.25, trail * 0.18);
+          const mud = Math.max(wSwamp * (0.22 + 0.2 * patch + 0.1 * midN), freshShore * (1 - sandyShore) * 0.85, creek * 0.35);
           const dirt = Math.max(
             smoothstep(0.13, 0.26, slope) * 0.7,
-            wForest * (0.62 + 0.25 * patch + 0.15 * midN),
+            wWood * (0.62 + 0.25 * patch + 0.15 * midN),
             creek * 0.6,
             rock > 0.25 && rock < 0.9 ? 0.3 * (1 - Math.abs(rock - 0.55) * 3) : 0,
             trail * 0.85
-          ) * (1 - rock * 0.6);
+          ) * (1 - rock * 0.6) * (1 - 0.7 * beach);
           const used = rock + dirt + sand + mud;
           const veg = Math.max(0, 1 - used);
           // Grassland goes from lush to ochre mostly with moisture (broad
-          // regions), with gentler patch / mid-scale variation on top.
+          // regions), with gentler patch / mid-scale variation on top — lush
+          // green the rule, golden swathes the exception.
           const dry = clamp(
-            0.38 - (moist - 0.5) * 1.35 + patch * 0.35 + midN * 0.28 + hm * 0.25 +
-              (1 - smoothstep(10, 60, oceanD)) * 0.3 - wForest * 0.4,
+            0.1 - (moist - 0.5) * 1.35 + patch * 0.32 + midN * 0.28 + hm * 0.25 +
+              (1 - smoothstep(10, 60, oceanD)) * 0.3 + wCoast * 0.25 - wWood * 0.4,
             0,
             1
           );
@@ -4134,14 +4368,14 @@ export class Terrain {
           w[L_DRY] = veg * dry;
 
           // Forest floors sit in shade; folds and hollows hold it too.
-          ao *= 1 - 0.26 * wForest;
+          ao *= 1 - 0.26 * wWood;
 
+          // Plains is everything else on land, the upland meadows included.
           let b = B_PLAINS;
-          if (wForest > 0.5) b = B_FOREST;
-          if (wSwamp > 0.5) b = B_SWAMP;
-          if (wHigh > 0.5) b = B_HIGHLAND;
-          if (wBeach > 0.5) b = B_BEACH;
+          if (wWood > 0.5) b = B_FOREST;
+          if (wCoast > 0.5) b = B_COAST;
           if (wRock > 0.5) b = B_ROCK;
+          coast[i] = wCoast * clamp(1 - od / (COAST_W + 10), 0, 1);
           biome[i] = b;
           counts[b]++;
         }
@@ -4163,13 +4397,14 @@ export class Terrain {
     }
 
     let landN = 0;
-    for (let b = B_BEACH; b < BIOMES.length; b++) landN += counts[b];
+    for (let b = B_COAST; b < BIOMES.length; b++) landN += counts[b];
     const share = {};
-    for (let b = B_BEACH; b < BIOMES.length; b++) share[BIOMES[b]] = +(counts[b] / Math.max(1, landN)).toFixed(3);
+    for (let b = B_COAST; b < BIOMES.length; b++) share[BIOMES[b]] = +(counts[b] / Math.max(1, landN)).toFixed(3);
     this.stats.biomeShare = share;
 
     this._biome = biome;
     this._moisture = moisture;
+    this._coast = coast;
     this._matA = matA;
     this._matB = matB;
   }
@@ -4278,8 +4513,20 @@ export class Terrain {
         const hr = H[ix < n - 1 ? i + 1 : i];
         const hu = H[iz > 0 ? i - n : i];
         const hd = H[iz < n - 1 ? i + n : i];
-        const nx = (hl - hr) / ((ix > 0 && ix < n - 1 ? 2 : 1) * cs);
-        const nz = (hu - hd) / ((iz > 0 && iz < n - 1 ? 2 : 1) * cs);
+        let nx = (hl - hr) / ((ix > 0 && ix < n - 1 ? 2 : 1) * cs);
+        let nz = (hu - hd) / ((iz > 0 && iz < n - 1 ? 2 : 1) * cs);
+        // On steep rock, shade from a wider difference: light flows across the
+        // facets of cliff bands and ribs instead of breaking at every edge
+        // (the shader adds the crag detail back as normal perturbation).
+        if (ix > 1 && ix < n - 2 && iz > 1 && iz < n - 2) {
+          const steep = smoothstep(0.7, 1.6, Math.hypot(nx, nz));
+          if (steep > 0) {
+            const wx = (H[i - 2] - H[i + 2]) / (4 * cs);
+            const wz = (H[i - 2 * n] - H[i + 2 * n]) / (4 * cs);
+            nx = lerp(nx, wx, steep * 0.6);
+            nz = lerp(nz, wz, steep * 0.6);
+          }
+        }
         const inv = 32767 / Math.sqrt(nx * nx + 1 + nz * nz);
         nrm[i * 3] = Math.round(nx * inv);
         nrm[i * 3 + 1] = Math.round(inv);
@@ -4527,11 +4774,11 @@ export class Terrain {
     for (let c = 0; c < 3; c++) out[c] *= inv * shade;
     const b = this._biome[i];
     if (b === B_FOREST) for (let c = 0; c < 3; c++) out[c] = lerp(out[c], MAP.forest[c], 0.62);
-    else if (b === B_SWAMP) for (let c = 0; c < 3; c++) out[c] = lerp(out[c], MAP.swamp[c], 0.4);
+    else if (b === B_COAST) for (let c = 0; c < 3; c++) out[c] = lerp(out[c], MAP.coast[c], 0.3);
     return out;
   }
 
-  /** Field-guide symbols: stippled trees in forests, reed tufts in swamps. */
+  /** Field-guide symbols: stippled trees in forests, marram tufts on the coast. */
   _mapSymbols(ctx, px) {
     const step = Math.max(4, px / 120);
     const r = Math.max(0.8, px / 640);
@@ -4556,17 +4803,16 @@ export class Terrain {
           ctx.beginPath();
           ctx.arc(su - r * 0.4, sv - r * 0.4, r * 0.45, 0, TAU);
           ctx.fill();
-        } else if (b === "swamp") {
-          if (rng() < 0.45) continue;
-          ctx.strokeStyle = "rgba(48, 62, 52, 0.55)";
-          ctx.lineWidth = Math.max(0.6, r * 0.6);
+        } else if (b === "coast" && this.coastAt(x, z) < 0.8) {
+          // A fan of three blades — dune grass — sparser toward the sand.
+          if (rng() < 0.6) continue;
+          ctx.strokeStyle = "rgba(96, 92, 58, 0.5)";
+          ctx.lineWidth = Math.max(0.6, r * 0.55);
           ctx.beginPath();
           for (let k = -1; k <= 1; k++) {
-            ctx.moveTo(su + k * r * 1.2, sv + r);
-            ctx.lineTo(su + k * r * 1.6, sv - r * (k === 0 ? 1.8 : 1.1));
+            ctx.moveTo(su, sv + r);
+            ctx.lineTo(su + k * r * 1.3, sv - r * (k === 0 ? 1.6 : 1.0));
           }
-          ctx.moveTo(su - r * 2.2, sv + r * 1.1);
-          ctx.lineTo(su + r * 2.2, sv + r * 1.1);
           ctx.stroke();
         }
       }

@@ -605,7 +605,7 @@ export class Ecosystem {
       if (diet && s.diet !== diet) wgt = 0;
       if (s.biomes && s.biomes.length && !s.biomes.includes(biome)) wgt *= OFF_BIOME_WEIGHT;
       if (s.waterAffinity > 0 && pt && wgt > 0) {
-        if (wet === null) wet = biome === "beach" || !!this.world.terrain?.nearestFreshWater?.(pt.x, pt.z, 60);
+        if (wet === null) wet = biome === "coast" || !!this.world.terrain?.nearestFreshWater?.(pt.x, pt.z, 60);
         wgt *= wet ? 1 + 2.5 * s.waterAffinity : 1 - 0.8 * s.waterAffinity;
       }
       if (s.maxAlive != null && wgt > 0 && this._npcCountOf(s.id) >= s.maxAlive) wgt = 0; // rare: never more at once

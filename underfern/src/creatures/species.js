@@ -154,7 +154,7 @@ export const SPECIES = {
     aggression: 0.05,
     perception: 110,
     spawnWeight: 1.2,
-    biomes: ["plains", "forest", "beach"],
+    biomes: ["plains", "forest", "coast"],
     call: { kind: "chirp", pitch: 540, duration: 0.45 },
     colors: {
       eye: "#3a2616",
@@ -252,7 +252,7 @@ export const SPECIES = {
     aggression: 0.7,
     perception: 95,
     spawnWeight: 0.55,
-    biomes: ["forest", "plains", "swamp"],
+    biomes: ["forest", "plains"],
     call: { kind: "shriek", pitch: 300, duration: 1.0 },
     colors: {
       eye: "#c99a2e",
@@ -322,7 +322,7 @@ export const SPECIES = {
     name: "Ceratosaurus",
     diet: "carnivore",
     playable: true,
-    tagline: "Horned ambusher of the swamps and riverbanks.",
+    tagline: "Horned ambusher of the wet woods and riverbanks.",
     description:
       "A deep-tailed, horn-nosed predator with a ridge of bony scutes down its back and long bladed teeth. " +
       "It swims better than any hunter its size: stalk the shallows, strike from the water and drag prey in after you.",
@@ -349,7 +349,7 @@ export const SPECIES = {
     aggression: 0.65,
     perception: 85,
     spawnWeight: 0.45,
-    biomes: ["swamp", "forest", "beach"],
+    biomes: ["forest", "coast"],
     call: { kind: "roar", pitch: 140, duration: 1.6 },
     colors: {
       eye: "#d0a032",
@@ -446,7 +446,7 @@ export const SPECIES = {
     aggression: 0.3,
     perception: 60,
     spawnWeight: 0.55,
-    biomes: ["plains", "forest", "swamp"],
+    biomes: ["plains", "forest"],
     call: { kind: "bellow", pitch: 90, duration: 2.0 },
     colors: {
       eye: "#3a2414",
@@ -541,7 +541,7 @@ export const SPECIES = {
     aggression: 0.85,
     perception: 100,
     spawnWeight: 0.35,
-    biomes: ["plains", "forest", "highland"],
+    biomes: ["plains", "forest"],
     call: { kind: "roar", pitch: 75, duration: 2.2 },
     colors: {
       eye: "#d8a032",
@@ -645,7 +645,7 @@ export const SPECIES = {
     perception: 115,
     smell: 1.5, // huge olfactory bulbs
     spawnWeight: 0.07,
-    biomes: ["forest", "plains", "highland"],
+    biomes: ["forest", "plains"],
     // A closed-mouth boom under a growl; open / lift / swell shape the call pose (defaults 1 / 1 / 0).
     call: { kind: "rumble", pitch: 30, duration: 3.4, open: 0.65, lift: 0.3, swell: 0.06 },
     colors: {
@@ -762,7 +762,7 @@ export const SPECIES = {
     aggression: 0.6,
     perception: 105,
     spawnWeight: 0.12,
-    biomes: ["swamp", "beach", "plains"],
+    biomes: ["coast", "plains"],
     call: { kind: "rattle", pitch: 100, duration: 2.2, lift: 0.55 }, // lift: the long neck rises only part way
     colors: {
       eye: "#c2a640",
@@ -889,7 +889,7 @@ export const SPECIES = {
     aggression: 0.1,
     perception: 90,
     spawnWeight: 1.6,
-    biomes: ["plains", "forest", "swamp"],
+    biomes: ["plains", "forest"],
     call: { kind: "honk", pitch: 210, duration: 0.8 },
     colors: {
       eye: "#3a2616",
@@ -985,7 +985,7 @@ export const SPECIES = {
     aggression: 0.15,
     perception: 80,
     spawnWeight: 0.18,
-    biomes: ["plains", "swamp", "beach"],
+    biomes: ["plains", "forest", "coast"],
     call: { kind: "bellow", pitch: 45, duration: 3.0 },
     colors: {
       eye: "#2e2012",
@@ -1085,7 +1085,7 @@ export const SPECIES = {
     aggression: 0.12,
     perception: 70,
     spawnWeight: 0.7,
-    biomes: ["plains", "swamp", "beach"],
+    biomes: ["plains", "forest", "coast"],
     call: { kind: "bellow", pitch: 38, duration: 3.4 },
     colors: {
       eye: "#2a1d10",

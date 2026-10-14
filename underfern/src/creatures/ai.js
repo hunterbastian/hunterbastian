@@ -123,10 +123,9 @@ function playerIn(g) {
   return null;
 }
 
-// How far one sees into a biome (forest and swamp hide things).
+// How far one sees into a biome (forest hides things; plains and coast are open).
 function coverOf(biome) {
   if (biome === "forest") return 0.55;
-  if (biome === "swamp") return 0.8;
   return 1;
 }
 

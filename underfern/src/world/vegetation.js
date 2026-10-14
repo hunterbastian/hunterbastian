@@ -30,6 +30,7 @@ import * as THREE from "three";
 import { makeRng, rand, hash, weightedPick } from "../core/rng.js";
 import { TAU, clamp, lerp, smoothstep, damp } from "../core/math.js";
 import { createNoise2D, fbm2D } from "../core/noise.js";
+import { LOOK, LOOK_NOISE_GLSL, patchLook } from "./look.js";
 
 /* --- Tuning ---------------------------------------------------------------- */
 
@@ -46,9 +47,9 @@ const REGROW_DELAY = 10;
 /** Visual scale of a fully eaten plant (a stub) relative to its full size. */
 const EATEN_SCALE = 0.26;
 
-const TREE_KINDS = ["araucaria", "podocarp", "ginkgo", "treefern", "snag"];
+const TREE_KINDS = ["araucaria", "podocarp", "ginkgo", "treefern", "snag", "palm"];
 /** Nominal (instance-scale 1) heights in metres. */
-const TREE_H = { araucaria: 26, podocarp: 19, ginkgo: 15, treefern: 6.5, snag: 11.5 };
+const TREE_H = { araucaria: 26, podocarp: 19, ginkgo: 15, treefern: 6.5, snag: 11.5, palm: 9 };
 
 const HASH_CELL = 16; // spatial hash cell (m) for colliders and plants
 const LOD_CHUNK = 32; // trees / rocks are bucketed into chunks this big for LOD lists
@@ -205,15 +206,16 @@ function drawBarkPlated(ctx, rng, r) {
   ctx.beginPath();
   ctx.rect(r.x, r.y, r.w, r.h);
   ctx.clip();
-  // Narrow ridges broken into short plates: lighter, slightly varied.
+  // Narrow ridges broken into long plates: lighter, slightly varied. (Short
+  // plates with dark seams read as brickwork, especially pixelated.)
   const cols = 13;
   const colW = r.w / cols;
   const plates = new Buckets(ramp(6, 22, 32, 10, 18, 27, 40));
-  const cracks = new Buckets(["rgba(20,15,11,0.75)"]);
+  const cracks = new Buckets(["rgba(20,15,11,0.38)"]);
   for (let c = 0; c < cols; c++) {
     let y = rng() * 40 * k;
     while (y < r.h) {
-      const len = rand(rng, 18, 64) * k;
+      const len = rand(rng, 46, 150) * k;
       const w = colW * rand(rng, 0.55, 0.85);
       const x0 = c * colW + (colW - w) * rng();
       const t = rng();
@@ -237,7 +239,7 @@ function drawBarkPlated(ctx, rng, r) {
     }
   }
   plates.fill(ctx);
-  cracks.stroke(ctx, 2.2 * k);
+  cracks.stroke(ctx, 1.4 * k);
   // Deep vertical furrows, wandering but periodic in y so the strip tiles.
   const fur = new Buckets(["rgba(18,13,10,0.85)", "rgba(28,21,16,0.7)"]);
   for (let c = 0; c < cols; c++) {
@@ -802,6 +804,15 @@ function bleedRegions(data, size, regions) {
           data[i + 1] = g;
           data[i + 2] = b;
           data[i + 3] = 0;
+        } else if (a < 200) {
+          // Thin edges: the canvas stores premultiplied colour, so a faint
+          // pixel comes back with a noisy (often far too bright) colour. Pull
+          // it toward the card's average — otherwise the mips spread it, and
+          // far canopies glitter with light specks.
+          const t = (a - 16) / 184;
+          data[i] = Math.round(r + (data[i] - r) * t);
+          data[i + 1] = Math.round(g + (data[i + 1] - g) * t);
+          data[i + 2] = Math.round(b + (data[i + 2] - b) * t);
         }
       }
     }
@@ -953,6 +964,12 @@ uniform vec3 uFocus;
 uniform vec4 uLod;
 attribute vec3 aWind;
 varying float vLeaf;
+#ifdef VEG_GRASS
+uniform vec4 uLookWind;
+varying float vGust;
+varying float vTip;
+${LOOK_NOISE_GLSL}
+#endif
 `;
 
 // Runs right after <begin_vertex>, in object space, so the shadow-coordinate,
@@ -979,6 +996,12 @@ const VEG_VERT_MAIN = /* glsl */ `
   float vegGust = uWind.z;
   float vegSway = sin( uTime * 0.83 + vegPh ) * 0.55 + sin( uTime * 1.73 + vegPh * 1.37 ) * 0.3 + sin( uTime * 0.29 + vegPh * 0.5 ) * 0.35;
   float vegBend = aWind.x * vegScale * ( 0.25 + 0.9 * vegGust );
+  #ifdef VEG_GRASS
+    // The gust bands the turf shows (look.js) bend the blades as they pass.
+    vGust = lookGust( vegBase.xz );
+    vTip = clamp( position.y / 0.62, 0.0, 1.0 );
+    vegBend *= 1.0 + 2.2 * vGust;
+  #endif
   vec3 vegD = vec3( uWind.x, 0.0, uWind.y ) * vegBend * ( 0.55 + 0.45 * vegSway );
   float vegFl = aWind.y * ( 0.03 + 0.1 * vegGust ) * min( vegScale, 1.4 );
   vec3 vegP = transformed;
@@ -1013,22 +1036,59 @@ const VEG_COLOR_VERTEX = /* glsl */ `
 const VEG_FRAG_PARS = /* glsl */ `
 uniform float uAtlasSize;
 varying float vLeaf;
+#ifdef VEG_GRASS
+varying float vGust;
+varying float vTip;
+#endif
 float vegDither( vec2 p ) {
   return fract( 52.9829189 * fract( dot( p, vec2( 0.06711056, 0.00583715 ) ) ) );
 }
 `;
 
-// Before <alphatest_fragment>: bark is opaque whatever its texel alpha, foliage
-// alpha is boosted with the mip level so canopies don't thin out with distance.
+// Grass: dark, cool roots rising to sun-bleached tips, and a passing gust
+// flashes the bent blades lighter and warmer (their undersides catch the light).
+const VEG_FRAG_GRASS = /* glsl */ `
+#ifdef VEG_GRASS
+  diffuseColor.rgb *= mix( 0.5, 1.0, vTip );
+  diffuseColor.rgb = mix( diffuseColor.rgb, diffuseColor.rgb * vec3( 1.1, 1.13, 0.86 ), vTip * vTip * 0.6 );
+  diffuseColor.rgb *= 1.0 + vGust * ( 0.1 + 0.32 * vTip );
+#endif
+`;
+
+// Foliage is matte: Fresnel highlights on thin cards at grazing angles read as
+// white glitter at a distance (worse in the pixel style), so leaves keep little.
+const VEG_FRAG_SPEC = /* glsl */ `
+#include <aomap_fragment>
+reflectedLight.directSpecular *= mix( 1.0, 0.15, vLeaf );
+reflectedLight.indirectSpecular *= mix( 1.0, 0.35, vLeaf );
+`;
+
+// Replaces <alphatest_fragment>: bark is opaque whatever its texel alpha,
+// foliage alpha is boosted with the mip level so canopies don't thin out with
+// distance. Alpha-to-coverage smooths leaf edges up close; far away the mipped
+// alpha is noisy from pixel to pixel and partial coverage would let the sky
+// speckle through solid canopies, so there coverage is plainly on or off.
 const VEG_FRAG_ALPHA = /* glsl */ `
+float vegFar = 0.0;
 #ifdef USE_MAP
 {
   vec2 vegTx = vMapUv * uAtlasSize;
   vec2 vegDx = dFdx( vegTx );
   vec2 vegDy = dFdy( vegTx );
   float vegLod = 0.5 * log2( max( max( dot( vegDx, vegDx ), dot( vegDy, vegDy ) ), 1.0 ) );
-  diffuseColor.a = vLeaf < 0.5 ? 1.0 : diffuseColor.a * ( 1.0 + vegLod * 0.24 );
+  // Far canopies fill in faster: sub-pixel gaps would show the bright sky
+  // through them as glitter (especially at the pixel style's low resolution).
+  diffuseColor.a = vLeaf < 0.5 ? 1.0 : diffuseColor.a * ( 1.0 + vegLod * 0.3 + max( vegLod - 1.5, 0.0 ) * 0.65 );
+  vegFar = smoothstep( 1.5, 3.0, vegLod );
 }
+#endif
+#ifdef USE_ALPHATEST
+  #ifdef ALPHA_TO_COVERAGE
+    diffuseColor.a = mix( smoothstep( alphaTest, alphaTest + fwidth( diffuseColor.a ), diffuseColor.a ), step( alphaTest, diffuseColor.a ), vegFar );
+    if ( diffuseColor.a == 0.0 ) discard;
+  #else
+    if ( diffuseColor.a < alphaTest ) discard;
+  #endif
 #endif
 #ifdef VEG_DEPTH
   // Canopies let some light through: a fine hole pattern in the shadow map that
@@ -1044,8 +1104,9 @@ function patchVegShader(shader, mat, depth) {
   shader.uniforms.uFocus = u.uFocus;
   shader.uniforms.uAtlasSize = u.uAtlasSize;
   shader.uniforms.uLod = mat.vegLod;
+  const grass = !depth && mat.vegGrass ? "#define VEG_GRASS\n" : "";
   let vs = shader.vertexShader;
-  vs = vs.replace("#include <common>", `#include <common>\n${VEG_VERT_PARS}`);
+  vs = vs.replace("#include <common>", `#include <common>\n${grass}${VEG_VERT_PARS}`);
   vs = vs.replace(
     "#include <begin_vertex>",
     `#include <begin_vertex>\n${mat.vegShrink ? "#define VEG_SHRINK\n" : ""}${VEG_VERT_MAIN}`,
@@ -1053,9 +1114,11 @@ function patchVegShader(shader, mat, depth) {
   if (!depth) vs = vs.replace("#include <color_vertex>", VEG_COLOR_VERTEX);
   shader.vertexShader = vs;
   let fs = shader.fragmentShader;
-  fs = fs.replace("#include <common>", `#include <common>\n${depth ? "#define VEG_DEPTH\n" : ""}${VEG_FRAG_PARS}`);
-  fs = fs.replace("#include <alphatest_fragment>", `${VEG_FRAG_ALPHA}\n#include <alphatest_fragment>`);
+  fs = fs.replace("#include <common>", `#include <common>\n${depth ? "#define VEG_DEPTH\n" : ""}${grass}${VEG_FRAG_PARS}`);
+  fs = fs.replace("#include <alphatest_fragment>", VEG_FRAG_ALPHA);
   if (!depth) {
+    fs = fs.replace("#include <color_fragment>", `#include <color_fragment>\n${VEG_FRAG_GRASS}`);
+    fs = fs.replace("#include <aomap_fragment>", VEG_FRAG_SPEC);
     // Foliage keeps its bent (outward) normal on both faces; bark flips as usual.
     fs = fs.replace(
       "#include <normal_fragment_begin>",
@@ -1078,18 +1141,24 @@ class PlantMaterial extends THREE.MeshStandardMaterial {
     this.vegShared = veg.shared || null;
     this.vegLod = { value: new THREE.Vector4(1e7, 2e7, 0, 0) };
     this.vegShrink = !!veg.shrink;
+    this.vegGrass = !!veg.grass;
   }
   copy(src) {
     super.copy(src);
     this.vegShared = src.vegShared;
     this.vegLod = src.vegLod;
     this.vegShrink = src.vegShrink;
+    this.vegGrass = src.vegGrass;
     return this;
   }
   onBeforeCompile(shader) {
     patchVegShader(shader, this, false);
+    // Foliage wraps light generously (no rim: thin cards facing every way
+    // would all count as silhouette edges).
+    patchLook(shader, { wrap: 0.65, rim: 0, fill: 1 });
   }
   customProgramCacheKey() {
+    if (this.vegGrass) return "underfern-veg-grass";
     return this.vegShrink ? "sauria-veg-shrink" : "sauria-veg";
   }
 }
@@ -1180,6 +1249,7 @@ varying float vMoss;`)
   float rMoss = smoothstep( 0.32, 0.78, vRockUp + ( rc.g - 0.1 ) * 1.6 ) * vMoss;
   diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.07, 0.095, 0.03 ) * ( 0.75 + rc.g * 3.0 ), rMoss );
 }`);
+    patchLook(shader, { wrap: 0.45, rim: 0, fill: 1 });
   }
   customProgramCacheKey() {
     return "sauria-rock";
@@ -1673,6 +1743,47 @@ function buildTreeFern(rng, near) {
     const sp = arcSpine(o, az, -0.55, -1.35, rand(rng, 2.0, 2.6), near ? 3 : 1, rand(rng, -0.4, 0.4));
     addRibbon(b, sp.pts, sp.sidesH, 1.05, REG.deadfrond, "along", {
       centre: crown, bendN: 0.3, bend, flutter: (s) => s * 0.3, color: () => gray(0.85),
+    });
+  }
+  return b.build();
+}
+
+// A coastal palm (they had arrived by T. rex's day): a tall, leaning, ringed
+// trunk and a mop of long arching pinnate fronds over a skirt of dead ones.
+function buildPalm(rng, near) {
+  const b = new GeoBuilder();
+  const H = TREE_H.palm;
+  const bend = treeBend(H, 0.55);
+  const rings = near ? 12 : 4;
+  const lean = rand(rng, 0.6, 1.5);
+  const pts = [];
+  const radii = [];
+  for (let i = 0; i < rings; i++) {
+    const t = i / (rings - 1);
+    const y = lerp(-0.4, H, t);
+    // The lean grows toward the top (a gentle banana curve).
+    pts.push(new V3(lean * t * t + Math.sin(t * 5.3) * 0.05, y, Math.sin(t * 2.1) * 0.12 * t));
+    radii.push(lerp(0.22, 0.15, t) * (1 + 0.55 * Math.exp(-(y + 0.4) * 2.2)) * (t > 0.9 ? 1.25 : 1));
+  }
+  addTube(b, pts, radii, near ? 8 : 5, REG.barkB, { bend, color: trunkAO(0.55, 1.4, [1.12, 1.04, 0.92]), rough: near ? 0.06 : 0, rng, v0: rng() });
+  const top = pts[rings - 1];
+  const crown = top.clone().add(new V3(0, -0.6, 0));
+  const nf = near ? 14 : 8;
+  const az0 = rng() * TAU;
+  for (let j = 0; j < nf; j++) {
+    const az = az0 + (j / nf) * TAU + rand(rng, -0.18, 0.18);
+    const up = j % 3 === 0;
+    const sp = arcSpine(top, az, up ? rand(rng, 0.9, 1.2) : rand(rng, 0.35, 0.75), rand(rng, -1.15, -0.55), rand(rng, 3.8, 5.0) * (near ? 1 : 1.05), near ? 6 : 2, rand(rng, -0.25, 0.25), 1.3);
+    addRibbon(b, sp.pts, sp.sidesH, near ? 1.55 : 1.85, REG.cycad, "along", {
+      centre: crown, bendN: 0.45, bend, flutter: (s) => s * 1.0, color: (s) => gray(lerp(0.7, 1.08, s)),
+    });
+  }
+  const dead = near ? 4 : 2;
+  for (let j = 0; j < dead; j++) {
+    const az = az0 + (j / dead) * TAU + 0.4;
+    const sp = arcSpine(top.clone().add(new V3(0, -0.25, 0)), az, -0.7, -1.4, rand(rng, 2.2, 2.9), near ? 3 : 1, rand(rng, -0.3, 0.3));
+    addRibbon(b, sp.pts, sp.sidesH, 1.1, REG.deadfrond, "along", {
+      centre: crown, bendN: 0.3, bend, flutter: (s) => s * 0.3, color: () => gray(0.9),
     });
   }
   return b.build();
@@ -2312,13 +2423,12 @@ class LodSet {
 const GRASS_CHUNK = 12;
 const GRASS_BUILDS = 3; // new grass chunks generated per frame while walking (each ≈1 ms); the rest follow
 const UNDER_TRIES = 40; // undergrowth candidates per chunk
-const GRASS_DENSITY = { plains: 0.62, forest: 0.13, swamp: 0.42, highland: 0.3, beach: 0.04, rock: 0.02 };
-const UNDER_DENSITY = { forest: 0.24, swamp: 0.1, plains: 0.018, highland: 0.006 };
+const GRASS_DENSITY = { plains: 0.95, forest: 0.18, coast: 0.42, rock: 0.02 };
+const GRASS_TRIES = 0.95; // grass candidates per m² (each kept with its biome's density)
+const UNDER_DENSITY = { forest: 0.24, plains: 0.018, coast: 0.004 };
 const GRASS_TINT = {
   forest: [0.78, 0.9, 0.7],
-  swamp: [1.0, 1.05, 0.7],
-  highland: [0.92, 0.93, 0.8],
-  beach: [1.25, 1.12, 0.8],
+  coast: [1.22, 1.12, 0.78], // pale, salt-bleached marram
   rock: [0.95, 0.95, 0.85],
 };
 
@@ -2335,7 +2445,7 @@ class GrassField {
     const span = this.radius + GRASS_CHUNK * 1.5;
     const area = Math.PI * span * span;
     const d = Math.max(0.3, veg.density);
-    this.grassCap = Math.ceil(area * 0.66 * d);
+    this.grassCap = Math.ceil(area * 0.95 * d);
     this.underCap = Math.ceil(area * 0.26 * d);
     const rng = makeRng(hash(veg.seed, "grass-geo"));
     this.grass = makeInstanced(buildGrassClump(rng), veg._mat.grass, this.grassCap, { dynamic: true, receive: true });
@@ -2434,7 +2544,7 @@ class GrassField {
     const ucol = [];
     const x0 = cx * GRASS_CHUNK - half;
     const z0 = cz * GRASS_CHUNK - half;
-    const tries = Math.round(GRASS_CHUNK * GRASS_CHUNK * 0.62 * Math.min(1.4, d));
+    const tries = Math.round(GRASS_CHUNK * GRASS_CHUNK * GRASS_TRIES * Math.min(1.4, d));
     const m = new Array(16);
     for (let i = 0; i < tries + UNDER_TRIES; i++) {
       const under = i >= tries;
@@ -2447,8 +2557,12 @@ class GrassField {
       const biome = T.biomeAt(x, z);
       let p;
       if (under) p = ((UNDER_DENSITY[biome] || 0) * GRASS_CHUNK * GRASS_CHUNK) / UNDER_TRIES;
-      else p = (GRASS_DENSITY[biome] || 0) / 0.62;
+      else p = (GRASS_DENSITY[biome] || 0) / GRASS_TRIES;
       if (p <= 0) continue;
+      // Bare sand at the sea's edge; marram on the dunes. Thinner turf up on the meadows.
+      const coast = biome === "coast" && T.coastAt ? T.coastAt(x, z) : 0;
+      if (coast > 0) p *= 1 - smoothstep(0.66, 0.84, coast);
+      else if (biome === "plains") p *= 1 - 0.5 * smoothstep(40, 90, h);
       const patch = noise(x * 0.035 + 3.3, z * 0.035 - 8.1);
       p *= under ? 0.4 + 0.9 * smoothstep(-0.5, 0.4, -patch) : 0.2 + 0.8 * smoothstep(-0.5, 0.25, patch);
       if (rng() >= p) continue;
@@ -2464,14 +2578,15 @@ class GrassField {
         if (rng() < 0.16) ucol.push(1.3 * v, 0.84 * v, 0.52 * v);
         else ucol.push(v * rand(rng, 0.88, 1.02), v, v * rand(rng, 0.8, 0.95));
       } else {
-        const tall = biome === "swamp" ? 1.25 : biome === "plains" ? 1.08 : biome === "forest" ? 0.85 : 0.75;
+        const tall = biome === "coast" ? 1.3 : biome === "plains" ? 1.08 : biome === "forest" ? 0.85 : 0.75;
         const s = rand(rng, 0.8, 1.25);
         writeTRS(m, 0, x, h - 0.03 - slope * 0.45, z, yaw, s, s * tall * rand(rng, 0.8, 1.25));
         gmat.push(...m);
         const v = rand(rng, 0.86, 1.08);
         if (biome === "plains") {
-          const dry = smoothstep(-0.35, 0.45, noise(x * 0.011 + 40.2, z * 0.011 - 12.7)) * 0.9 + rng() * 0.1;
-          gcol.push(lerp(0.9, 1.32, dry) * v, lerp(1.0, 1.1, dry) * v, lerp(0.8, 0.68, dry) * v);
+          // Mostly lush green meadow; golden only where the ground runs dry.
+          const dry = smoothstep(-0.05, 0.65, noise(x * 0.011 + 40.2, z * 0.011 - 12.7)) * 0.9 + rng() * 0.1;
+          gcol.push(lerp(0.8, 1.14, dry) * v, lerp(1.02, 1.07, dry) * v, lerp(0.7, 0.66, dry) * v);
         } else {
           const t = GRASS_TINT[biome] || GRASS_TINT.forest;
           gcol.push(t[0] * v, t[1] * v, t[2] * v);
@@ -2490,49 +2605,45 @@ class GrassField {
 
 /* --- Placement tables ------------------------------------------------------------------------ */
 
-const TREE_P = { forest: 0.5, swamp: 0.2, plains: 0.035, highland: 0.06, beach: 0.025, rock: 0.012 };
-const TREE_R = { araucaria: 0.5, podocarp: 0.4, ginkgo: 0.5, treefern: 0.24, snag: 0.42 };
-const TREE_SCALE = { araucaria: [0.62, 1.18], podocarp: [0.6, 1.2], ginkgo: [0.62, 1.2], treefern: [0.65, 1.25], snag: [0.6, 1.2] };
-const ROCK_P = { rock: 0.38, highland: 0.22, beach: 0.05, plains: 0.034, forest: 0.045, swamp: 0.022 };
-const ROCK_MOSS = { forest: 0.9, swamp: 0.95, plains: 0.45, highland: 0.3, rock: 0.15, beach: 0.05 };
-const LOG_P = { forest: 0.17, swamp: 0.2, plains: 0.025, highland: 0.02 };
+const TREE_P = { forest: 0.5, plains: 0.035, coast: 0.05, rock: 0.012 };
+const TREE_R = { araucaria: 0.5, podocarp: 0.4, ginkgo: 0.5, treefern: 0.24, snag: 0.42, palm: 0.26 };
+const TREE_SCALE = { araucaria: [0.62, 1.18], podocarp: [0.6, 1.2], ginkgo: [0.62, 1.2], treefern: [0.65, 1.25], snag: [0.6, 1.2], palm: [0.75, 1.3] };
+const ROCK_P = { rock: 0.38, coast: 0.04, plains: 0.034, forest: 0.045 };
+const ROCK_MOSS = { forest: 0.9, plains: 0.45, rock: 0.15, coast: 0.05 };
+const LOG_P = { forest: 0.17, plains: 0.025, coast: 0.03 };
 const PLANT_SCALE = { fern: [0.95, 1.45], cycad: [0.8, 1.2], horsetail: [0.8, 1.2], shrub: [0.75, 1.25] };
 
-function treeWeights(biome, mix, moist, shore) {
+/** `upland` 0..1: how far into the high meadows (plains above ~40 m) a spot is. */
+function treeWeights(biome, mix, moist, shore, upland) {
   if (shore) return { snag: 0.3, treefern: 0.4, ginkgo: 0.3 };
   switch (biome) {
     case "forest":
-      return { araucaria: 0.34 + 0.3 * mix, podocarp: 0.34 - 0.3 * mix, ginkgo: 0.14, treefern: 0.1 + 0.22 * moist };
+      // Wet woods (the old swamps) lean to tree ferns and the odd dead snag.
+      return { araucaria: 0.34 + 0.3 * mix, podocarp: 0.34 - 0.3 * mix, ginkgo: 0.14, treefern: 0.1 + 0.22 * moist, snag: 0.08 * smoothstep(0.65, 0.8, moist) };
     case "plains":
-      return { ginkgo: 0.42, araucaria: 0.32, podocarp: 0.1, treefern: 0.16 };
-    case "swamp":
-      return { snag: 0.32, treefern: 0.34, ginkgo: 0.16, podocarp: 0.18 };
-    case "highland":
-      return { podocarp: 0.62, araucaria: 0.38 };
-    case "beach":
-      return { araucaria: 0.45, treefern: 0.55 };
+      return upland > 0.5 ? { podocarp: 0.62, araucaria: 0.38 } : { ginkgo: 0.42, araucaria: 0.32, podocarp: 0.1, treefern: 0.16 };
+    case "coast":
+      return { palm: 0.5, treefern: 0.26, araucaria: 0.14, ginkgo: 0.1 };
     default:
       return { podocarp: 1 };
   }
 }
 
-function plantWeights(biome, shore, clearing, lowland) {
+/** `coast` = terrain.coastAt (1 open sand … 0 inland). */
+function plantWeights(biome, shore, clearing, lowland, upland, coast) {
   let w;
   switch (biome) {
     case "forest":
       w = { fern: 0.055 + 0.07 * clearing, shrub: 0.026, cycad: 0.012, horsetail: 0 };
       break;
     case "plains":
-      w = { fern: 0.025, shrub: 0.035, cycad: 0.016 + (lowland ? 0.035 : 0), horsetail: 0 };
+      w = upland > 0.5
+        ? { shrub: 0.025, fern: 0.012, cycad: 0, horsetail: 0 }
+        : { fern: 0.025, shrub: 0.035, cycad: 0.016 + (lowland ? 0.035 : 0), horsetail: 0 };
       break;
-    case "swamp":
-      w = { horsetail: 0.2, fern: 0.05, shrub: 0.012, cycad: 0 };
-      break;
-    case "beach":
-      w = { cycad: 0.13, shrub: 0.01, fern: 0, horsetail: 0 };
-      break;
-    case "highland":
-      w = { shrub: 0.025, fern: 0.012, cycad: 0, horsetail: 0 };
+    case "coast":
+      // Nothing on the open sand; cycads and salt scrub behind the dunes.
+      w = { cycad: 0.13 * (1 - smoothstep(0.62, 0.8, coast)), shrub: 0.03 * (1 - smoothstep(0.55, 0.75, coast)), fern: 0, horsetail: 0 };
       break;
     default:
       w = { shrub: 0.01, fern: 0, cycad: 0, horsetail: 0 };
@@ -2551,6 +2662,7 @@ const TREE_BUILDERS = {
   ginkgo: buildGinkgo,
   treefern: buildTreeFern,
   snag: buildSnag,
+  palm: buildPalm,
 };
 const PLANT_BUILDERS = { fern: buildFern, cycad: buildCycad, horsetail: buildHorsetail, shrub: buildShrub };
 
@@ -2569,13 +2681,16 @@ export class Vegetation {
   /**
    * Scatter the island's plant life (deterministic for a seed).
    * @param {object} terrain Terrain (heightAt, slopeAt, normalAt, biomeAt, isWater, isFreshWater, inBounds, half, seaLevel)
-   * @param {{ seed?: number, density?: number, grass?: boolean, renderer?: THREE.WebGLRenderer }} [opts]
+   * @param {{ seed?: number, density?: number, grass?: boolean, renderer?: THREE.WebGLRenderer,
+   *           landmarks?: { colliders: object[], sites: object[] } }} [opts]
    *   density scales every population (QUALITY.vegetationDensity; < 0.7 also selects the
    *   light LOD/texture profile); grass=false skips grass and undergrowth; renderer
    *   (optional) enables alpha-to-coverage foliage when the canvas has MSAA — without it
-   *   this is detected on the first rendered frame.
+   *   this is detected on the first rendered frame; landmarks (world/landmarks.js): their
+   *   colliders join the trunks and boulders (collidersNear), and no tree, rock or log
+   *   grows on their footprints.
    */
-  constructor(terrain, { seed = 1, density = 1, grass = true, renderer = null } = {}) {
+  constructor(terrain, { seed = 1, density = 1, grass = true, renderer = null, landmarks = null } = {}) {
     const t0 = nowMs();
     this.terrain = terrain;
     this.seed = seed >>> 0 || 1;
@@ -2646,6 +2761,14 @@ export class Vegetation {
     this._colliders = new SpatialHash(this._half, HASH_CELL);
     this._solid = new SpatialHash(this._half, HASH_CELL);
     this._plantHash = new SpatialHash(this._half, HASH_CELL);
+    this._clearings = [];
+    if (landmarks) {
+      for (const c of landmarks.colliders) {
+        this._colliders.insert(c);
+        this._solid.insert(c);
+      }
+      for (const s of landmarks.sites) this._clearings.push({ x: s.x, z: s.z, r: s.r * 0.95 });
+    }
     this._place();
     this.stats.placementMs = nowMs() - t;
 
@@ -2897,6 +3020,10 @@ export class Vegetation {
     this._windS = damp(this._windS, s, 1.5, dt);
     const len = Math.hypot(this._windX, this._windZ) || 1;
     this._u.uWind.value.set(this._windX / len, this._windZ / len, this._windS);
+    // Gust bands over the grass and turf (look.js) travel downwind at a few m/s.
+    // Wraps after a thousand gust bands (hours of play).
+    this._gustPhase = ((this._gustPhase || 0) + dt * (3 + 6 * this._windS)) % ((TAU / 0.07) * 1000);
+    LOOK.uLookWind.value.set(this._windX / len, this._windZ / len, this._windS, this._gustPhase);
   }
 
   _updateRegrowth(dt) {
@@ -2961,8 +3088,8 @@ export class Vegetation {
       roughness: 0.82,
       metalness: 0,
     };
-    const mk = (a, b, far, shrink, overlap = 0) => {
-      const m = new PlantMaterial(base, { shared, shrink });
+    const mk = (a, b, far, shrink, overlap = 0, grass = false) => {
+      const m = new PlantMaterial(base, { shared, shrink, grass });
       m.vegLod.value.set(a, b, far, overlap);
       return m;
     };
@@ -2971,7 +3098,7 @@ export class Vegetation {
       far: mk(L.treeNear - L.treeBand, L.treeNear, 1, false, L.treeOverlap),
       plant: mk(L.plantFar - L.plantBand, L.plantFar, 0, true),
       log: mk(L.logFar - 30, L.logFar, 0, true),
-      grass: mk(L.grass - L.grassBand, L.grass, 0, true),
+      grass: mk(L.grass - L.grassBand, L.grass, 0, true, 0, true),
       rockNear: new RockMaterial({ roughness: 0.93, metalness: 0 }, { shared, rockMap: this._rockTex }),
       rockFar: new RockMaterial({ roughness: 0.93, metalness: 0 }, { shared, rockMap: this._rockTex }),
     };
@@ -3023,6 +3150,14 @@ export class Vegetation {
     };
     const clearingAt = (x, z) => fbm2D(nz, x * 0.0065 + 11.3, z * 0.0065 - 7.1, 3);
     const groveAt = (x, z) => fbm2D(nz, x * 0.013 - 41.7, z * 0.013 + 19.9, 3);
+    // The upland meadows (plains high on the plateaus): sparse conifers, boulders.
+    const uplandAt = (h, biome) => (biome === "plains" ? smoothstep(36, 60, h - sea) : 0);
+    const coastAt = typeof T.coastAt === "function" ? (x, z) => T.coastAt(x, z) : () => 0;
+    // Landmark footprints: no trees, rocks or logs (ferns and grass may grow there).
+    const cleared = (x, z) => {
+      for (const c of this._clearings) if ((x - c.x) * (x - c.x) + (z - c.z) * (z - c.z) < c.r * c.r) return true;
+      return false;
+    };
 
     /* Rocks first (trees and plants keep clear of them). */
     const rocks = { type: [], mat: [], col: [], extra: [] };
@@ -3038,10 +3173,12 @@ export class Vegetation {
         if (h < sea + 0.4) continue;
         const biome = T.biomeAt(x, z);
         const slope = T.slopeAt(x, z);
-        const p = (ROCK_P[biome] || 0) + (slope > 0.4 ? 0.12 : 0);
+        const upland = uplandAt(h, biome);
+        const p = (ROCK_P[biome] || 0) + 0.19 * upland + (slope > 0.4 ? 0.12 : 0);
         if (roll >= p * d) continue;
+        if (cleared(x, z)) continue;
         const cluster = rng() < 0.32 ? 1 + Math.floor(rng() * 3) : 0;
-        const big = biome === "highland" || biome === "rock";
+        const big = upland > 0.5 || biome === "rock";
         const base = big ? rand(rng, 1.0, 3.0) * (rng() < 0.1 ? 1.6 : 1) : rand(rng, 0.5, 1.5) * (rng() < 0.06 ? 2.3 : 1);
         for (let c = 0; c <= cluster; c++) {
           const cx = c ? x + rand(rng, -1, 1) * base * 2.2 : x;
@@ -3067,6 +3204,10 @@ export class Vegetation {
         const biome = T.biomeAt(x, z);
         if (roll >= (LOG_P[biome] || 0) * d) continue;
         if (T.slopeAt(x, z) > 0.3) continue;
+        if (cleared(x, z)) continue;
+        // On the coast: driftwood, washed up on the sand and bleached grey.
+        const drift = biome === "coast";
+        if (drift && coastAt(x, z) < 0.45) continue;
         const s = rand(rng, 0.7, 1.25);
         const yaw = rng() * TAU;
         const dx = Math.cos(yaw);
@@ -3083,7 +3224,9 @@ export class Vegetation {
         _scl.set(s, s, s);
         _m4.compose(_pos, _q, _scl);
         logs.mat.push(..._m4.elements);
-        logs.col.push(1, 1, 1);
+        // Bark takes only ~15 % of the instance tint (see VEG_COLOR_VERTEX), hence the big numbers.
+        if (drift) logs.col.push(4.4, 4.2, 3.9);
+        else logs.col.push(1, 1, 1);
         for (const k of [-0.33, 0, 0.33]) {
           const c = { x: x + dx * L * k, z: z + dz * L * k, r: 0.42 * s, height: 0.8 * s, kind: "log" };
           this._colliders.insert(c);
@@ -3107,26 +3250,30 @@ export class Vegetation {
         const slope = T.slopeAt(x, z);
         if (slope > 0.6) continue;
         if (inCave(x, z)) continue;
+        if (cleared(x, z)) continue;
         const biome = T.biomeAt(x, z);
         let p = TREE_P[biome] || 0;
-        const shore = h < sea + 2.2 && biome !== "beach" && freshNear(x, z);
+        const upland = uplandAt(h, biome);
+        const shore = h < sea + 2.2 && biome !== "coast" && freshNear(x, z);
         if (biome === "forest") p *= smoothstep(-0.42, -0.1, clearingAt(x, z)) * (1 - smoothstep(0.35, 0.6, slope));
-        else if (biome === "plains") p *= 0.2 + 2.4 * smoothstep(0.05, 0.45, groveAt(x, z));
+        else if (biome === "plains") p *= lerp(0.2 + 2.4 * smoothstep(0.05, 0.45, groveAt(x, z)), 1.7, upland);
+        // Palms and tree ferns stand back from the open sand, in clumps.
+        else if (biome === "coast") p *= (1 - smoothstep(0.5, 0.68, coastAt(x, z))) * (0.3 + 2 * smoothstep(0.0, 0.4, groveAt(x, z)));
         if (shore) p = Math.max(p, 0.14);
         if (roll >= p * d) continue;
         const mix = nz(x * 0.018 + 5.1, z * 0.018 + 9.4);
         const moist = hasMoist ? clamp(T.moistureAt(x, z), 0, 1) : 0.5;
-        const kind = weightedPick(rng, treeWeights(biome, mix, moist, shore));
+        const kind = weightedPick(rng, treeWeights(biome, mix, moist, shore, upland));
         let s = rand(rng, TREE_SCALE[kind][0], TREE_SCALE[kind][1]);
         if (kind !== "treefern" && kind !== "snag" && (biome === "forest" || biome === "plains") && rng() < 0.1) {
           s *= rand(rng, 0.32, 0.5); // sapling
         }
-        if (biome === "highland") s *= 0.85;
+        if (upland > 0.5) s *= 0.85;
         const spacing = kind === "treefern" ? 1.4 : 2.2 * Math.max(0.6, s);
         if (this._colliders.any(x, z, spacing)) continue;
         const sy = s * rand(rng, 0.92, 1.1);
         const yaw = rng() * TAU;
-        const tilt = kind === "snag" ? rand(rng, 0, 0.1) : kind === "treefern" ? rand(rng, 0, 0.09) : rand(rng, 0, 0.025);
+        const tilt = kind === "snag" ? rand(rng, 0, 0.1) : kind === "treefern" || kind === "palm" ? rand(rng, 0, 0.09) : rand(rng, 0, 0.025);
         const ta = rng() * TAU;
         _q.setFromAxisAngle(_axis.set(Math.cos(ta), 0, Math.sin(ta)), tilt);
         _q2.setFromAxisAngle(UP, yaw);
@@ -3136,7 +3283,7 @@ export class Vegetation {
         _m4.compose(_pos, _q, _scl);
         trees.mat.push(..._m4.elements);
         trees.type.push(TREE_KINDS.indexOf(kind));
-        trees.col.push(...this._treeTint(kind, biome, rng));
+        trees.col.push(...this._treeTint(kind, biome, rng, upland));
         this._colliders.insert({
           x, z, r: TREE_R[kind] * s, height: TREE_H[kind] * sy,
           kind: kind === "snag" ? "snag" : kind === "treefern" ? "treefern" : "tree",
@@ -3160,7 +3307,7 @@ export class Vegetation {
         const biome = T.biomeAt(x, z);
         const shore = h < sea + 1.8 && freshNear(x, z);
         const clearing = biome === "forest" ? 1 - smoothstep(-0.42, -0.1, clearingAt(x, z)) : 0;
-        const w = plantWeights(biome, shore, clearing, h < sea + 3.5);
+        const w = plantWeights(biome, shore, clearing, h < sea + 3.5, uplandAt(h, biome), biome === "coast" ? coastAt(x, z) : 0);
         let total = 0;
         for (const k in w) total += w[k];
         if (roll >= total * d) continue;
@@ -3183,7 +3330,7 @@ export class Vegetation {
     this._treeItems = typed(trees);
     this._rockItems = typed(rocks);
     this._logItems = { count: logs.mat.length / 16, mat: Float32Array.from(logs.mat), col: Float32Array.from(logs.col) };
-    const byKind = [0, 0, 0, 0, 0];
+    const byKind = TREE_KINDS.map(() => 0);
     for (const t of trees.type) byKind[t]++;
     this.stats.trees = trees.type.length;
     this.stats.treesByKind = Object.fromEntries(TREE_KINDS.map((k, i) => [k, byKind[i]]));
@@ -3218,8 +3365,8 @@ export class Vegetation {
     _m4.compose(_pos, _q, _scl);
     rocks.mat.push(..._m4.elements);
     let v = rand(rng, 0.95, 1.25);
-    if (biome === "beach") v *= 1.12;
-    else if (biome === "forest" || biome === "swamp") v *= 0.9;
+    if (biome === "coast") v *= 1.12;
+    else if (biome === "forest") v *= 0.9;
     const warm = rand(rng, -0.04, 0.06);
     rocks.col.push(v * (1 + warm), v, v * (1 - warm * 1.5));
     rocks.extra.push((ROCK_MOSS[biome] ?? 0.3) * rand(rng, 0.6, 1.1));
@@ -3253,16 +3400,16 @@ export class Vegetation {
     let tint;
     const v = rand(rng, 0.86, 1.08);
     if (kind === "fern" && rng() < 0.18) tint = [1.38 * v, 0.8 * v, 0.48 * v]; // rust fern
-    else if (biome === "plains" || biome === "beach") tint = [1.1 * v, 1.04 * v, 0.74 * v];
+    else if (biome === "plains" || biome === "coast") tint = [1.1 * v, 1.04 * v, 0.74 * v];
     else tint = [v * rand(rng, 0.9, 1.04), v, v * rand(rng, 0.82, 0.96)];
     this._pData.push({ yaw: rng() * TAU, s, sy: rand(rng, 0.9, 1.1), y: h - 0.04 - slope * 0.5, tint });
   }
 
-  _treeTint(kind, biome, rng) {
+  _treeTint(kind, biome, rng, upland = 0) {
     const w = rng();
     let c;
     if (kind === "araucaria" || kind === "podocarp") {
-      const v = rand(rng, 0.8, 1.06) * (biome === "highland" ? 0.9 : 1);
+      const v = rand(rng, 0.8, 1.06) * (upland > 0.5 ? 0.9 : 1);
       c = [lerp(0.9, 1.08, w) * v, v, lerp(0.98, 0.82, w) * v];
     } else if (kind === "ginkgo") {
       const y = w * w;
@@ -3271,6 +3418,10 @@ export class Vegetation {
     } else if (kind === "treefern") {
       const v = rand(rng, 0.9, 1.08);
       c = [v * lerp(0.95, 1.08, w), v, v * 0.9];
+    } else if (kind === "palm") {
+      // Sun-yellowed to deep green.
+      const v = rand(rng, 0.9, 1.1);
+      c = [v * lerp(0.98, 1.22, w), v * lerp(1.0, 1.06, w), v * lerp(0.86, 0.66, w)];
     } else {
       c = [1, 1, 1];
     }
@@ -3283,7 +3434,7 @@ export class Vegetation {
     const g = this._geo;
 
     /* Trees: near + far InstancedMesh per kind, refilled by the LOD set. */
-    const byKind = [0, 0, 0, 0, 0];
+    const byKind = TREE_KINDS.map(() => 0);
     for (let i = 0; i < this._treeItems.count; i++) byKind[this._treeItems.type[i]]++;
     const nearMeshes = [];
     const farMeshes = [];
