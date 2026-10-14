@@ -1040,6 +1040,23 @@ test("creature: armor reduces attacks (less what a crushing bite pierces), ignor
   }
 });
 
+test("creature: an invulnerable (creative) creature shrugs off bites, falls, starvation and drowning", () => {
+  const w = getWorld();
+  const p = landSpot(19);
+  const c = w.ecosystem.spawn("allosaurus", p.x, p.z, { growth: 1 });
+  c.brain = null;
+  c.invulnerable = true;
+  assert.equal(c.takeDamage(1e9, null, "bite"), 0, "a bite deals nothing:");
+  c.die("test");
+  assert(c.alive, "die() is ignored");
+  Object.assign(c, { food: 0, water: 0, stamina: 0, bleeding: 50, legBroken: 30 });
+  step(c, 2);
+  assert(c.alive && c.health === c.maxHealth, "still whole after a starving, bleeding moment");
+  assert(c.food === 100 && c.water === 100 && c.stamina === 100 && c.bleeding === 0 && c.legBroken === 0, "vitals topped up");
+  c.invulnerable = false;
+  w.ecosystem.remove(c);
+});
+
 test("creature + ecosystem: death credits the killer and leaves a carcass that is eaten and rots away", () => {
   const w = getWorld();
   const eco = w.ecosystem;

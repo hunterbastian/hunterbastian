@@ -2367,6 +2367,11 @@ button:disabled {
   color: var(--c-night);
 }
 
+.chip--creative {
+  border-color: rgba(169, 223, 224, 0.4);
+  color: #a9dfe0;
+}
+
 .chip--group {
   border-color: rgba(217, 164, 65, 0.4);
   color: var(--c-ochre);

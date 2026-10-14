@@ -821,7 +821,7 @@ export class Menu {
     this.species = (species || []).filter(Boolean);
     this.isTouch = typeof isTouch === "boolean" ? isTouch : isTouchDevice();
 
-    /** Called with the chosen species id ("Hatch"). */
+    /** Called with the chosen species id and { creative } ("Hatch" / "Spawn"). */
     this.onStart = () => {};
     /** Called when the player resumes their saved life. */
     this.onContinue = () => {};
@@ -1009,6 +1009,10 @@ export class Menu {
             <span class="mode__body"><span class="mode__name">Survival</span><span class="mode__desc">Live as a dinosaur — feed, hide, fight, grow up.</span></span>
             <span class="mode__go" aria-hidden="true">${icon("arrowRight")}</span>
           </button>
+          <button type="button" class="mode mode--creative" data-act="creative">
+            <span class="mode__body"><span class="mode__name">Creative</span><span class="mode__desc">Roam full grown — no hunger, no thirst, no death.</span></span>
+            <span class="mode__go" aria-hidden="true">${icon("arrowRight")}</span>
+          </button>
         </div>
       </div>
 
@@ -1016,10 +1020,10 @@ export class Menu {
         <header class="species__head">
           <button type="button" class="back" data-act="back" aria-label="Back to the title screen">${icon("arrowLeft")}<span>Back</span></button>
           <div class="species__titles">
-            <p class="eyebrow">Survival · choose a species</p>
+            <p class="eyebrow species__eyebrow">Survival · choose a species</p>
             <h2 class="species__title" id="${id}-sp-title">Who will you be?</h2>
           </div>
-          <p class="species__intro">${COUNT_WORDS[this.species.length] ?? this.species.length} animals, some eighty million years apart, on one island. You start as a hatchling — the island decides the rest.</p>
+          <p class="species__intro" data-intro-survival="${COUNT_WORDS[this.species.length] ?? this.species.length} animals, some eighty million years apart, on one island. You start as a hatchling — the island decides the rest." data-intro-creative="Every playable animal, full grown. Wander, watch, lead a herd — nothing here can kill you.">${COUNT_WORDS[this.species.length] ?? this.species.length} animals, some eighty million years apart, on one island. You start as a hatchling — the island decides the rest.</p>
         </header>
         <div class="species__strip">
           <div class="species__list" role="listbox" aria-labelledby="${id}-sp-title" aria-orientation="horizontal"></div>
@@ -1055,6 +1059,9 @@ export class Menu {
     this._detailName = el.querySelector(".species__detail-name");
     this._detailDesc = el.querySelector(".species__detail-desc");
     this._hatchBtn = el.querySelector(".hatch");
+    this._eyebrow = el.querySelector(".species__eyebrow");
+    this._intro = el.querySelector(".species__intro");
+    this._mode = "survival";
     this._hatchText = el.querySelector(".hatch__text");
     if (this.isTouch) el.querySelector(".hatch__kbd").remove();
 
@@ -1196,6 +1203,8 @@ export class Menu {
       if (!t) return;
       switch (t.dataset.act) {
         case "survival":
+        case "creative":
+          this._mode = t.dataset.act;
           this._setScreen("species", true);
           break;
         case "continue":
@@ -1379,7 +1388,16 @@ export class Menu {
       s.toggleAttribute("inert", !on);
       s.setAttribute("aria-hidden", on ? "false" : "true");
     }
-    if (name === "species") this._syncStrip();
+    if (name === "species") {
+      // Survival hatches a youngster; Creative spawns it full grown.
+      const creative = this._mode === "creative";
+      this.el.classList.toggle("is-creative", creative);
+      this._eyebrow.textContent = creative ? "Creative · choose a species" : "Survival · choose a species";
+      this._intro.textContent = this._intro.dataset[creative ? "introCreative" : "introSurvival"];
+      if (this._hatchBtn.firstElementChild) this._hatchBtn.firstElementChild.outerHTML = icon(creative ? "compass" : "egg");
+      this._syncStrip();
+      this._select(this._selected, { instant: true });
+    }
     if (!focus) return;
     if (name === "species") {
       this._select(this._selected, { focus: true, instant: true });
@@ -1443,7 +1461,7 @@ export class Menu {
     const s = this.species[i];
     this._detailName.textContent = s.name || s.id;
     this._detailDesc.textContent = s.description || s.tagline || "";
-    this._hatchText.innerHTML = `Hatch <em>${escapeHtml(s.name || s.id)}</em>`;
+    this._hatchText.innerHTML = `${this._mode === "creative" ? "Spawn" : "Hatch"} <em>${escapeHtml(s.name || s.id)}</em>`;
     this._hatchBtn.disabled = false;
     const card = this._cards[i];
     const list = this._list;
@@ -1505,7 +1523,7 @@ export class Menu {
   _hatch() {
     const s = this.species[this._selected];
     if (!s || this._loading) return;
-    this.onStart(s.id);
+    this.onStart(s.id, { creative: this._mode === "creative" });
   }
 
   /* --- Settings form --- */

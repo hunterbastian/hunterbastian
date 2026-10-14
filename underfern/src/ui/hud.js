@@ -350,6 +350,8 @@ export class Hud {
     this._pause = { open: true, onResume, onQuit, onSettings };
     this._pauseEl.querySelector("[data-act='settings']").hidden = typeof onSettings !== "function";
     this._pauseNotes.textContent = this._fieldNotes();
+    const note = this._pauseEl.querySelector(".pause__quit-note");
+    if (note) note.textContent = this._player?.invulnerable ? "Creative runs aren't saved" : "Progress is saved";
     this._openOverlay(this._pauseEl);
     this._focusLater(this._pauseEl.querySelector("[data-act='resume']"));
   }
@@ -432,7 +434,7 @@ export class Hud {
       <div class="hud__prompt" aria-live="polite"><span class="prompt"></span></div>
       <div class="hud__status">
         <div class="chips">
-          ${chip("group", "Herd", "track")}${chip("bleeding", "Bleeding", "bleed")}${chip("leg", "Broken leg", "fracture")}${chip("resting", "Resting", "rest")}
+          ${chip("creative", "Creative", "compass")}${chip("group", "Herd", "track")}${chip("bleeding", "Bleeding", "bleed")}${chip("leg", "Broken leg", "fracture")}${chip("resting", "Resting", "rest")}
           ${chip("swimming", "Swimming", "waves")}${chip("crouched", "Crouched", "crouch")}${chip("night", "Night", "moon")}
         </div>
         <div class="vitals">
@@ -627,6 +629,7 @@ export class Hud {
     }
 
     // Status chips.
+    this._chip("creative", Boolean(p.invulnerable));
     this._updateGroupChip(p);
     this._chip("bleeding", bleeding);
     this._chip("leg", (Number(p.legBroken) || 0) > 0);

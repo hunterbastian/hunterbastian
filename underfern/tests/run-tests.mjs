@@ -201,7 +201,7 @@ const SUITES = [
     query: "?quality=low&mute=1&debug=1",
     steps: [
       {
-        name: "title: a single way in — Survival",
+        name: "title: two ways in — Survival and Creative",
         async run({ page, errors }) {
           await waitState(page, "menu");
           // The actions unlock a beat after loading completes.
@@ -210,8 +210,8 @@ const SUITES = [
             modes: [...document.querySelectorAll(".menu .mode")].map((b) => b.dataset.act),
             numerals: document.querySelectorAll(".menu .mode__num").length,
           }));
-          expect(t.modes.length === 1 && t.modes[0] === "survival", `the title should offer Survival alone, got ${JSON.stringify(t.modes)}`);
-          expect(t.numerals === 0, "a lone mode card needs no numeral");
+          expect(t.modes.join() === "survival,creative", `the title should offer Survival then Creative, got ${JSON.stringify(t.modes)}`);
+          expect(t.numerals === 0, "mode cards carry no numerals");
           await frames(page, 2);
           await shot(page, "title");
           await expectClean(page, errors);
@@ -267,6 +267,46 @@ const SUITES = [
           expect(!kept.hidden && kept.name === "Tyrannosaurus rex" && kept.sil, `a T. rex save should offer Continue, got ${JSON.stringify(kept)}`);
           await page.evaluate((key) => localStorage.removeItem(key), KEY);
           await expectClean(page, errors);
+        },
+      },
+      {
+        name: "title: Creative → Spawn: full grown, can't be hurt, never saved",
+        async run({ page, errors }) {
+          await page.evaluate(() => __underfern.menu());
+          await page.waitForSelector(".menu .mode--creative:not([disabled])", { timeout: 30_000 });
+          await page.click(".menu .mode--creative");
+          await page.waitForFunction(() => document.querySelector(".menu")?.dataset.screen === "species", null, { timeout: 30_000 });
+          const ui = await page.evaluate(() => ({
+            eyebrow: document.querySelector(".menu .species__eyebrow").textContent.trim(),
+            button: document.querySelector(".menu .hatch__text").textContent.trim(),
+          }));
+          expect(ui.eyebrow === "Creative · choose a species", `creative eyebrow, got "${ui.eyebrow}"`);
+          expect(ui.button.startsWith("Spawn"), `the button should read Spawn…, got "${ui.button}"`);
+          await page.click(".menu .hatch");
+          await waitState(page, "playing", 60_000);
+          await page.evaluate(() => __underfern.advance(1));
+          const r = await page.evaluate(() => {
+            const p = __underfern.player;
+            p.takeDamage(1e9, null, "bite");
+            p.food = 0;
+            __underfern.advance(1);
+            const chip = document.querySelector('[data-chip="creative"]');
+            return {
+              creative: __underfern.creative,
+              growth: p.growth,
+              alive: p.alive,
+              health: p.health / p.maxHealth,
+              food: p.food,
+              chip: !!chip && !chip.hidden,
+              saved: localStorage.getItem("underfern.save.v1"),
+            };
+          });
+          expect(r.creative && r.growth === 1, `Creative should spawn a full-grown adult, got ${JSON.stringify(r)}`);
+          expect(r.alive && r.health === 1 && r.food === 100, `a creative player can't be hurt or starve, got ${JSON.stringify(r)}`);
+          expect(r.chip, "the HUD should show the Creative chip");
+          expect(r.saved === null, "a creative run must not write the survival save");
+          await expectClean(page, errors);
+          return "spawned full grown; shrugged off a lethal bite; no save written";
         },
       },
     ],

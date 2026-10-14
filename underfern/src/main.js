@@ -190,6 +190,8 @@ const game = {
   controller: null,
   map: null,
   speciesId: null,
+  /** Creative mode: spawned full grown, can't be hurt, never saved. */
+  creative: false,
   survived: 0,
   saveTimer: 0,
   deathTimer: 0,
@@ -206,7 +208,8 @@ const attractFocus = new THREE.Vector3();
 
 function saveGame() {
   const p = game.world?.player;
-  if (game.state === "dead" || !p || !p.alive) return;
+  // A creative run never touches the survival save (or its Continue).
+  if (game.state === "dead" || !p || !p.alive || game.creative) return;
   const sky = game.world.sky;
   store.set(GAME.saveKey, {
     v: 1,
@@ -276,7 +279,7 @@ function pickSpawn(species) {
  * @param {string} speciesId
  * @param {{ growth?: number, from?: object, pos?: {x:number,z:number} }} [opts]
  */
-function startSurvival(speciesId, { growth = 0, from = null, pos = null } = {}) {
+function startSurvival(speciesId, { growth = 0, from = null, pos = null, creative = false } = {}) {
   const world = game.world;
   const species = getSpecies(speciesId);
   audio?.start();
@@ -287,12 +290,14 @@ function startSurvival(speciesId, { growth = 0, from = null, pos = null } = {}) 
 
   const spot = pos || (from ? { x: from.x, z: from.z } : pickSpawn(species));
   const heading = from ? from.heading : Math.random() * Math.PI * 2;
+  game.creative = !!creative && !from;
   const creature = eco.spawn(species.id, spot.x, spot.z, {
-    growth: from ? from.growth : growth,
+    growth: from ? from.growth : game.creative ? 1 : growth,
     heading,
     isPlayer: true,
   });
   if (eco.player !== creature) eco.setPlayer(creature);
+  creature.invulnerable = game.creative;
   // Herd and pack animals hatch (or carry on) among their own kind.
   eco.formPlayerGroup?.(creature, { resumed: !!from });
 
@@ -430,7 +435,7 @@ menu.onSettingsClose = () => {
 /* Menu wiring                                                               */
 /* ----------------------------------------------------------------------- */
 
-menu.onStart = (speciesId) => startSurvival(speciesId);
+menu.onStart = (speciesId, { creative = false } = {}) => startSurvival(speciesId, { creative });
 menu.onContinue = () => {
   const s = loadSave();
   if (s) startSurvival(s.speciesId, { from: s });
@@ -583,6 +588,7 @@ async function boot() {
       startSurvival(getSpecies(autostart).id, {
         growth: clamp(num("growth") ?? 0, 0, 1),
         pos: Number.isFinite(px) && Number.isFinite(pz) ? { x: px, z: pz } : null,
+        creative: params.get("creative") === "1",
       });
     } catch (err) {
       console.warn("[underfern] unknown ?species", autostart, err);
@@ -660,6 +666,9 @@ function updateDebug() {
 window.__underfern = {
   get state() {
     return game.state;
+  },
+  get creative() {
+    return game.creative;
   },
   get world() {
     return game.world;

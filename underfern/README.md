@@ -112,6 +112,11 @@ usually near a freshwater lake. Then:
 - **Day and night.** A full day lasts 16 minutes. Nights are dark but moonlit.
   Carnivores roam more after dark and herbivores bed down.
 
+**Creative** (the second card on the title screen) is a sandbox: pick any
+playable species and spawn full grown, with no hunger, thirst, injury or death.
+It's for exploring the island and watching the animals, and it never touches
+your Survival save.
+
 Death leaves your body on the island as a carcass and shows a field record (time
 survived, growth, kills, cause). *Hatch again* to try another life. Progress
 autosaves on the device, and **Continue** on the title screen picks up a living
@@ -217,6 +222,7 @@ URL parameters, handy for sharing a moment or testing:
 | --- | --- |
 | `?species=<id>` | skip the menu and hatch as that species (`dryosaurus`, `utahraptor`, `ceratosaurus`, `stegosaurus`, `allosaurus`, `brontosaurus`, `tyrannosaurus`, `spinosaurus`) |
 | `?growth=0..1` | starting growth for `?species` |
+| `?creative=1` | with `?species`: Creative mode (full grown, can't be hurt, never saved) |
 | `?pos=x,z` | spawn position in metres |
 | `?t=0..1` | time of day (0 midnight, 0.25 sunrise, 0.5 noon, 0.75 sunset); pauses the clock |
 | `?style=pixel\|detailed` · `?pixel=0..1` | render style · pixel size |

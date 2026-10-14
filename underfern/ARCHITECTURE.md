@@ -512,6 +512,7 @@ export class Creature {
   update(dt)                 // full sim step (movement, terrain follow, swimming, collisions, metabolism,
                              //  growth, regen, bleeding, actions, model animation)
   takeDamage(amount, source /* Creature|null */, type, pierce = 0) // → damage dealt after armor (× (1 − pierce)); emits "damage"
+  invulnerable        // Creative mode: takeDamage/die/damage-over-time do nothing; vitals stay full
   scent; noise; visibility;  // 0..1 stealth signals the AI senses read for ANY target (scent 1,
                              //   noise from gait (idle 0.05 … sprint 1, crouch ×0.4), visibility 1 (×0.6 crouched))
   heal(amount)
@@ -674,7 +675,7 @@ export class Hud {
 export class Menu {
   constructor(root, { species /* SpeciesDef[] (playable, in order) */ })
   show({ save = null } = {}); hide();                  // save = { speciesId, speciesName, growth, day } | null
-  onStart = (speciesId) => {};  onContinue = () => {};
+  onStart = (speciesId, { creative }) => {};  onContinue = () => {};  // creative: the title's Creative card
   setLoading(progress /* 0..1 */, label)               // loading state before the world is ready
   settings;                                            // { style: "detailed"|"pixel", quality: "auto"|"high"|"low",
                                                        //   muted: bool, sensitivity: 0.5..2 } — a Settings panel on the title

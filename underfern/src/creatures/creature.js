@@ -116,6 +116,8 @@ export class Creature {
     this.stamina = 100;
     this.bleeding = 0; // hp/s
     this.legBroken = 0; // seconds left
+    /** Creative mode: never hungry, thirsty, tired or hurt, and can't die. */
+    this.invulnerable = false;
 
     this.resting = false;
     this.crouching = false;
@@ -811,7 +813,7 @@ export class Creature {
     if (impact <= safe) return;
     const over = impact - safe;
     this.takeDamage(this.maxHealth * 0.07 * over, null, "fall");
-    if (this.alive && over > 2.5 && this.legBroken <= 0) {
+    if (this.alive && !this.invulnerable && over > 2.5 && this.legBroken <= 0) {
       this.legBroken = LEG_HEAL_TIME + over * 4;
       this.world.events?.emit("legBreak", { creature: this });
     }
@@ -1139,6 +1141,16 @@ export class Creature {
       this.stamina = Math.min(100, this.stamina + regen * dt);
     }
 
+    // Creative mode: always fed, watered, rested and whole.
+    if (this.invulnerable) {
+      this.food = 100;
+      this.water = 100;
+      this.stamina = 100;
+      this.bleeding = 0;
+      this.legBroken = 0;
+      this.health = this.maxHealth;
+    }
+
     // Damage over time.
     const maxH = this.maxHealth;
     if (this.food <= 0) this._dot("starve", maxH * 0.01 * dt);
@@ -1189,7 +1201,7 @@ export class Creature {
 
   // Continuous damage: applied every frame, evented once a second.
   _dot(type, amount) {
-    if (!this.alive || !(amount > 0)) return;
+    if (!this.alive || !(amount > 0) || this.invulnerable) return;
     const dealt = Math.min(this.health, amount);
     this.health -= dealt;
     this._dotAcc[type] += dealt;
@@ -1335,7 +1347,7 @@ export class Creature {
    * @returns {number} damage actually dealt
    */
   takeDamage(amount, source = null, type = "bite", pierce = 0) {
-    if (!this.alive || !(amount > 0)) return 0;
+    if (!this.alive || !(amount > 0) || this.invulnerable) return 0;
     const armor = this._t.armor * (1 - clamp(+pierce || 0, 0, 1));
     const mul = ATTACK_TYPES[type] ? 1 - armor : 1;
     const dealt = Math.min(this.health, amount * mul);
@@ -1373,7 +1385,7 @@ export class Creature {
    * @param {object|null} killer
    */
   die(cause = "Unknown causes", killer = null) {
-    if (!this.alive) return;
+    if (!this.alive || this.invulnerable) return;
     this.alive = false;
     this.health = 0;
     this.causeOfDeath = cause;
