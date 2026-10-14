@@ -573,7 +573,8 @@ export class Brain {
 ```
 Herbivores keep a daily round when leading a herd (fresh water at dawn, open plains by day,
 the forest edge at evening, once each per day), graze, drink, herd (cohesion around the leader,
-which may be a full-grown player), rest at night, flee
+which may be a full-grown player; defenders with young in the herd form a ring between them
+and a predator, tails out, while the young huddle inside it), rest at night, flee
 from threatening carnivores (bigger ones flee less; Stegosaurus/Diplodocus/Brontosaurus
 turn and fight when attacked or cornered). Carnivores roam, hunt when hungry
 (prefer prey they can handle, avoid big herds), eat carcasses, attack the player
@@ -754,6 +755,7 @@ URL params: `?species=<id>` autostart · `?growth=0..1` · `?t=0..1` time of day
 | `groupStray` | `{ creature, group }` — the player has drifted out of reach of every mate |
 | `groupLeft` | `{ creature, group, reason: "strayed" \| "lost" }` — strayed too long, or every mate is gone |
 | `groupLead` | `{ creature, group }` — the full-grown player has taken the lead of its herd / pack |
+| `herdAlarm` | `{ group, threat, by }` — a mate sensed danger; sent for a group the player is in (one at a time, the same danger not again for 20 s) |
 | `herdRoute` | `{ group, leg: "water" \| "graze" \| "shelter" }` — the NPC leader of the player's herd sets off on a leg of its daily round |
 | `spawn` | `{ creature }` |
 | `sniff` | `{ creature }` |

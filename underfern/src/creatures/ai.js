@@ -123,6 +123,32 @@ function playerIn(g) {
   return null;
 }
 
+// Centre of the young (growth < JUVENILE, the player too) of `self`'s group
+// within `r` m of it, or null. Shared scratch — read it, don't keep it.
+const _young = { x: 0, z: 0, n: 0 };
+function youngOf(g, self, r) {
+  const m = g && g.members;
+  if (!m) return null;
+  const px = self.position.x;
+  const pz = self.position.z;
+  let n = 0;
+  let sx = 0;
+  let sz = 0;
+  for (let i = 0; i < m.length; i++) {
+    const k = m[i];
+    if (!k || k === self || !k.alive || !k.position || num(k.growth, 1) >= JUVENILE) continue;
+    if (dist2(px, pz, k.position.x, k.position.z) > r * r) continue;
+    n++;
+    sx += k.position.x;
+    sz += k.position.z;
+  }
+  if (!n) return null;
+  _young.x = sx / n;
+  _young.z = sz / n;
+  _young.n = n;
+  return _young;
+}
+
 // A herd's daily round, by day phase (0.25 sunrise, 0.75 sunset): down to the
 // water at dawn, out onto open plains through the day, back to the forest edge
 // for the evening. Null outside those windows (night: the herd sleeps).
@@ -160,6 +186,8 @@ function groupMemo(g) {
       rush: false, // the quarry was named by the player: the pack runs it down
       playerAtk: null, // whoever last hurt a player in the group…
       playerAtkAge: -1e9, // …and when, on the player's own clock
+      spotted: null, // the danger a mate last warned the player about…
+      spottedT: -1e9, // …and when
     };
     GROUPS.set(g, m);
   }
@@ -354,6 +382,8 @@ export class Brain {
     this._aidUntil = -1e9;
     this._regroupUntil = -1e9; // leading the player's group: walk back to it until then
     this._routeKey = ""; // "day:leg" of the daily-round leg already set off on
+    this._ringPt = { x: 0, z: 0 }; // defender's place in the ring round the young…
+    this._ringC = { x: 0, z: 0 }; // …and the ring's centre (the young)
 
     // Routine.
     this._activityUntil = 0;
@@ -628,6 +658,7 @@ export class Brain {
 
     // Threat memory: track the live threat, else remember where it was.
     if (threat) {
+      if (this.group && threatDanger > 0.2) this._shareSighting(threat);
       this._threat = threat;
       this._threatT = now;
       this._threatX = threat.position.x;
@@ -958,6 +989,58 @@ export class Brain {
     this.mode = mode;
   }
 
+  // A herd / pack mate sensing danger tells a player travelling with the group
+  // (one warning at a time; the same danger isn't repeated for 20 s).
+  _shareSighting(th) {
+    const g = this.group;
+    const p = playerIn(g);
+    if (!p || th === p || th.group === g) return;
+    const m = groupMemo(g);
+    const now = this._now;
+    if (now - m.spottedT < (m.spotted === th ? 20 : 6)) return;
+    m.spotted = th;
+    m.spottedT = now;
+    this.world.events?.emit("herdAlarm", { group: g, threat: th, by: this.creature });
+  }
+
+  // A defender with young in its herd takes a place in a ring between them and
+  // the danger, its tail toward it. True while it holds that place.
+  _ringUp() {
+    const y = youngOf(this.group, this.creature, 40);
+    if (!y) return false;
+    let ux = this._threatX - y.x;
+    let uz = this._threatZ - y.z;
+    const l = Math.hypot(ux, uz) || 1;
+    ux /= l;
+    uz /= l;
+    // Defenders spread across the danger's side of the young.
+    const a = Math.atan2(ux, uz) + clamp(this._flankSlot() * 0.7, -1.4, 1.4);
+    const R = 4 + radiusOf(this.creature) * 2.5;
+    this._ringC.x = y.x;
+    this._ringC.z = y.z;
+    this._ringPt.x = y.x + Math.sin(a) * R;
+    this._ringPt.z = y.z + Math.cos(a) * R;
+    this._enter("idle", null, "ring");
+    return true;
+  }
+
+  // Young whose herd's adults are forming a ring hold still in its middle.
+  _huddle() {
+    const m = this.group && this.group.members;
+    if (!m) return false;
+    const c = this.creature;
+    for (let i = 0; i < m.length; i++) {
+      const b = m[i] && m[i].alive ? m[i].brain : null;
+      if (!b || b.mode !== "ring" || b.state !== "idle") continue;
+      if (dist2(c.position.x, c.position.z, b._ringC.x, b._ringC.z) > 50 * 50) continue;
+      this._ringC.x = b._ringC.x;
+      this._ringC.z = b._ringC.z;
+      this._enter("idle", null, "huddle");
+      return true;
+    }
+    return false;
+  }
+
   _decideHerbivore() {
     const c = this.creature;
     const now = this._now;
@@ -994,8 +1077,12 @@ export class Brain {
         // Armour and tail spikes: stand ground, swing when it comes close.
         if (d < this._defendDist(th) && this._threatDanger > 0.15) return this._startFight(th, "defend");
         if (this.state === "flee" && this._keepFleeing()) return;
+        // Young in the herd: form up between them and the danger, tails out.
+        if (d < 80 && this._threatDanger > 0.15 && this._ringUp()) return;
         // Otherwise carry on, heads up (see _watchLook) — no running.
       } else {
+        // Young of a herd whose adults are ringing them stay inside the ring.
+        if (c.growth < JUVENILE && d > 12 && this._huddle()) return;
         if (d < fd) {
           if (this.state !== "flee" || this._fleeFrom !== th) {
             return this._startFlee(th, this._threatX, this._threatZ, rand(this.rng, 5, 9), d < fd * 0.7 || this._isUrgent(th));
@@ -2335,6 +2422,20 @@ export class Brain {
 
   _actIdle(dt) {
     const c = this.creature;
+    if (this.mode === "ring") {
+      // Into place, then face the young: the tail points at the danger.
+      const d = this._goTo(this._ringPt.x, this._ringPt.z, this._distToXZ(this._ringPt.x, this._ringPt.z) > 12 ? JOG : WALK, false, false, 1.5);
+      if (d < 2.5) {
+        this._gmag = 0;
+        const want = yawFromDir(this._ringC.x - c.position.x, this._ringC.z - c.position.z);
+        if (Math.abs(angleDiff(c.heading, want)) > 0.3) this._goDir(Math.sin(want), Math.cos(want), 0.14);
+      }
+      return this._threat;
+    }
+    if (this.mode === "huddle") {
+      if (this._distToXZ(this._ringC.x, this._ringC.z) > 3) this._goTo(this._ringC.x, this._ringC.z, WALK, false, false, 2);
+      return this._threat;
+    }
     // Idle animals look about; herd members drift back toward the leader.
     this._lookT -= dt;
     if (this._lookT <= 0) {

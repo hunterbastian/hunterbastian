@@ -1352,6 +1352,63 @@ test("ai: herds keep a daily round — water at dawn, plains by day, the forest 
   }
 });
 
+test("ai: herd mates warn their player about danger once; Stegosaurus adults ring the young, tails out, and the young huddle", () => {
+  const w = getWorld();
+  const eco = w.ecosystem;
+  const p = landSpot(18);
+  const made = [];
+  const think = (list, n = 10) => {
+    for (let i = 0; i < n; i++) for (const c of list) c.brain && c.brain.update(0.05);
+  };
+  // Make `c` aware of `th` (as if it had just sensed it).
+  const aware = (c, th) =>
+    Object.assign(c.brain, {
+      _threat: th,
+      _threatT: w.time,
+      _threatX: th.position.x,
+      _threatZ: th.position.z,
+      _threatD: Math.hypot(th.position.x - c.position.x, th.position.z - c.position.z),
+      _threatDanger: 1,
+    });
+  try {
+    w.time += 60;
+    const me = eco.spawn("stegosaurus", p.x, p.z, { growth: 0.2, isPlayer: true });
+    eco.formPlayerGroup(me);
+    const g = me.group;
+    const kid = eco.spawn("stegosaurus", me.position.x - 4, me.position.z + 3, { growth: 0.2, group: g });
+    const herd = g.members.filter((m) => m !== me);
+    made.push(...herd);
+    for (const m of herd) Object.assign(m, { food: 100, water: 100 });
+    // An Allosaurus stands off to one side of the young.
+    const allo = eco.spawn("allosaurus", me.position.x + 45, me.position.z, { growth: 1 });
+    allo.brain = null;
+    made.push(allo);
+
+    // Shared vigilance: a mate's sighting reaches the player, once.
+    const warned = capture("herdAlarm", () => {
+      herd[0].brain._shareSighting(allo);
+      herd[1].brain._shareSighting(allo);
+    });
+    assert(warned.length === 1 && warned[0].threat === allo && warned[0].group === g, "one warning for the player");
+
+    // The defensive ring.
+    for (const m of herd) aware(m, allo);
+    think(herd);
+    const adults = herd.filter((m) => m.growth >= 0.4);
+    const ringed = adults.filter((m) => m.brain.state === "idle" && m.brain.mode === "ring");
+    assert(adults.length && ringed.length === adults.length, `every adult takes a place in the ring (${ringed.length}/${adults.length})`);
+    for (const m of ringed) {
+      const b = m.brain;
+      const toward = (b._ringPt.x - b._ringC.x) * (allo.position.x - b._ringC.x) + (b._ringPt.z - b._ringC.z) * (allo.position.z - b._ringC.z);
+      assert(toward > 0, "ring places sit between the young and the danger");
+    }
+    assert(kid.brain.state === "idle" && kid.brain.mode === "huddle", `the young huddle inside the ring, got ${kid.brain.state}/${kid.brain.mode}`);
+  } finally {
+    eco.clearPlayer();
+    for (const c of made) eco.remove(c);
+  }
+});
+
 test("ecosystem: query finds the living within a radius", () => {
   const w = getWorld();
   const eco = w.ecosystem;

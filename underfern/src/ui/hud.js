@@ -242,6 +242,7 @@ export class Hud {
     on("groupLeft", (e) => this._onGroup("left", e));
     on("groupLead", (e) => this._onGroup("lead", e));
     on("herdRoute", (e) => this._onRoute(e));
+    on("herdAlarm", (e) => this._onHerdAlarm(e));
     on("newDay", (e) => this.toast(`Day ${e?.day ?? ""} — first light`, "info", "dawn"));
     on("notify", (e) => e?.text && this.toast(e.text, e.kind || "info"));
   }
@@ -502,6 +503,10 @@ export class Hud {
       this._threatPins.push({ el: t, x: null, on: false });
     }
     this._waterPinState = { x: null, on: false, edge: false };
+    // A danger a herd / pack mate spotted: a threat pin that follows it for a while.
+    this._alarm = null;
+    this._alarmPin = { kind: "creature", threat: true, x: 0, z: 0 };
+    this._pinList = [];
     this._markers = [];
 
     this._buildOverlays();
@@ -751,6 +756,17 @@ export class Hud {
     }
   }
 
+  // A mate spotted danger: say what and pin it on the compass for a while.
+  _onHerdAlarm(e) {
+    const p = this._player;
+    const th = e?.threat;
+    if (!p?.alive || !e.group || p.group !== e.group || !th?.species) return;
+    const unit = p.species?.social === "pack" ? "pack" : "herd";
+    const name = th.species.name;
+    this.toast(`Your ${unit} has spotted ${article(name)} ${name}!`, "danger", "claw");
+    this._alarm = { threat: th, t: 12 };
+  }
+
   // The herd's daily round, for a player travelling with it.
   _onRoute(e) {
     const p = this._player;
@@ -913,7 +929,24 @@ export class Hud {
       const water = list.find((m) => m.kind === "water");
       if (water) this._water = { x: water.x, z: water.z, age: 0 };
     }
-    this._setThreatPins(active ? list : null, this._c.bearing ?? 0, p);
+    let pins = active ? list : null;
+    const al = this._alarm;
+    if (al) {
+      al.t -= dt;
+      const th = al.threat;
+      if (al.t <= 0 || !th?.alive || !th.position) {
+        this._alarm = null;
+      } else {
+        const arr = this._pinList;
+        arr.length = 0;
+        if (pins) for (let i = 0; i < pins.length; i++) arr.push(pins[i]);
+        this._alarmPin.x = th.position.x;
+        this._alarmPin.z = th.position.z;
+        arr.push(this._alarmPin);
+        pins = arr;
+      }
+    }
+    this._setThreatPins(pins, this._c.bearing ?? 0, p);
 
     let used = 0;
     if (active && cam && this._sniffAlpha > 0.01) {
