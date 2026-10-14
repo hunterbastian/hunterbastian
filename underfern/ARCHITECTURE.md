@@ -285,14 +285,15 @@ carved below sea level (fresh). A few small offshore islets are welcome.
 so the same seed gives the same island at any mesh resolution.
 - *Massif* (`_mountain`, `_peak`): 3–4 horn peaks (main ≈ `maxHeight` 190 m) — concave
   pyramids with arêtes and cirque hollows — joined by a serrated ridge (smooth max),
-  with terraced cliff bands on the faces. Cliffs (slope > the creature's block grade
-  0.39) are barriers; the way up is elsewhere.
+  with terraced cliff bands on the faces and per-vertex crags on the sheer rock.
+  Cliffs (slope > the creature's block grade 0.39) are barriers; the way up is elsewhere.
 - *Passes* (`_planPassValleys`): 1–2 notches in the ridge; a U-shaped, meandering valley
   runs from the saddle down both sides to the foot of the range (cut-and-fill floor,
   cut-only banks), graded so every animal can cross.
 - *Lookouts* (`_planLookouts`, after the rivers): up to two flat pads high on the ridge,
   each reached from walkable ground by a switchback trail found by a direction-aware
-  Dijkstra on the layout grid (grade-limited, turn-penalised) and carved as a ledge.
+  A* on the layout grid (grade-limited, turn-penalised; the heuristic is the plain
+  distance to walkable ground) and carved as a ledge.
   Trails paint as worn dirt, valley floors stay grassy.
 - *Caves* (`caves.js`): `planCaves` scores candidate mouths (gentle ground under a
   rise, reachable, clear of passes/trails/lookouts) and designs a **cavern** (a great
