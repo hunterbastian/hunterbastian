@@ -373,8 +373,26 @@ const SUITES = [
           await waitState(page, "playing");
           const style = await page.evaluate(() => [__underfern.style, document.getElementById("game").dataset.style]);
           expect(style[0] === "detailed" && style[1] === "detailed", `expected the detailed style, got ${style}`);
-          const r = await driveWithKeys(page, ["ShiftLeft", "KeyW"], 2.5);
-          expect(r.dist > 3, `allosaurus moved only ${r.dist.toFixed(2)} m sprinting for 2.5 s`);
+          // Spawns sit near a lake: sprint the camera-relative way with dry, gentle ground ahead.
+          const key = await page.evaluate(() => {
+            const t = __underfern.world.terrain;
+            const p = __underfern.player.position;
+            const yaw = __underfern.controller.camera.yaw;
+            const ways = [["KeyW", 0], ["KeyS", Math.PI], ["KeyA", Math.PI / 2], ["KeyD", -Math.PI / 2]];
+            for (const [k, off] of ways) {
+              const a = yaw + off;
+              let ok = true;
+              for (let d = 4; d <= 40 && ok; d += 4) {
+                const x = p.x + Math.sin(a) * d;
+                const z = p.z + Math.cos(a) * d;
+                if (t.isWater(x, z) || t.slopeAt(x, z) > 0.25) ok = false;
+              }
+              if (ok) return k;
+            }
+            return "KeyW";
+          });
+          const r = await driveWithKeys(page, ["ShiftLeft", key], 2.5);
+          expect(r.dist > 3, `allosaurus moved only ${r.dist.toFixed(2)} m sprinting for 2.5 s (${key})`);
           expect(r.gait === "sprint", `holding Shift+W should sprint, gait was "${r.gait}"`);
           await frames(page, 2);
           await shot(page, "survival-detailed");
