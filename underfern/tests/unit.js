@@ -11,10 +11,12 @@ import { QUALITY, WORLD } from "../src/config.js";
 import { makeRng, hash, rand, randInt, pick, weightedPick } from "../src/core/rng.js";
 import { createNoise2D, fbm2D, ridged2D } from "../src/core/noise.js";
 import { EventBus } from "../src/core/events.js";
-import { Terrain, BIOMES } from "../src/world/terrain.js";
+import { Terrain, BIOMES, LIVING_BIOMES } from "../src/world/terrain.js";
 import { SPECIES, PLAYABLE, getSpecies, growthScale, growthStage } from "../src/creatures/species.js";
 import { Wind } from "../src/world/wind.js";
 import { World } from "../src/world/world.js";
+import { planLandmarks, LANDMARK_KINDS } from "../src/world/landmarks.js";
+import { weatherForDay, WEATHER_KINDS } from "../src/world/sky.js";
 import { isRotated, appSize, toApp, onAppResize } from "../src/core/screen.js";
 import { Input } from "../src/player/input.js";
 import { ThirdPersonCamera } from "../src/player/camera.js";
@@ -345,6 +347,43 @@ test("terrain: lakes/rivers are fresh water; nearestFreshWater stands on the sho
   if (Number.isFinite(w.waterX)) wet ||= t.isFreshWater(w.waterX, w.waterZ);
   assert(wet, "no fresh water next to the shore point");
   assert.equal(t.nearestFreshWater(-t.half + 2, -t.half + 2, 5), null, "nothing fresh within 5 m of the ocean corner:");
+});
+
+test("biomes: three living biomes — coast, plains, forest — around the massif's rock", () => {
+  const t = getTerrain();
+  assert.equal(BIOMES.join(","), "ocean,lake,coast,plains,forest,rock", "BIOMES:");
+  assert.equal(LIVING_BIOMES.join(","), "coast,plains,forest", "LIVING_BIOMES:");
+  const share = t.stats.biomeShare;
+  for (const b of Object.keys(share)) assert(BIOMES.includes(b), `unknown biome in the stats: ${b}`);
+  for (const b of LIVING_BIOMES) assert(share[b] > 0.05, `${b} should cover a real share of the land (${share[b]})`);
+  assert(share.plains > share.coast && share.forest > 0.1, `plains and forest dominate inland (${JSON.stringify(share)})`);
+  // The coast is a belt along the open sea: every coast point has the ocean
+  // close by, and most land right at the sea's edge (not cliff) is coast.
+  const oceanWithin = (x, z, r) => {
+    for (let a = 0; a < 24; a++) {
+      for (let d = 10; d <= r; d += 10) if (t.biomeAt(x + Math.sin(a * 0.2618) * d, z + Math.cos(a * 0.2618) * d) === "ocean") return true;
+    }
+    return false;
+  };
+  const r = makeRng(31);
+  let coast = 0;
+  let edge = 0;
+  let edgeCoast = 0;
+  for (let i = 0; i < 6000 && coast < 60; i++) {
+    const x = (r() - 0.5) * t.size * 0.95;
+    const z = (r() - 0.5) * t.size * 0.95;
+    const b = t.biomeAt(x, z);
+    if (b === "coast") {
+      coast++;
+      assert(oceanWithin(x, z, 170), `coast at ${x.toFixed(0)}, ${z.toFixed(0)} is far from the sea`);
+      assert.range(t.coastAt(x, z), 0, 1, "coastAt");
+    } else if (b !== "ocean" && b !== "lake" && b !== "rock" && t.heightAt(x, z) < t.seaLevel + 3 && oceanWithin(x, z, 20)) {
+      edge++;
+    }
+    if (b === "coast" && t.heightAt(x, z) < t.seaLevel + 3 && oceanWithin(x, z, 20)) edgeCoast++;
+  }
+  assert(coast >= 20, `found only ${coast} coast samples`);
+  assert(edgeCoast / Math.max(1, edgeCoast + edge) > 0.6, `the sea's edge should be mostly coast (${edgeCoast} coast, ${edge} other)`);
 });
 
 test("terrain: findSpawnPoint honours biomes / height / slope / ring and is deterministic", () => {
@@ -720,6 +759,45 @@ test("camera: inside a cave it stays under the rock and never in it, whatever th
   }
 });
 
+/* --- world/landmarks.js -------------------------------------------------- */
+
+test("landmarks: fossils and stone wonders on valid ground, clear of caves, lakes, rivers and routes; same per seed", () => {
+  const t = getHiTerrain();
+  const sites = planLandmarks(t, WORLD.seed);
+  assert.equal(JSON.stringify(planLandmarks(t, WORLD.seed)), JSON.stringify(sites), "same seed and terrain, same sites:");
+  assert(sites.length >= 5, `at least five landmarks (${sites.map((s) => s.kind)})`);
+  assert(sites.filter((s) => s.fossil).length >= 2, "at least two fossil giants");
+  assert(sites.some((s) => !s.fossil), "and some stone");
+  for (const s of sites) {
+    const at = `${s.kind} at ${s.x.toFixed(0)}, ${s.z.toFixed(0)}`;
+    assert(LANDMARK_KINDS.includes(s.kind), `unknown kind ${s.kind}`);
+    assert(t.inBounds(s.x, s.z, s.r), `${at}: inside the tile`);
+    if (s.kind === "stacks") {
+      // In the open sea, a swim off the shore — never a lake or river.
+      assert(t.isWater(s.x, s.z) && !t.isFreshWater(s.x, s.z), `${at}: stands in the sea`);
+      assert.equal(t.nearestFreshWater(s.x, s.z, s.r + 40), null, `${at}: no river mouth beside it:`);
+    } else {
+      for (let k = 0; k < 16; k++) {
+        const a = (k / 16) * Math.PI * 2;
+        for (const d of [0, s.r * 0.5, s.r]) {
+          const x = s.x + Math.cos(a) * d;
+          const z = s.z + Math.sin(a) * d;
+          assert(t.heightAt(x, z) > t.seaLevel + 0.5, `${at}: footprint is dry ground`);
+          assert(!t.nearCave(x, z), `${at}: footprint is clear of caves`);
+          assert(t.biomeAt(x, z) !== "rock", `${at}: not on the massif's bare rock`);
+        }
+      }
+      assert.equal(t.nearestFreshWater(s.x, s.z, s.r + 20), null, `${at}: no lake or river beside it:`);
+    }
+    for (const c of t.caves) for (const e of c.entrances) assert(Math.hypot(e.x - s.x, e.z - s.z) > s.r + 20, `${at}: clear of the ${c.kind}'s mouth`);
+    for (const p of [...t.passes, ...t.lookouts]) assert(Math.hypot(p.x - s.x, p.z - s.z) > s.r + 30, `${at}: clear of the passes and lookouts`);
+    for (const o of sites) if (o !== s) assert(Math.hypot(o.x - s.x, o.z - s.z) > 150, `${at}: spaced from the ${o.kind}`);
+  }
+  // Another island, other places.
+  const other = planLandmarks(getTerrain(), WORLD.seed + 7);
+  assert(other.some((o, i) => !sites[i] || Math.hypot(o.x - sites[i].x, o.z - sites[i].z) > 1), "another seed moves them");
+});
+
 /* --- creatures/species.js ------------------------------------------------- */
 
 const DIETS = ["carnivore", "herbivore"];
@@ -760,7 +838,7 @@ test("species: every SpeciesDef carries the full contract with sane values", () 
     assert.range(s.aggression, 0, 1, `${at} aggression`);
     assert(typeof s.spawnWeight === "number" && s.spawnWeight >= 0, `${at} spawnWeight`);
     assert(Array.isArray(s.biomes) && s.biomes.length > 0, `${at} biomes`);
-    for (const b of s.biomes) assert(BIOMES.includes(b), `${at} unknown biome ${b}`);
+    for (const b of s.biomes) assert(LIVING_BIOMES.includes(b), `${at} biome ${b} is not one of ${LIVING_BIOMES}`);
     assert(CALLS.includes(s.call?.kind), `${at} call.kind ${s.call?.kind}`);
     assert(posNum(s.call.pitch) && posNum(s.call.duration), `${at} call pitch / duration`);
     assert(s.colors && typeof s.colors === "object", `${at} colors`);
@@ -828,7 +906,7 @@ test("species: the apex newcomers — Tyrannosaurus and Spinosaurus — are rare
     if (s !== spino) assert(spino.swim >= s.swim && spino.speed.swim >= s.speed.swim, `Spinosaurus should out-swim ${s.id}`);
     if (s !== spino && s.diet === "carnivore") assert(spino.length > s.length, `Spinosaurus should be longer than ${s.id}`);
   }
-  assert(spino.waterAffinity > 0.5 && spino.biomes.includes("swamp") && spino.biomes.includes("beach"), "Spinosaurus keeps to the water");
+  assert(spino.waterAffinity > 0.5 && spino.biomes.includes("coast") && spino.biomes.includes("plains"), "Spinosaurus keeps to the coast (and the riverbanks, by its water affinity)");
   assert(spino.height < allo.height, "Spinosaurus stands lower at the hip than Allosaurus");
   assert(spino.body.features?.sail, "Spinosaurus carries its sail");
   assert.equal(spino.call.kind, "rattle", "Spinosaurus call:");
@@ -962,6 +1040,75 @@ test("world: builds at low resolution with terrain, sky, water, vegetation, wind
   const removed = w.vegetation.eatPlant(plant, 5);
   assert.near(removed, Math.min(5, before), 1e-9, "eatPlant removes what it can:");
   assert.near(plant.food, before - removed, 1e-9, "plant food decreases:");
+});
+
+test("world: landmarks are obstacles for creatures and keep-outs for spawns", () => {
+  const w = getWorld();
+  const L = w.landmarks;
+  assert(L && L.sites.length >= 4, "the world has its landmarks");
+  for (const s of L.sites) {
+    assert(s.colliders.length > 0, `${s.kind}: has colliders`);
+    for (const c of s.colliders) assert(c.r > 0 && c.r <= 4.5, `${s.kind}: collider radius ${c.r} within the hash's comfort`);
+    const c = s.colliders[0];
+    const found = w.vegetation.collidersNear(c.x, c.z, 0.5);
+    assert(found.some((f) => f.kind === "landmark"), `${s.kind}: collidersNear reports it`);
+  }
+  const r = makeRng(77);
+  for (let i = 0; i < 300; i++) {
+    const p = w.terrain.findSpawnPoint(r, { minHeight: 1, maxSlope: 0.4 });
+    if (!p) continue;
+    for (const s of L.sites) assert(Math.hypot(p.x - s.x, p.z - s.z) >= s.r, `spawn point inside the ${s.kind}`);
+  }
+});
+
+test("sky: weather — one deterministic state per day, varied, auroras only after clear or fair days", () => {
+  const seen = new Set();
+  let aurorae = 0;
+  for (let d = 1; d <= 60; d++) {
+    const a = weatherForDay(1234, d);
+    const b = weatherForDay(1234, d);
+    assert(a.kind === b.kind && a.aurora === b.aurora, `day ${d} is the same every time`);
+    assert(WEATHER_KINDS.includes(a.kind), `day ${d}: unknown weather ${a.kind}`);
+    seen.add(a.kind);
+    if (a.aurora) {
+      aurorae++;
+      assert(a.kind === "clear" || a.kind === "fair", `day ${d}: an aurora after a ${a.kind} day`);
+    }
+  }
+  assert.equal(weatherForDay(1234, 1).kind, "fair", "the first day is fair:");
+  assert(weatherForDay(1234, 1).aurora, "and its night has an aurora");
+  assert.equal(seen.size, WEATHER_KINDS.length, `every weather turns up within 60 days (${[...seen]})`);
+  assert.range(aurorae, 4, 30, "aurora nights in 60");
+  let differ = 0;
+  for (let d = 2; d <= 40; d++) if (weatherForDay(1234, d).kind !== weatherForDay(99, d).kind) differ++;
+  assert(differ > 10, "another seed, another sky");
+  // The Sky follows it: a misty noon hides the distance; auroras only in the dark.
+  const sky = getWorld().sky;
+  const keep = { phase: sky.phase, day: sky.day, force: sky.forceWeather, aurora: sky.forceAurora };
+  try {
+    sky.forceWeather = "clear";
+    sky.setPhase(0.5);
+    const clearFar = sky.fog.far;
+    const clearSun = sky.sunLight.intensity;
+    sky.forceWeather = "misty";
+    sky.setPhase(0.5);
+    assert(sky.fog.far < clearFar * 0.6, `misty noon fog is nearer (${sky.fog.far.toFixed(0)} vs ${clearFar.toFixed(0)})`);
+    sky.forceWeather = "overcast";
+    sky.setPhase(0.5);
+    assert(sky.sunLight.intensity < clearSun * 0.6, "overcast dims the sun");
+    sky.forceWeather = "clear";
+    sky.forceAurora = true;
+    sky.setPhase(0.5);
+    assert.equal(sky.weather.aurora, 0, "no aurora at noon:");
+    sky.setPhase(0.0);
+    assert(sky.weather.aurora > 0.9, "an aurora at midnight when the night has one");
+    assert(sky.uniforms.uAurora.value > 0.5, "and the dome draws it");
+  } finally {
+    sky.forceWeather = keep.force;
+    sky.forceAurora = keep.aurora;
+    sky.day = keep.day;
+    sky.setPhase(keep.phase);
+  }
 });
 
 test("creature: metabolism drains food/water at the species rate (NPCs ×0.35)", () => {
@@ -1110,13 +1257,13 @@ test("ecosystem: rare apex species never exceed maxAlive in the wild (a player o
   };
   try {
     for (const id of ["spinosaurus", "tyrannosaurus"]) for (const c of wild(id)) eco.remove(c);
-    assert(picks("swamp", "spinosaurus") > 0, "a Spinosaurus can turn up when none is about");
+    assert(picks("coast", "spinosaurus") > 0, "a Spinosaurus can turn up when none is about");
     assert(picks("forest", "tyrannosaurus") > 0, "a T. rex can turn up when none is about");
     const me = eco.spawn("spinosaurus", p.x, p.z, { growth: 0, isPlayer: true });
     spawned.push(me);
-    assert(picks("swamp", "spinosaurus") > 0, "the player's own kind doesn't use up the wild one");
+    assert(picks("coast", "spinosaurus") > 0, "the player's own kind doesn't use up the wild one");
     spawned.push(eco.spawn("spinosaurus", p.x + 40, p.z, { growth: 1 }));
-    assert.equal(picks("swamp", "spinosaurus"), 0, "with one Spinosaurus about, no second:");
+    assert.equal(picks("coast", "spinosaurus"), 0, "with one Spinosaurus about, no second:");
     spawned.push(eco.spawn("tyrannosaurus", p.x - 40, p.z, { growth: 1 }));
     assert(picks("forest", "tyrannosaurus") > 0, "T. rex allows a second");
     spawned.push(eco.spawn("tyrannosaurus", p.x - 40, p.z + 40, { growth: 1 }));

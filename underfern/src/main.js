@@ -13,6 +13,7 @@ import { WORLD, TIME, GAME, QUALITY, STYLE } from "./config.js";
 import { clamp } from "./core/math.js";
 import { makeRng, hash } from "./core/rng.js";
 import { World } from "./world/world.js";
+import { setLookScreen } from "./world/look.js";
 import { PLAYABLE, getSpecies } from "./creatures/species.js";
 import { Input } from "./player/input.js";
 import { ThirdPersonCamera } from "./player/camera.js";
@@ -149,6 +150,7 @@ function resize() {
   canvas.style.width = "100%";
   canvas.style.height = "100%";
   canvas.dataset.style = style;
+  setLookScreen(canvas.width, canvas.height); // the vignette works in drawing-buffer pixels
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }
@@ -551,6 +553,11 @@ async function boot() {
     world.sky.setPhase(clamp(tParam, 0, 1));
     world.sky.paused = true;
   }
+  // ?weather=clear|fair|overcast|misty holds one weather; ?aurora=0|1 forces tonight's curtains.
+  const weather = params.get("weather");
+  if (weather) world.sky.forceWeather = weather;
+  if (params.get("aurora") !== null) world.sky.forceAurora = params.get("aurora") === "1";
+  if (weather || params.get("aurora") !== null) world.sky.setPhase(world.sky.phase);
 
   hud.bindEvents(world.events);
   audio = new AudioEngine(world.events);
@@ -559,7 +566,7 @@ async function boot() {
   game.tpc = new ThirdPersonCamera(camera, world.terrain);
   game.tpc.sensitivity = settings.sensitivity;
   game.controller = new PlayerController({ world, input, camera: game.tpc, audio });
-  game.map = new MapView(uiRoot, world.terrain);
+  game.map = new MapView(uiRoot, world.terrain, { landmarks: world.landmarks });
 
   world.events.on("death", (e) => {
     if (e.creature && e.creature === world.ecosystem.player && game.state === "playing") {

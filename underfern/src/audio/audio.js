@@ -1392,7 +1392,7 @@ export class AudioEngine {
   /**
    * Sample one ring of points around the listener per control tick (a full
    * sweep every ~0.5 s): nearest ocean / fresh water (+ direction), forest and
-   * swamp cover, height above ground.
+   * wet-wood cover (env.swamp: where the frogs are), height above ground.
    */
   _probeEnvironment(terrain) {
     const env = this.env;
@@ -1426,9 +1426,10 @@ export class AudioEngine {
         lake++;
         lx += dx;
         lz += dz;
-      } else if (pr.ring < 4) {
-        if (bio === "forest") pr.forest++;
-        else if (bio === "swamp") pr.swamp++;
+      } else if (pr.ring < 4 && bio === "forest") {
+        pr.forest++;
+        // Wet woods (low, by fresh water) are where the frogs are.
+        if (typeof terrain.moistureAt === "function" && terrain.moistureAt(L.x + dx * r, L.z + dz * r) > 0.7) pr.swamp++;
       }
     }
     if (pr.ring < 4) pr.n += PROBE_POINTS;
@@ -1882,10 +1883,9 @@ export class AudioEngine {
     }
     const b = typeof terrain.biomeAt === "function" ? terrain.biomeAt(x, z) : "plains";
     if (b === "rock") s.kind = "rock";
-    else if (b === "highland") s.kind = num(terrain.slopeAt?.(x, z), 0) > 0.28 ? "rock" : "grass";
-    else if (b === "beach") s.kind = "sand";
-    else if (b === "swamp") s.kind = "mud";
-    else if (b === "forest") s.kind = "forest";
+    else if (b === "coast") s.kind = num(terrain.coastAt?.(x, z), 1) > 0.45 ? "sand" : "grass";
+    else if (b === "plains" && num(terrain.slopeAt?.(x, z), 0) > 0.28) s.kind = "rock";
+    else if (b === "forest") s.kind = num(terrain.moistureAt?.(x, z), 0) > 0.78 ? "mud" : "forest";
     return s;
   }
 

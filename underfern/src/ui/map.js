@@ -1,5 +1,6 @@
 // Island map overlay (M): the terrain's shaded-relief survey plate with your
-// position, heading, view cone, recent trail, sniffed markers and your herd or pack.
+// position, heading, view cone, recent trail, sniffed markers and your herd or
+// pack, and the island's landmarks — old bones and stone wonders — engraved on it.
 //
 // The relief is rendered once (terrain.mapCanvas is expensive) — lazily, or
 // ahead of time in an idle callback — and only the small dynamic layer on top
@@ -20,13 +21,12 @@ const CARDINALS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 const BIOME_NAME = {
   ocean: "Open sea",
   lake: "Fresh water",
-  beach: "Beach",
-  plains: "Grassland",
+  coast: "Coast",
+  plains: "Plains",
   forest: "Forest",
-  swamp: "Swamp",
-  highland: "Highland",
   rock: "Bare rock",
 };
+const UPLAND_M = 45; // plains above this read as "Upland meadow"
 const MARKER_COLOR = {
   water: "#3f8f98",
   plant: "#6d8a3a",
@@ -50,10 +50,12 @@ export class MapView {
   /**
    * @param {HTMLElement} root UI root (#ui)
    * @param {object|null} terrain Terrain (needs size, mapCanvas(); heightAt/biomeAt are used when present)
+   * @param {{ landmarks?: { sites: object[] } | null }} [opts] landmarks (world/landmarks.js) to mark on the plate
    */
-  constructor(root, terrain) {
+  constructor(root, terrain, { landmarks = null } = {}) {
     this.root = root;
     this.terrain = null;
+    this.landmarks = landmarks;
     this._open = false;
     this._baseReady = false;
     this._trail = [];
@@ -206,6 +208,8 @@ export class MapView {
             <li><span class="lg lg--peak"></span>Summit · height in metres</li>
             <li><span class="lg lg--route"></span>Pass &amp; trail to a lookout</li>
             <li><span class="lg lg--cave"></span>Cave mouth &amp; passage</li>
+            <li><span class="lg lg--bone"></span>Old bones — fossil giants</li>
+            <li><span class="lg lg--stone"></span>Stone arch, sea stacks, basalt</li>
           </ul>
           <p class="map__hint"><span class="map__hint-keys"><kbd class="kbd">M</kbd> or <kbd class="kbd">Esc</kbd> to close</span><span class="map__hint-touch">Tap anywhere to close</span></p>
         </aside>
@@ -272,7 +276,9 @@ export class MapView {
     const src = this.terrain.mapCanvas(MAP_PX);
     this._base.width = src.width;
     this._base.height = src.height;
-    this._base.getContext("2d").drawImage(src, 0, 0);
+    const ctx = this._base.getContext("2d");
+    ctx.drawImage(src, 0, 0);
+    this._drawLandmarks(ctx, src.width);
     this._baseReady = true;
     this.el.classList.add("has-base");
   }
@@ -300,6 +306,90 @@ export class MapView {
   }
 
   /* --- Drawing --- */
+
+  /**
+   * The landmarks, engraved like the plate's other symbols: ivory bones with
+   * an ink outline for the fossil giants, a dark stone glyph for the arch,
+   * the stacks and the causeway, each with its name in the plate's italic.
+   */
+  _drawLandmarks(ctx, px) {
+    const sites = this.landmarks?.sites;
+    if (!sites || !sites.length) return;
+    const size = this.terrain?.size || 1600;
+    const half = size / 2;
+    const k = px / size;
+    const u = px / 768;
+    const INK = "rgba(52, 46, 36, 0.92)";
+    const PAPER = "rgba(244, 238, 222, 0.95)";
+    const BONE = "rgba(236, 226, 200, 0.98)";
+    const STONE = "rgba(92, 88, 84, 0.95)";
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    for (const s of sites) {
+      const cx = (s.x + half) * k;
+      const cy = (s.z + half) * k;
+      const r = 6.5 * u;
+      ctx.save();
+      ctx.translate(cx, cy);
+      const shape = new Path2D();
+      if (s.fossil) {
+        // A spine with three pairs of ribs.
+        shape.moveTo(-r, 0);
+        shape.lineTo(r, 0);
+        for (let i = -1; i <= 1; i++) {
+          const x = i * r * 0.55;
+          shape.moveTo(x, 0);
+          shape.quadraticCurveTo(x + r * 0.35, -r * 0.55, x - r * 0.05, -r * 0.95);
+          shape.moveTo(x, 0);
+          shape.quadraticCurveTo(x + r * 0.35, r * 0.55, x - r * 0.05, r * 0.95);
+        }
+      } else if (s.kind === "arch") {
+        shape.moveTo(-r, r * 0.7);
+        shape.lineTo(-r * 0.7, -r * 0.2);
+        shape.quadraticCurveTo(0, -r * 1.2, r * 0.7, -r * 0.2);
+        shape.lineTo(r, r * 0.7);
+      } else if (s.kind === "stacks") {
+        for (const [x, h] of [[-0.6, 0.7], [0, 1], [0.6, 0.55]]) {
+          shape.moveTo(x * r, r * 0.6);
+          shape.lineTo(x * r, r * (0.6 - 1.4 * h));
+        }
+      } else {
+        // Basalt: a tight cluster of hexagons.
+        for (const [x, y] of [[0, 0], [0.62, 0.36], [-0.62, 0.36], [0, -0.72]]) {
+          for (let j = 0; j <= 6; j++) {
+            const a = (j / 6) * Math.PI * 2 + Math.PI / 6;
+            const vx = x * r + Math.cos(a) * r * 0.36;
+            const vy = y * r + Math.sin(a) * r * 0.36;
+            if (j === 0) shape.moveTo(vx, vy);
+            else shape.lineTo(vx, vy);
+          }
+        }
+      }
+      // Paper halo, then the glyph: bone is drawn ivory over ink, stone in dark grey.
+      ctx.strokeStyle = PAPER;
+      ctx.lineWidth = 4.6 * u;
+      ctx.stroke(shape);
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = (s.fossil ? 2.8 : 2.4) * u;
+      ctx.stroke(shape);
+      ctx.strokeStyle = s.fossil ? BONE : STONE;
+      ctx.lineWidth = (s.fossil ? 1.3 : 1.2) * u;
+      ctx.stroke(shape);
+      ctx.restore();
+      // Its name, beside it.
+      ctx.font = `italic ${Math.round(9.5 * u)}px "Fraunces", Georgia, serif`;
+      ctx.textBaseline = "middle";
+      const label = s.label;
+      const lx = cx + r * 1.5;
+      ctx.lineWidth = 3 * u;
+      ctx.strokeStyle = PAPER;
+      ctx.strokeText(label, lx, cy);
+      ctx.fillStyle = INK;
+      ctx.fillText(label, lx, cy);
+    }
+    ctx.restore();
+  }
 
   _draw() {
     const ctx = this._ctx;
@@ -451,7 +541,9 @@ export class MapView {
       // Under a cave roof (and not walking on top of it): name the cave.
       const cave = t.caveAt ? t.caveAt(pos.x, pos.z) : null;
       const inside = cave && Number.isFinite(pos.y) && pos.y < t.ceilingAt(pos.x, pos.z);
-      set("biome", inside ? cave.label : BIOME_NAME[t.biomeAt(pos.x, pos.z)] || "—");
+      const biome = t.biomeAt(pos.x, pos.z);
+      const upland = biome === "plains" && t.heightAt(pos.x, pos.z) - (t.seaLevel || 0) > UPLAND_M;
+      set("biome", inside ? cave.label : upland ? "Upland meadow" : BIOME_NAME[biome] || "—");
     }
   }
 }
