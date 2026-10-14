@@ -482,7 +482,7 @@ export class Creature {
     let sh = 0;
     const ceil = t.ceilingAt(p.x, p.z);
     if (ceil !== Infinity && p.y < ceil) sh = t.shelterAt(p.x, p.z);
-    const v = 1 - 0.8 * sh;
+    const v = 1 - 0.7 * sh;
     if (Math.abs(v - this._shade) > 0.01) {
       this._shade = v;
       m.setShade(v);

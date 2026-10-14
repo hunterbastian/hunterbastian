@@ -133,6 +133,23 @@ North Africa (Kem Kem and Bahariya) 99–93 million years ago, and Tyrannosaurus
 was among the very last dinosaurs, in the Hell Creek Formation 68–66 million years
 ago. Allosaurus is still Utah's state fossil.
 
+### The island
+
+Ochre plains, conifer forest, swamps, freshwater lakes and rivers ring a central
+**massif**: three or four horn peaks up to about 190 m, joined by a jagged ridge and
+walled with cliff bands. Cliffs are too steep to climb. The ways up are a pass valley
+or two that cut right through the range, and switchback trails that climb to
+**lookouts** high on the ridge, with the whole island below.
+
+There are **caves** to find: a great cavern with a skylight, a tunnel with a mouth at
+each end and a few small dens. A den's mouth is barely 3 m high, so a raptor can rest
+inside but an adult Allosaurus can't follow it in, and nothing the size of a
+Brontosaurus gets into any of them. It's dark and echoing inside, and nothing grows or
+spawns there.
+
+The map (M) marks the summits with their heights, the passes, the trails to the
+lookouts and the cave mouths. Every island comes from its seed (`?seed=N`).
+
 ## Controls
 
 The in-game **Field notes** (H, or from the pause menu) show the same list.
@@ -248,9 +265,10 @@ Plain ES modules under `src/`, loaded by `index.html` through an import map:
 - `core/screen.js`: the app frame (`#app`). On a phone held upright it lays the
   game out at landscape size and rotates it 90°; everything that reads pointer
   positions or the screen size goes through it
-- `world/`: terrain (heightfield island with lakes and rivers, procedural surface
-  shader), water, sky and day/night, vegetation (instanced forests and food
-  plants), wind
+- `world/`: terrain (heightfield island with a mountain massif, passes, trails,
+  lakes and rivers, procedural surface shader), caves (carved floors under rock
+  vaults, with a clearance and darkness query), water, sky and day/night,
+  vegetation (instanced forests and food plants), wind
 - `creatures/`:
   - species data and the procedural skinned dinosaur models
   - the shared survival simulation (`creature.js`)

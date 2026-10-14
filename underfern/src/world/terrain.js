@@ -299,6 +299,23 @@ function smoothProf(prof, r) {
 const TRAIL_DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1], [2, 1], [2, -1], [-2, 1], [-2, -1], [1, 2], [1, -2], [-1, 2], [-1, -2]].map(
   ([x, z]) => [x, z, Math.atan2(x, z)]
 );
+// Flat tables for the trail search's inner loop: offsets, lengths (cells),
+// the midpoint cell a knight move must not hop over, and the turning
+// penalty (radians past a gentle bend) between every pair of headings.
+const TD_N = TRAIL_DIRS.length;
+const TD_X = Int32Array.from(TRAIL_DIRS, (d) => d[0]);
+const TD_Z = Int32Array.from(TRAIL_DIRS, (d) => d[1]);
+const TD_LEN = Float64Array.from(TRAIL_DIRS, (d) => Math.hypot(d[0], d[1]));
+const TD_MX = Int32Array.from(TRAIL_DIRS, (d) => Math.round(d[0] / 2));
+const TD_MZ = Int32Array.from(TRAIL_DIRS, (d) => Math.round(d[1] / 2));
+const TD_TURN = new Float64Array(TD_N * TD_N);
+for (let a = 0; a < TD_N; a++) {
+  for (let b = 0; b < TD_N; b++) {
+    let turn = Math.abs(TRAIL_DIRS[b][2] - TRAIL_DIRS[a][2]);
+    if (turn > Math.PI) turn = 2 * Math.PI - turn;
+    TD_TURN[a * TD_N + b] = Math.max(0, turn - 0.42);
+  }
+}
 
 /** Minimal binary min-heap of (key, value) pairs for the river path search. */
 class MinHeap {
@@ -1412,12 +1429,28 @@ float terDepth = max(-terAbove, 0.0);
 terAlb = mix(terAlb, terAlb * vec3(0.6, 0.84, 0.82), smoothstep(0.0, 1.2, terDepth));
 terAlb = mix(terAlb, terDeep, smoothstep(0.3, 7.0, terDepth) * 0.85);
 #ifdef TER_CAVE
-// Baked cave light: how much daylight reaches this far from a mouth or skylight.
-terAlb *= vCave;
+// Deeper in, the crevices darken (the baked light itself is applied after lighting).
 terAO *= mix(0.55, 1.0, vCave);
 #endif
 
 diffuseColor.rgb *= terAlb;
+`;
+
+// Caves only: the baked light (aCave — how much daylight reaches this far from
+// a mouth or skylight) scales the lit colour, and a dim fill from the sky's
+// hemisphere light stands in for light bouncing in, so deep walls stay
+// readable instead of black (and follow day and night).
+const FRAG_CAVE_LIGHT = /* glsl */ `
+#ifdef TER_CAVE
+{
+#if NUM_HEMI_LIGHTS > 0
+  vec3 terFill = 0.5 * (hemisphereLights[0].skyColor + hemisphereLights[0].groundColor);
+#else
+  vec3 terFill = vec3(0.4);
+#endif
+  outgoingLight = outgoingLight * vCave + diffuseColor.rgb * terFill * (0.8 * (1.0 - vCave));
+}
+#endif
 `;
 
 /**
@@ -1449,7 +1482,8 @@ function createTerrainMaterial(textures, seaLevel) {
       .replace(
         "#include <aomap_fragment>",
         "reflectedLight.indirectDiffuse *= terAO;\nreflectedLight.indirectSpecular *= mix(1.0, terAO, 0.7);"
-      );
+      )
+      .replace("#include <opaque_fragment>", `${FRAG_CAVE_LIGHT}\n#include <opaque_fragment>`);
   };
   mat.customProgramCacheKey = () => "sauria-terrain-v3";
   return mat;
@@ -1568,6 +1602,8 @@ export class Terrain {
         this._topH[i] += seaLevel;
       }
     }
+    // From here on heightAt reads cave floors from the cave index.
+    this._caveFloor = !!(this._caveIndex && this.caves.length);
 
     t = now();
     this._collectShore();
@@ -1612,9 +1648,17 @@ export class Terrain {
   /**
    * Ground height at a world position. Interpolates over the same two
    * triangles per cell the mesh is drawn with, so feet sit exactly on the
-   * visible surface. Off the tile → deep ocean.
+   * visible surface; under a cave's roof it is the cave's floor (as its
+   * mesh draws it — see surfaceAt / groundAt for the hillside on top).
+   * Off the tile → deep ocean.
    */
   heightAt(x, z) {
+    const h = this._gridHeightAt(x, z);
+    return this._caveFloor ? this._caveIndex.floorAt(x, z, h - this.seaLevel) + this.seaLevel : h;
+  }
+
+  /** The heightfield alone, interpolated on the mesh's own triangles. */
+  _gridHeightAt(x, z) {
     const res = this.resolution;
     const fx = (x + this.half) / this.cellSize;
     const fz = (z + this.half) / this.cellSize;
@@ -2395,6 +2439,7 @@ export class Terrain {
     let mtn = 0;
     let hm = 0;
     let mm = 0;
+    let rough = 0;
     let sw = 0;
     if (m < 0) {
       // Sea floor: a shallow shelf off the beaches, then a drop to the deep.
@@ -2443,6 +2488,7 @@ export class Terrain {
         }
         mtn = this._mountain(g, x, z, wx, wz, sd, dd, st, side, w, wa, wb) * smoothstep(0, 14, m);
         mm = f.mm;
+        rough = f.rough;
       }
 
       // Swampy lowlands: flatten toward just above sea level. Only ground
@@ -2462,6 +2508,7 @@ export class Terrain {
     f.mtn = mtn * (1 - edge);
     f.hm = hm;
     f.mm = mm;
+    f.rough = rough;
     f.sw = sw;
     f.cliff = cliff;
     f.cliffN = cliffN;
@@ -2722,6 +2769,7 @@ export class Terrain {
       mtn = smax(mtn, pk, 16);
       mm = Math.max(mm, Math.min(1, pk / 40));
     }
+    let rough = 0;
     if (mtn > 0.5) {
       // Rough crags along crests and summits.
       const crag = ridged2D(g.nCrag, wx * 0.0075, wz * 0.0075, 2);
@@ -2732,6 +2780,8 @@ export class Terrain {
       const faces = smoothstep(-0.35, 0.25, g.nBand(x * 0.011 + 31.7, z * 0.011 - 12.9));
       const sideK = lerp(0.7, steep ? 1 : 0.4, smoothstep(0, 40, dc));
       const zone = clamp(band * sideK * smoothstep(0.2, 0.55, mm) + 0.8 * smoothstep(0.3, 0.7, pkF) * faces, 0, 1);
+      // Where the rock is sheer (bands, the horns' faces) the vertices add crags.
+      rough = clamp(zone + smoothstep(0.3, 0.7, pkF), 0, 1) * smoothstep(6, 20, mtn);
       if (zone > 0.01 && mtn > 6) {
         const step = 15;
         const wander = 5 * g.nBand(x * 0.019 + 7.7, z * 0.019 - 3.1) + 3 * band;
@@ -2742,6 +2792,7 @@ export class Terrain {
       }
     }
     f.mm = mm;
+    f.rough = rough;
     return mtn;
   }
 
@@ -3040,6 +3091,8 @@ export class Terrain {
       g.routes.push(tr, pad);
       g.lookouts.push({ x: c.x, z: c.z, h: padH, trail: tr });
     }
+    g.trailBuf = null; // the search's state buffers are big: let them go
+    g.trailHeur = null;
     this._applyRoutesToLayout(g, (k) => k !== "valley");
   }
 
@@ -3159,17 +3212,61 @@ export class Terrain {
     return null;
   }
 
-  /** One direction-aware Dijkstra pass (state = node × heading) for _trailSearch. */
+  /**
+   * Lower bound on a trail's cost from every layout node: the plain path
+   * length (metres, same 16 moves) to the nearest reachable node. Every leg
+   * costs at least its length, so this is a consistent A* heuristic and the
+   * search finds an equally cheap trail while visiting a fraction of the states.
+   */
+  _trailHeuristic(g, reachable) {
+    if (g.trailHeur && g.trailHeur.src === reachable) return g.trailHeur.h;
+    const L = g.lgrid;
+    const LN = L.n;
+    const h = new Float64Array(LN * LN).fill(Infinity);
+    const heap = new MinHeap();
+    for (let i = 0; i < LN * LN; i++) {
+      if (reachable[i]) {
+        h[i] = 0;
+        heap.push(0, i);
+      }
+    }
+    while (heap.size) {
+      const key = heap.keys[0];
+      const i = heap.pop();
+      if (key > h[i]) continue;
+      const x = i % LN;
+      const z = (i / LN) | 0;
+      for (let k = 0; k < TD_N; k++) {
+        const mx = x + TD_X[k];
+        const mz = z + TD_Z[k];
+        if (mx < 0 || mz < 0 || mx >= LN || mz >= LN) continue;
+        const m = mz * LN + mx;
+        const nd = key + TD_LEN[k] * L.step;
+        if (nd < h[m]) {
+          h[m] = nd;
+          heap.push(nd, m);
+        }
+      }
+    }
+    // A hair under the exact length so rounding never overestimates.
+    for (let i = 0; i < LN * LN; i++) h[i] *= 0.9999;
+    g.trailHeur = { src: reachable, h };
+    return h;
+  }
+
+  /** One direction-aware A* pass (state = node × heading) for _trailSearch. */
   _trailSearchOnce(g, x0, z0, reachable, gmax, turnCost) {
     const L = g.lgrid;
     const LN = L.n;
     const H = g.lH;
-    const sx = clamp(Math.round((x0 - L.origin) / L.step), 1, LN - 2);
-    const sz = clamp(Math.round((z0 - L.origin) / L.step), 1, LN - 2);
+    const step = L.step;
+    const sx = clamp(Math.round((x0 - L.origin) / step), 1, LN - 2);
+    const sz = clamp(Math.round((z0 - L.origin) / step), 1, LN - 2);
     const start = sz * LN + sx;
-    const ND = TRAIL_DIRS.length;
+    const ND = TD_N;
+    const est = this._trailHeuristic(g, reachable);
     // One pair of big state buffers per island, reused by every search.
-    if (!g.trailBuf) g.trailBuf = { dist: new Float32Array(LN * LN * ND), prev: new Int32Array(LN * LN * ND) };
+    if (!g.trailBuf) g.trailBuf = { dist: new Float64Array(LN * LN * ND), prev: new Int32Array(LN * LN * ND) };
     const { dist, prev } = g.trailBuf;
     dist.fill(Infinity);
     prev.fill(-1);
@@ -3177,53 +3274,50 @@ export class Terrain {
     // State ND·node + dir; the start may leave in any direction.
     for (let d = 0; d < ND; d++) {
       dist[start * ND + d] = 0;
-      heap.push(0, start * ND + d);
+      heap.push(est[start], start * ND + d);
     }
     let goal = -1;
     let visited = 0;
     while (heap.size) {
       const key = heap.keys[0];
       const state = heap.pop();
-      if (key > dist[state]) continue; // a stale entry: this state was reached cheaper since
-      if (++visited > 260000) break;
       const node = (state / ND) | 0;
+      const d0 = dist[state];
+      if (key > d0 + est[node]) continue; // a stale entry: this state was reached cheaper since
+      if (++visited > 260000) break;
       const dir = state - node * ND;
       if (reachable[node] && node !== start) {
         goal = state;
         break;
       }
-      const d0 = dist[state];
       const nx = node % LN;
       const nz = (node / LN) | 0;
       const h0 = H[node];
-      const a0 = TRAIL_DIRS[dir][2];
+      const turns = dir * ND;
+      const first = node === start;
       for (let k = 0; k < ND; k++) {
-        const [ox, oz, ak] = TRAIL_DIRS[k];
-        const mx = nx + ox;
-        const mz = nz + oz;
+        const mx = nx + TD_X[k];
+        const mz = nz + TD_Z[k];
         if (mx < 1 || mz < 1 || mx >= LN - 1 || mz >= LN - 1) continue;
         const m = mz * LN + mx;
         const h1 = H[m];
         if (h1 < 0.8) continue;
-        const len = Math.hypot(ox, oz) * L.step;
+        const len = TD_LEN[k] * step;
         const gr = Math.abs(h1 - h0) / len;
         // Midpoint check so knight moves don't hop over a crest or a gully.
-        const hm = (h0 + h1) * 0.5;
-        const hmid = H[(nz + Math.round(oz / 2)) * LN + nx + Math.round(ox / 2)];
-        const bump = Math.abs(hmid - hm) / len;
+        const hmid = H[(nz + TD_MZ[k]) * LN + nx + TD_MX[k]];
+        const bump = Math.abs(hmid - (h0 + h1) * 0.5) / len;
         // Gentle legs are cheap; anything steeper than the trail may be is a
         // cliff the carve will have to cut a ramp through — only as a last resort.
         const r = Math.max(gr, bump * 2) / gmax;
         if (r > 12) continue;
-        let turn = node === start ? 0 : Math.abs(ak - a0);
-        if (turn > Math.PI) turn = TAU - turn;
-        const cost = len * (1 + 1.5 * r * r + (r > 1 ? 40 * (r - 1) * (r - 1) : 0)) + Math.max(0, turn - 0.42) * turnCost;
+        const cost = len * (1 + 1.5 * r * r + (r > 1 ? 40 * (r - 1) * (r - 1) : 0)) + (first ? 0 : TD_TURN[turns + k] * turnCost);
         const nd = d0 + cost;
         const ms = m * ND + k;
         if (nd < dist[ms]) {
           dist[ms] = nd;
           prev[ms] = state;
-          heap.push(nd, ms);
+          heap.push(nd + est[m], ms);
         }
       }
     }
@@ -3231,7 +3325,7 @@ export class Terrain {
     const pts = [];
     for (let s = goal; s >= 0; s = prev[s]) {
       const p = (s / ND) | 0;
-      pts.push(L.origin + (p % LN) * L.step, L.origin + ((p / LN) | 0) * L.step);
+      pts.push(L.origin + (p % LN) * step, L.origin + ((p / LN) | 0) * step);
       if (p === start) break;
     }
     // pts runs goal → start; flip so a trail starts at its lookout.
@@ -3649,6 +3743,11 @@ export class Terrain {
           const zone = 0.4 + 6.5 * f.mm * f.mm + 1.6 * f.hm + 1.3 * f.cliff;
           const amp = zone * region * smoothstep(0.15, 0.7, slope) * fall * smoothstep(1.5, 9, h);
           if (amp > 0.04) h += gullies(x, z, gx, gz, amp, gullyMinL);
+          // Crags on the sheer rock (cliff bands, the horns' faces): mid-
+          // frequency relief breaks up their big flat facets. Never near the
+          // trails and ledges (fall), so they keep their footing.
+          const crag = f.rough * fall;
+          if (crag > 0.02) h += crag * (3 + 3 * f.mm) * (ridged2D(g.nCrag, x * 0.03 + 9.1, z * 0.03 - 3.7, 3) - 0.45);
         }
         H[i] = h;
       }

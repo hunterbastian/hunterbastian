@@ -116,6 +116,7 @@ function rasterLine(pts, cum, radius, grid, dist, sOut, side) {
  * @returns {object[]} cave designs
  */
 export function planCaves(ctx) {
+  ctx = { ...ctx, avoided: avoidIndex(ctx.avoid) };
   const rng = makeRng(hash("underfern-caves", "layout", ctx.seed));
   const noise = createNoise2D(hash("underfern-caves", "bend", ctx.seed));
   const G = ctx.ground;
@@ -146,7 +147,7 @@ export function planCaves(ctx) {
     }
     if (bestRise < 8) continue;
     if (!ctx.reach(x, z)) continue;
-    if (ctx.avoid.some((o) => Math.hypot(o.x - x, o.z - z) < o.r)) continue;
+    if (ctx.avoided(x, z, 1)) continue;
     cands.push({ x, z, h, a: bestA, rise: bestRise, mtn: ctx.mountain(x, z) });
   }
 
@@ -184,10 +185,57 @@ export function planCaves(ctx) {
   return caves;
 }
 
+/** [minX, minZ, maxX, maxZ] of a flat x, z point list. */
+function boxOf(p) {
+  const b = [Infinity, Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < p.length; i += 2) {
+    b[0] = Math.min(b[0], p[i]);
+    b[1] = Math.min(b[1], p[i + 1]);
+    b[2] = Math.max(b[2], p[i]);
+    b[3] = Math.max(b[3], p[i + 1]);
+  }
+  return b;
+}
+
+/**
+ * `avoided(x, z, f)`: is (x, z) within f × r of any { x, z, r } in `list`?
+ * Exact, through 50 m buckets so the hundreds of trail points stay cheap.
+ */
+function avoidIndex(list) {
+  const B = 50;
+  const buckets = new Map();
+  const key = (bx, bz) => bx * 65536 + bz;
+  for (const o of list) {
+    for (let bz = Math.floor((o.z - o.r) / B); bz <= Math.floor((o.z + o.r) / B); bz++) {
+      for (let bx = Math.floor((o.x - o.r) / B); bx <= Math.floor((o.x + o.r) / B); bx++) {
+        const k = key(bx, bz);
+        let a = buckets.get(k);
+        if (!a) buckets.set(k, (a = []));
+        a.push(o);
+      }
+    }
+  }
+  return (x, z, f) => {
+    const a = buckets.get(key(Math.floor(x / B), Math.floor(z / B)));
+    if (!a) return false;
+    for (let i = 0; i < a.length; i++) {
+      const o = a[i];
+      const dx = o.x - x;
+      const dz = o.z - z;
+      const r = o.r * f;
+      if (dx * dx + dz * dz < r * r) return true;
+    }
+    return false;
+  };
+}
+
 /** True if two caves' centrelines pass within `d` metres. */
 function pathsClose(a, b, d) {
   const pa = a.pts;
   const pb = b.pts;
+  const ba = a._box || (a._box = boxOf(pa));
+  const bb = boxOf(pb);
+  if (ba[0] - d > bb[2] || bb[0] - d > ba[2] || ba[1] - d > bb[3] || bb[1] - d > ba[3]) return false;
   for (let i = 0; i < pa.length; i += 6) {
     for (let j = 0; j < pb.length; j += 6) {
       if (Math.hypot(pa[i] - pb[j], pa[i + 1] - pb[j + 1]) < d) return true;
@@ -343,7 +391,7 @@ function designCave(ctx, noise, kind, c, theta, rng, turnDir = 1) {
   for (let i = 0; i < n; i += 2) {
     const x = pts[i * 2];
     const z = pts[i * 2 + 1];
-    if (ctx.avoid.some((o) => Math.hypot(o.x - x, o.z - z) < o.r * 0.7)) return null;
+    if (ctx.avoided(x, z, 0.7)) return null;
     for (let k = 0; k < 4; k++) {
       const a = (k / 4) * TAU + 0.4;
       if (G(x + Math.cos(a) * (W[i] + 14), z + Math.sin(a) * (W[i] + 14)) < 0.8) return null;
@@ -457,36 +505,44 @@ export function carveCaves(caves, T) {
     const R = wMax + FLOOR_MARGIN + 34;
     const cum = new Float64Array(cave.n);
     for (let i = 0; i < cave.n; i++) cum[i] = i * CAVE_STEP;
-    dist.fill(1e9);
+    // Only the grid points around this cave: its path's box grown by R.
+    const [bx0, bz0, bx1, bz1] = boxOf(cave.pts);
+    const ix0 = Math.max(0, Math.floor((bx0 - R - grid.origin) / grid.step));
+    const iz0 = Math.max(0, Math.floor((bz0 - R - grid.origin) / grid.step));
+    const ix1 = Math.min(n - 1, Math.ceil((bx1 + R - grid.origin) / grid.step));
+    const iz1 = Math.min(n - 1, Math.ceil((bz1 + R - grid.origin) / grid.step));
+    for (let iz = iz0; iz <= iz1; iz++) dist.fill(1e9, iz * n + ix0, iz * n + ix1 + 1);
     rasterLine(cave.pts, cum, R, grid, dist, sArr, side);
     cave.reach = R;
-    for (let i = 0; i < N; i++) {
-      const d = dist[i];
-      if (d >= R) continue;
-      const s = sArr[i];
-      const F = at(cave.F, s);
-      const W = at(cave.W, s);
-      const C = at(cave.C, s);
-      const T0 = F + Math.max(0, d - (W + FLOOR_MARGIN)) * WALL_SLOPE;
-      const roofed = roofedAt(cave, s);
-      const h0 = H0[i];
-      const cut = Math.min(h0, T0);
-      if (cut < H[i]) H[i] = cut;
-      if (roofed) {
-        // Keep the hillside, with at least a skin of rock over the vault.
-        const crown = F + vaultHeight(W, C, d) + 1.3;
-        const t = Math.max(h0, d < W + 1.5 ? crown : -Infinity);
-        top[i] = Math.max(top[i], t);
-        surf[i] = top[i];
-        zone[i] = 2;
-      } else {
-        surf[i] = Math.min(surf[i], cut);
-        if (d < W + FLOOR_MARGIN + 6 && zone[i] < 1) zone[i] = 1;
-      }
-      if (d < (vCave[i] >= 0 ? Math.abs(vD[i]) : Infinity) || vCave[i] < 0) {
-        vCave[i] = cave.id;
-        vS[i] = s;
-        vD[i] = d * side[i];
+    for (let iz = iz0; iz <= iz1; iz++) {
+      for (let i = iz * n + ix0, iEnd = iz * n + ix1; i <= iEnd; i++) {
+        const d = dist[i];
+        if (d >= R) continue;
+        const s = sArr[i];
+        const F = at(cave.F, s);
+        const W = at(cave.W, s);
+        const C = at(cave.C, s);
+        const T0 = F + Math.max(0, d - (W + FLOOR_MARGIN)) * WALL_SLOPE;
+        const roofed = roofedAt(cave, s);
+        const h0 = H0[i];
+        const cut = Math.min(h0, T0);
+        if (cut < H[i]) H[i] = cut;
+        if (roofed) {
+          // Keep the hillside, with at least a skin of rock over the vault.
+          const crown = F + vaultHeight(W, C, d) + 1.3;
+          const t = Math.max(h0, d < W + 1.5 ? crown : -Infinity);
+          top[i] = Math.max(top[i], t);
+          surf[i] = top[i];
+          zone[i] = 2;
+        } else {
+          surf[i] = Math.min(surf[i], cut);
+          if (d < W + FLOOR_MARGIN + 6 && zone[i] < 1) zone[i] = 1;
+        }
+        if (d < (vCave[i] >= 0 ? Math.abs(vD[i]) : Infinity) || vCave[i] < 0) {
+          vCave[i] = cave.id;
+          vS[i] = s;
+          vD[i] = d * side[i];
+        }
       }
     }
   }
@@ -500,6 +556,7 @@ export function carveCaves(caves, T) {
   for (let iz = 0; iz < res; iz++) {
     for (let ix = 0; ix < res; ix++) {
       const a = iz * n + ix;
+      if (vCave[a] < 0 && vCave[a + 1] < 0 && vCave[a + n] < 0 && vCave[a + n + 1] < 0) continue;
       const corners = [a, a + 1, a + n, a + n + 1];
       let id = -1;
       for (const v of corners) if (vCave[v] >= 0) id = vCave[v];
@@ -623,6 +680,7 @@ export class CaveIndex {
       const floor = new Float32Array(nx * nz);
       const roof = new Uint8Array(nx * nz);
       const dark = new Float32Array(nx * nz);
+      const fw = new Float32Array(nx * nz);
       const zoneM = new Uint8Array(nx * nz);
       for (let iz = 0; iz < nz; iz++) {
         for (let ix = 0; ix < nx; ix++) {
@@ -640,6 +698,12 @@ export class CaveIndex {
           zoneM[o] = 2;
           roof[o] = 1;
           ceil[o] = F + vaultHeight(W, C, d);
+          // Under the roof the ground is the cave's own floor (what its mesh
+          // shows), whatever the heightfield's resolution: eased in over the
+          // first metres past a mouth and out beyond the vault's walls.
+          let din = Infinity;
+          for (const m of cave.mouths) din = Math.min(din, (s - m.s) * m.dir);
+          fw[o] = smoothstep(0, 3, din) * smoothstep(W + 2.5, W + 0.5, d);
           let dk = caveDark(cave, s);
           const px = x0 + ix * FIELD_STEP;
           const pz = z0 + iz * FIELD_STEP;
@@ -652,8 +716,30 @@ export class CaveIndex {
           dark[o] = dk;
         }
       }
-      this.items.push({ cave, x0, z0, x1, z1, nx, nz, ceil, floor, roof, dark, zone: zoneM });
+      this.items.push({ cave, x0, z0, x1, z1, nx, nz, ceil, floor, roof, dark, fw, zone: zoneM });
     }
+    // One box around them all for a quick miss.
+    this.box = [Infinity, Infinity, -Infinity, -Infinity];
+    for (const c of this.items) {
+      this.box[0] = Math.min(this.box[0], c.x0 * k);
+      this.box[1] = Math.min(this.box[1], c.z0 * k);
+      this.box[2] = Math.max(this.box[2], c.x1 * k);
+      this.box[3] = Math.max(this.box[3], c.z1 * k);
+    }
+  }
+
+  /**
+   * The ground at world (x, z) given the heightfield's `h` (both relative to
+   * the sea): inside a cave its floor, so the floor doesn't depend on the
+   * mesh resolution; `h` everywhere else.
+   */
+  floorAt(x, z, h) {
+    const b = this.box;
+    if (!(x > b[0] && x < b[2] && z > b[1] && z < b[3])) return h;
+    const c = this._find(x, z);
+    if (!c) return h;
+    const w = this._sample(c, c.fw, x, z);
+    return w > 0 ? h + (this._sample(c, c.floor, x, z) - h) * w : h;
   }
 
   /** The cave grid entry containing world (x, z), or null. */
@@ -693,7 +779,28 @@ export class CaveIndex {
   ceilingAt(x, z) {
     const c = this._find(x, z);
     if (!c || !this._nearest(c, c.roof, x, z)) return Infinity;
-    return this._sample(c, c.ceil, x, z);
+    // Bilinear over the roofed corners only: at the edge of the roof (a mouth,
+    // a skylight) an open neighbour has no ceiling to blend in.
+    const fx = clamp((x / this.k - c.x0) / FIELD_STEP, 0, c.nx - 1.001);
+    const fz = clamp((z / this.k - c.z0) / FIELD_STEP, 0, c.nz - 1.001);
+    const ix = fx | 0;
+    const iz = fz | 0;
+    const tx = fx - ix;
+    const tz = fz - iz;
+    const a = iz * c.nx + ix;
+    let sw = 0;
+    let sv = 0;
+    const add = (i, w) => {
+      if (c.roof[i] && w > 0) {
+        sw += w;
+        sv += c.ceil[i] * w;
+      }
+    };
+    add(a, (1 - tx) * (1 - tz));
+    add(a + 1, tx * (1 - tz));
+    add(a + c.nx, (1 - tx) * tz);
+    add(a + c.nx + 1, tx * tz);
+    return sw > 0 ? sv / sw : this._nearest(c, c.ceil, x, z);
   }
 
   /** 0 in the open … 1 in the darkest depths of a cave. */
@@ -1025,9 +1132,14 @@ function buildMouth(cave, m, B, T, rock3) {
   const apron = [];
   for (let r = 0; r < ROWS_A; r++) {
     const s = sFront + (sFace - sFront) * (r / (ROWS_A - 1));
+    // The last rows settle exactly onto the cave's floor where the floor
+    // meets them (a crack of a few centimetres would show the sky).
+    const toFloor = 1 - smoothstep(0, 2.5, Math.abs(s - sFace));
+    const Fs = at(cave.F, s);
     for (let c = 0; c <= COLS; c++) {
       const [x, z] = pAt(s, lat(c));
-      const y = T.sample(T.heights, x, z) - SINK;
+      let y = T.sample(T.heights, x, z) - SINK;
+      if (Math.abs(lat(c)) <= fr.W + 0.71) y += (Fs - y) * toFloor;
       const [wa, wb] = T.weights(x, z);
       apron.push(B.v(x, y, z, wa, wb, 1, T.normalAt(T.heights, x, z)));
     }
@@ -1051,8 +1163,31 @@ function buildMouth(cave, m, B, T, rock3) {
 
   // Face: per column, from the apron's back edge (or the arch, inside the
   // opening) up to the skirt's front edge, leaning back into the hill.
-  const ROWS_F = 7;
+  const ROWS_F = 9;
   const face = [];
+  // Rock relief fades out within this many metres of the face's edges (the
+  // arch, the apron, the skirt) — by distance, not by row, so neighbouring
+  // columns of very different heights bulge alike and no crease shows.
+  const EDGE = 1.6;
+  // The arch as a polyline (lateral, height) for the fade's distance to it.
+  const arch = [];
+  for (let ca = 0; ca <= VA; ca++) {
+    const [ad, ay] = archPoint(fr.W, fr.C, -1 + (2 * ca) / VA);
+    arch.push(ad, fr.F + ay);
+  }
+  const toArch = (d, y) => {
+    let best = Infinity;
+    for (let i = 0; i < arch.length - 2; i += 2) {
+      const ax = arch[i];
+      const ay = arch[i + 1];
+      const vx = arch[i + 2] - ax;
+      const vy = arch[i + 3] - ay;
+      const l2 = vx * vx + vy * vy;
+      const t = l2 > 0 ? clamp(((d - ax) * vx + (y - ay) * vy) / l2, 0, 1) : 0;
+      best = Math.min(best, Math.hypot(d - ax - vx * t, y - ay - vy * t));
+    }
+    return best;
+  };
   for (let c = 0; c <= COLS; c++) {
     const d = lat(c);
     const [bx, bz] = pAt(sFace, d);
@@ -1070,9 +1205,14 @@ function buildMouth(cave, m, B, T, rock3) {
       let x = lerp(bx, tx, u);
       let z = lerp(bz, tz, u);
       let y = lerp(by, Math.max(ty, by), u);
-      // Rugged rock, pushed along the cave axis (never at the joined edges).
-      const e = Math.sin(Math.PI * u);
-      const disp = rock3(x, y, z) * 0.55 * e * smoothstep(0, 1.5, Math.abs(ty - by));
+      // Rugged rock, pushed along the cave axis (never at the joined edges):
+      // fine crags plus broad bulges and hollows so the face isn't a wall.
+      const top = Math.max(ty, by);
+      // Faded by distance to the arch in the face's plane, so columns either
+      // side of the arch's foot bulge alike (no crease up the face).
+      const ta = toArch(d, y);
+      const e = smoothstep(0, EDGE, inside ? ta : Math.min(ta, y - by)) * smoothstep(0, EDGE, top - y);
+      const disp = (rock3(x, y, z) * 0.55 + rock3(x * 0.3 + 17, y * 0.3, z * 0.3) * 1.3) * e;
       x -= fr.tx * dir * disp;
       z -= fr.tz * dir * disp;
       const ao = inside ? 0.55 + 0.35 * u : 0.75 + 0.2 * u;

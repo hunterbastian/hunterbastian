@@ -529,6 +529,9 @@ test("caves: 3–6 of different sizes — dens, a tunnel with two mouths, a cave
       assert.near(a.entrances[k].x, b.entrances[k].x, 1e-6, "same mouth x:");
       assert.near(a.entrances[k].z, b.entrances[k].z, 1e-6, "same mouth z:");
     }
+    // Inside, the ground is the cave's own floor at any mesh resolution.
+    assert.near(t.heightAt(a.deep.x, a.deep.z), lo.heightAt(a.deep.x, a.deep.z), 0.02, `${a.kind} ${a.id}: same floor deep inside:`);
+    assert.near(t.clearanceAt(a.deep.x, a.deep.z), lo.clearanceAt(a.deep.x, a.deep.z), 0.02, `${a.kind} ${a.id}: same headroom:`);
   }
 });
 
@@ -649,7 +652,8 @@ test("caves: a raptor walks into a den; a Brontosaurus (and an adult Allosaurus)
     walkAlong(raptor, intoCave(den), 25);
     assert(t.inCave(raptor.position.x, raptor.position.z), "the raptor made it inside");
     assert(raptor.position.y < t.ceilingAt(raptor.position.x, raptor.position.z), "…and stands under the roof, on the floor");
-    assert(raptor._shade < 0.9, "the den darkens it");
+    const sh = t.shelterAt(raptor.position.x, raptor.position.z);
+    assert(sh > 0.05 && raptor._shade < 1 - 0.5 * sh, `the den darkens it (shelter ${sh.toFixed(2)}, shade ${raptor._shade.toFixed(2)}, ${Math.hypot(raptor.position.x - e.x, raptor.position.z - e.z).toFixed(1)} m in)`);
     eco.remove(raptor);
     for (const id of ["brontosaurus", "allosaurus"]) {
       const big = at(id);
