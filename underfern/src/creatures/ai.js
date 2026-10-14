@@ -123,6 +123,16 @@ function playerIn(g) {
   return null;
 }
 
+// A herd's daily round, by day phase (0.25 sunrise, 0.75 sunset): down to the
+// water at dawn, out onto open plains through the day, back to the forest edge
+// for the evening. Null outside those windows (night: the herd sleeps).
+function routeLeg(phase) {
+  if (phase >= 0.22 && phase < 0.32) return "water";
+  if (phase >= 0.36 && phase < 0.6) return "graze";
+  if (phase >= 0.64 && phase < 0.76) return "shelter";
+  return null;
+}
+
 // How far one sees into a biome (forest and swamp hide things).
 function coverOf(biome) {
   if (biome === "forest") return 0.55;
@@ -343,6 +353,7 @@ export class Brain {
     this._eatTry = 0;
     this._aidUntil = -1e9;
     this._regroupUntil = -1e9; // leading the player's group: walk back to it until then
+    this._routeKey = ""; // "day:leg" of the daily-round leg already set off on
 
     // Routine.
     this._activityUntil = 0;
@@ -1020,8 +1031,9 @@ export class Brain {
     const L = this._leader();
     const lb = L && L.brain;
 
-    // Thirst — and herd mates drink when their leader does.
-    const herdDrinks = lb && lb.state === "drink" && c.water < 85 && this._leaderD < this._herdR * 2.5;
+    // Thirst — and herd mates drink when their leader does (the player too).
+    const leaderDrinks = lb ? lb.state === "drink" : !!(L && L.drinking);
+    const herdDrinks = leaderDrinks && c.water < 85 && this._leaderD < this._herdR * 2.5;
     if (now > this._noWaterUntil && (c.water < 40 || (this.state === "drink" && c.water < 97) || herdDrinks)) {
       return this._startDrink();
     }
@@ -1039,10 +1051,13 @@ export class Brain {
     }
     this._gatherT = 0;
 
+    // A player leading the herd lies down: the herd settles round it.
+    if (L && !lb && L.resting && this._leaderD < this._herdR * 1.5) return this._enter("rest", null);
+
     // Keep up with the herd.
     if (L) {
       // Follow while the leader is travelling; settle (graze) once it stops.
-      const moving = num(L.speed, 0) > 0.6 && lb && lb.state !== "graze" && lb.state !== "idle";
+      const moving = num(L.speed, 0) > 0.6 && (!lb || (lb.state !== "graze" && lb.state !== "idle"));
       const enter = this._herdR + 8;
       const exit = this._herdR * 0.8;
       if (this.state === "follow" ? this._leaderD > exit || moving : this._leaderD > enter || (moving && this._leaderD > this._herdR * 0.6)) {
@@ -1075,6 +1090,7 @@ export class Brain {
   _pickHerbivoreActivity() {
     const c = this.creature;
     const now = this._now;
+    if (this.group && this._dailyRound()) return;
     const r = this.rng();
     // A leader settles the herd where there's browse while any of it is hungry.
     const hungry = Math.min(c.food, this._herdFood) < 97;
@@ -1212,7 +1228,8 @@ export class Brain {
     const L = this._leader();
     const lb = L && L.brain;
     if (L) {
-      if (lb && lb.state === "rest" && this._leaderD < this._herdR * 1.5 && c.food > 30 && c.water > 25) return this._enter("rest", null);
+      const leaderRests = lb ? lb.state === "rest" : !!L.resting;
+      if (leaderRests && this._leaderD < this._herdR * 1.5 && c.food > 30 && c.water > 25) return this._enter("rest", null);
       const moving = num(L.speed, 0) > 0.6;
       if (this._leaderD > this._herdR + 10 || (this.state === "follow" && this._leaderD > this._herdR * 0.8) || (moving && this._leaderD > this._herdR * 0.6)) {
         return this._enter("follow", L);
@@ -1581,7 +1598,36 @@ export class Brain {
 
   // Sample a few candidate points and keep the best: dry, gentle, in bounds,
   // preferably in this species' biomes and roughly ahead (no zig-zagging).
-  _pickDestination(minR, maxR) {
+  // A herd leader sets off on each leg of the daily round once a day (see
+  // routeLeg). True when that's what it's doing now.
+  _dailyRound() {
+    const sky = this.world.sky;
+    const leg = sky && Number.isFinite(sky.phase) ? routeLeg(sky.phase) : null;
+    if (!leg) return false;
+    const key = `${num(sky.day, 0)}:${leg}`;
+    if (this._routeKey === key) return false;
+    this._routeKey = key;
+    const c = this.creature;
+    let started = false;
+    if (leg === "water") {
+      if (c.water < 95) {
+        this._noWaterUntil = 0;
+        this._startDrink();
+        started = this.state === "drink";
+      }
+    } else if (this._pickDestination(leg === "graze" ? 60 : 40, leg === "graze" ? 170 : 140, leg === "graze" ? "plains" : "forest")) {
+      this._activityUntil = this._now + 120;
+      this._enter("wander", this._destPt, "route");
+      started = true;
+    }
+    // Tell a player travelling with the herd where it's off to.
+    if (started && playerIn(this.group)) this.world.events?.emit("herdRoute", { group: this.group, leg });
+    return started;
+  }
+
+  // prefer: a biome to favour ("forest" favours its edge, where the open land
+  // is a short dash away).
+  _pickDestination(minR, maxR, prefer = null) {
     const c = this.creature;
     const t = this.world.terrain;
     const px = c.position.x;
@@ -1602,7 +1648,12 @@ export class Brain {
         if (t.nearCave && t.nearCave(x, z)) continue; // caves: never a place to wander to
         const slope = t.slopeAt(x, z);
         if (slope > SLOPE_SOFT) continue;
-        if (biomes.includes(t.biomeAt(x, z))) score += 1;
+        const biome = t.biomeAt(x, z);
+        if (biomes.includes(biome)) score += 1;
+        if (prefer && biome === prefer) {
+          score += 1.5;
+          if (prefer === "forest" && (t.biomeAt(x + 25, z) !== "forest" || t.biomeAt(x - 25, z) !== "forest" || t.biomeAt(x, z + 25) !== "forest" || t.biomeAt(x, z - 25) !== "forest")) score += 0.8;
+        }
         if (this._waterAff > 0 && t.nearestFreshWater && t.nearestFreshWater(x, z, 35)) score += 2.5 * this._waterAff;
         score -= slope * 2;
       }

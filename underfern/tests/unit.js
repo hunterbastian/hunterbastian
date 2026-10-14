@@ -1262,6 +1262,96 @@ test("ai: the herd defends its player, its leader waits and comes back when call
   }
 });
 
+test("ecosystem + ai: a full-grown player leads its herd; the herd follows it and rests with it", () => {
+  const w = getWorld();
+  const eco = w.ecosystem;
+  const p = landSpot(16);
+  let made = [];
+  try {
+    const me = eco.spawn("dryosaurus", p.x, p.z, { growth: 0.5, isPlayer: true });
+    eco.formPlayerGroup(me);
+    const g = me.group;
+    made = g.members.filter((m) => m !== me);
+    assert(g.leader !== me, "a sub-adult follows");
+    me.growth = 1;
+    const lead = capture("groupLead", () => {
+      eco._updatePlayerGroup(0.1);
+      eco._updatePlayerGroup(0.1);
+    });
+    assert(g.leader === me && lead.length === 1, "full grown, the player takes the lead (announced once)");
+    w.time += 30;
+    for (const m of made) {
+      Object.assign(m, { food: 100, water: 100 });
+      Object.assign(m.brain, { state: "idle", target: null, mode: "", _threat: null, _attacker: null });
+    }
+    // The player walks off: the herd follows.
+    me.position.x += 30;
+    me.speed = 3;
+    me.heading = Math.PI / 2;
+    for (let i = 0; i < 10; i++) for (const m of made) m.brain.update(0.05);
+    const following = made.filter((m) => m.brain.state === "follow" && m.brain.target === me).length;
+    assert(following >= Math.ceil(made.length / 2), `most of the herd follows its leader (${following}/${made.length})`);
+    // The player lies down: the herd settles round it.
+    me.speed = 0;
+    me.resting = true;
+    for (const m of made) m.position.set(me.position.x + (m.position.x - p.x) * 0.2, m.position.y, me.position.z + (m.position.z - p.z) * 0.2);
+    for (let i = 0; i < 10; i++) for (const m of made) m.brain.update(0.05);
+    const resting = made.filter((m) => m.brain.state === "rest").length;
+    assert(resting >= Math.ceil(made.length / 2), `most of the herd rests by its resting leader (${resting}/${made.length})`);
+  } finally {
+    eco.clearPlayer();
+    for (const c of made) eco.remove(c);
+  }
+});
+
+test("ai: herds keep a daily round — water at dawn, plains by day, the forest edge at evening — once a day", () => {
+  const w = getWorld();
+  const eco = w.ecosystem;
+  const p = landSpot(17);
+  const phase0 = w.sky.phase;
+  const day0 = w.sky.day;
+  const herd = eco.spawnGroup("stegosaurus", p.x, p.z, 3, { growth: 1 });
+  const L = herd.find((m) => m.group.leader === m);
+  const b = L.brain;
+  // One fresh decision for the leader at the given time of day.
+  const decide = (phase) => {
+    w.sky.setPhase(phase);
+    w.time += 30;
+    Object.assign(b, { state: "idle", target: null, mode: "", _threat: null, _attacker: null, _activityUntil: 0 });
+    L.food = 100;
+    for (let i = 0; i < 8; i++) b.update(0.05);
+    return { state: b.state, mode: b.mode, dest: { ...b._destPt } };
+  };
+  try {
+    L.water = 70;
+    let r = decide(0.26);
+    assert.equal(r.state, "drink", "at dawn the leader takes the herd to drink:");
+    L.water = 100;
+    r = decide(0.45);
+    assert(r.state === "wander" && r.mode === "route", `by day it sets off for open ground, got ${r.state}/${r.mode}`);
+    r = decide(0.46);
+    assert(!(r.state === "wander" && r.mode === "route"), "each leg is set off on only once a day");
+    r = decide(0.7);
+    assert(r.state === "wander" && r.mode === "route", `at evening it heads for the forest edge, got ${r.state}/${r.mode}`);
+    // Route news reaches a player travelling with the herd, and only then.
+    w.sky.day += 1;
+    L.water = 70;
+    const quiet = capture("herdRoute", () => decide(0.26));
+    assert(b.state === "drink" && quiet.length === 0, "a new day's dawn drink, unannounced without the player");
+    const me = eco.spawn("stegosaurus", L.position.x + 8, L.position.z, { growth: 0.3, isPlayer: true });
+    eco.joinGroup(me, L.group);
+    w.sky.day += 1;
+    L.water = 70;
+    const news = capture("herdRoute", () => decide(0.26));
+    assert(news.length === 1 && news[0].leg === "water" && news[0].group === me.group, "with the player in the herd, the dawn leg is announced once");
+  } finally {
+    eco.clearPlayer();
+    w.sky.setPhase(phase0);
+    w.sky.day = day0;
+    for (const c of herd) eco.remove(c);
+  }
+});
+
 test("ecosystem: query finds the living within a radius", () => {
   const w = getWorld();
   const eco = w.ecosystem;

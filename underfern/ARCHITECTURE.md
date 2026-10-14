@@ -542,7 +542,8 @@ export class Ecosystem {
   remove(creature)
   setPlayer(creature) ; clearPlayer()
   formPlayerGroup(player, { resumed = false }) // → group | null — a herd/pack species hatches among 2+ NPCs of
-                      // its kind (an NPC adult leads, the player never does); loners get null
+                      // its kind (an NPC adult leads until the player is full grown, then the player
+                      // does and the group follows it); loners get null
   joinGroupNear(player, range = 60)            // → group | null — also runs on the player's own "call"
   joinGroup(creature, group)
   update(dt, focus)   // population upkeep around focus (spawn ring GAME.npcSpawnMin..Max, despawn > npcDespawn,
@@ -570,7 +571,9 @@ export class Brain {
   update(dt) // perceive (staggered ~4 Hz), decide, steer → writes creature.intent
 }
 ```
-Herbivores graze, drink, herd (cohesion around the leader), rest at night, flee
+Herbivores keep a daily round when leading a herd (fresh water at dawn, open plains by day,
+the forest edge at evening, once each per day), graze, drink, herd (cohesion around the leader,
+which may be a full-grown player), rest at night, flee
 from threatening carnivores (bigger ones flee less; Stegosaurus/Diplodocus/Brontosaurus
 turn and fight when attacked or cornered). Carnivores roam, hunt when hungry
 (prefer prey they can handle, avoid big herds), eat carcasses, attack the player
@@ -750,6 +753,8 @@ URL params: `?species=<id>` autostart · `?growth=0..1` · `?t=0..1` time of day
 | `groupJoined` | `{ creature, group, formed, resumed }` — the player hatched into (`formed`) or called its way into a herd / pack |
 | `groupStray` | `{ creature, group }` — the player has drifted out of reach of every mate |
 | `groupLeft` | `{ creature, group, reason: "strayed" \| "lost" }` — strayed too long, or every mate is gone |
+| `groupLead` | `{ creature, group }` — the full-grown player has taken the lead of its herd / pack |
+| `herdRoute` | `{ group, leg: "water" \| "graze" \| "shelter" }` — the NPC leader of the player's herd sets off on a leg of its daily round |
 | `spawn` | `{ creature }` |
 | `sniff` | `{ creature }` |
 

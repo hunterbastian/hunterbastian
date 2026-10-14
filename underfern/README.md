@@ -99,7 +99,10 @@ usually near a freshwater lake. Then:
   watch, waits for you and wades in when you're attacked, and a raptor pack
   joins whatever you bite. Wander off for too long and you lose them. **Call**
   brings your group back to you, and calling near another group of your kind
-  joins it. The HUD badge and a compass pin show where they are.
+  joins it. The HUD badge and a compass pin show where they are. Herds keep a
+  daily round: down to the water at dawn, out onto the open plains by day, back
+  to the forest edge at evening. Once you're **full grown you lead**: the group
+  follows where you go and lies down when you rest.
 - **Use your senses.** **Sniff** marks nearby food, the nearest fresh water and
   other creatures for a few seconds. **Call** lets others of your species answer
   from the distance. Herbivores get nervous when they hear a carnivore. **Crouch**

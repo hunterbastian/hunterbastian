@@ -240,6 +240,8 @@ export class Hud {
     on("groupJoined", (e) => this._onGroup("joined", e));
     on("groupStray", (e) => this._onGroup("stray", e));
     on("groupLeft", (e) => this._onGroup("left", e));
+    on("groupLead", (e) => this._onGroup("lead", e));
+    on("herdRoute", (e) => this._onRoute(e));
     on("newDay", (e) => this.toast(`Day ${e?.day ?? ""} — first light`, "info", "dawn"));
     on("notify", (e) => e?.text && this.toast(e.text, e.kind || "info"));
   }
@@ -693,7 +695,8 @@ export class Hud {
       st.d = Infinity;
     }
     this._chip("group", n > 0);
-    const label = n ? `${p.species?.social === "pack" ? "Pack" : "Herd"} · ${n}` : "";
+    const unit = p.species?.social === "pack" ? "pack" : "herd";
+    const label = n ? (g.leader === p ? `Leading ${unit} · ${n}` : `${unit[0].toUpperCase()}${unit.slice(1)} · ${n}`) : "";
     if (label !== st.label) {
       st.label = label;
       const t = this._chips.group?.el.querySelector("span:last-child");
@@ -728,7 +731,9 @@ export class Hud {
     const sp = p.species || {};
     const unit = sp.social === "pack" ? "pack" : "herd";
     const call = this.isTouch ? "tap Call" : "call (Q)";
-    if (kind === "joined") {
+    if (kind === "lead") {
+      this.toast(`Full grown: you lead the ${unit} now. They follow where you go.`, "good", "track");
+    } else if (kind === "joined") {
       if (e.resumed) {
         this.toast(`Your ${sp.name} ${unit} is close by. Stay with them.`, "good", "track");
       } else if (e.formed) {
@@ -744,6 +749,18 @@ export class Hud {
     } else {
       this.toast(`You've lost your ${unit}. Find another and ${call} to join it.`, "warn", "track");
     }
+  }
+
+  // The herd's daily round, for a player travelling with it.
+  _onRoute(e) {
+    const p = this._player;
+    if (!p?.alive || !e?.group || p.group !== e.group) return;
+    const text = {
+      water: "Dawn. Your herd heads down to the water to drink.",
+      graze: "Your herd moves out onto the open plains to graze.",
+      shelter: "Evening. Your herd makes for the forest edge.",
+    }[e.leg];
+    if (text) this.toast(text, "info", e.leg === "water" ? "drop" : e.leg === "graze" ? "leaf" : "moon");
   }
 
   _chip(key, on) {

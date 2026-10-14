@@ -7,8 +7,9 @@
 // predators, and a freshly hatched juvenile gets a quiet first minute.
 //
 // A player of a herd or pack species hatches among its own kind: the group
-// takes it in (NPCs keep the lead), a player who drifts too far loses it, and
-// calling near another group of the species joins that one.
+// takes it in (NPCs lead until the player is full grown, then it does), a
+// player who drifts too far loses it, and calling near another group of the
+// species joins that one.
 
 import * as THREE from "three";
 import { Creature } from "./creature.js";
@@ -249,7 +250,7 @@ export class Ecosystem {
     return best;
   }
 
-  /** Add `c` to `group` (leaving any other). NPCs keep the lead. */
+  /** Add `c` to `group` (leaving any other). NPCs lead unless `c` is a grown player. */
   joinGroup(c, group) {
     if (!c || !group || c.group === group) return;
     this._leaveGroup(c);
@@ -638,11 +639,19 @@ export class Ecosystem {
     return rand(rng, 0.55, 0.98);
   }
 
-  // The biggest NPC leads; the player never does.
+  // A full-grown player leads its herd / pack; otherwise the biggest NPC does.
   _electLeader(group) {
     let leader = null;
     for (const m of group.members) {
-      if (m.alive && !this._isPlayerActor(m) && (!leader || m.growth > leader.growth)) leader = m;
+      if (!m.alive) continue;
+      if (this._isPlayerActor(m)) {
+        if (m.growth >= 1) {
+          leader = m;
+          break;
+        }
+        continue;
+      }
+      if (!leader || m.growth > leader.growth) leader = m;
     }
     group.leader = leader;
   }
@@ -665,6 +674,12 @@ export class Ecosystem {
       near = Math.min(near, dist2(m.position.x, m.position.z, p.position.x, p.position.z));
     }
     if (!mates) return this._leavePlayerGroup(p, "lost");
+    // Full grown: the player takes the lead (announced once per group).
+    if (p.growth >= 1 && g.leader !== p) this._electLeader(g);
+    if (g.leader === p && !g.playerLed) {
+      g.playerLed = true;
+      this.world.events?.emit("groupLead", { creature: p, group: g });
+    }
     if (near <= STRAY_RANGE * STRAY_RANGE) {
       this._strayT = 0;
       return;
@@ -685,6 +700,7 @@ export class Ecosystem {
     const g = c.group;
     if (!g) return;
     c.group = null;
+    if (this._isPlayerActor(c)) g.playerLed = false;
     const i = g.members.indexOf(c);
     if (i >= 0) g.members.splice(i, 1);
     if (g.leader === c) this._electLeader(g);
