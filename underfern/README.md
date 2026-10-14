@@ -112,6 +112,10 @@ usually near a freshwater lake. Then:
 - **Day and night.** A full day lasts 16 minutes. Nights are dark but moonlit.
   Carnivores roam more after dark and herbivores bed down.
 
+The title screen is kept minimal: the wordmark, the ways in (Continue, Survival,
+Creative) and a line of links to Controls, Settings and the **Changelog**, which
+lists every update newest first (`src/ui/changelog.js`).
+
 **Creative** (the second card on the title screen) is a sandbox: pick any
 playable species and spawn full grown, with no hunger, thirst, injury or death.
 It's for exploring the island and watching the animals, and it never touches

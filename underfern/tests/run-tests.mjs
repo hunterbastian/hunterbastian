@@ -208,13 +208,34 @@ const SUITES = [
           await page.waitForSelector(".menu .mode--survival:not([disabled])", { timeout: 30_000 });
           const t = await page.evaluate(() => ({
             modes: [...document.querySelectorAll(".menu .mode")].map((b) => b.dataset.act),
-            numerals: document.querySelectorAll(".menu .mode__num").length,
+            links: [...document.querySelectorAll(".menu .title__link")].map((b) => b.dataset.act),
+            bar: getComputedStyle(document.querySelector(".menu .menu__bar")).visibility,
           }));
           expect(t.modes.join() === "survival,creative", `the title should offer Survival then Creative, got ${JSON.stringify(t.modes)}`);
-          expect(t.numerals === 0, "mode cards carry no numerals");
+          expect(t.links.join() === "controls,settings,changelog", `the title's links should be Controls · Settings · Changelog, got ${JSON.stringify(t.links)}`);
+          expect(t.bar === "hidden", "a minimal title: no tool bar over it");
           await frames(page, 2);
           await shot(page, "title");
           await expectClean(page, errors);
+        },
+      },
+      {
+        name: "title: Changelog opens with every update, newest first, and Esc closes it",
+        async run({ page, errors }) {
+          await page.click('.menu .title__link[data-act="changelog"]');
+          await page.waitForFunction(() => !document.querySelector(".layer--changelog").hasAttribute("inert"), null, { timeout: 10_000 });
+          const log = await page.evaluate(() => ({
+            versions: [...document.querySelectorAll(".log__entry .log__v")].map((v) => v.textContent),
+            dates: [...document.querySelectorAll(".log__entry .log__date")].map((d) => d.getAttribute("datetime")),
+            notes: document.querySelectorAll(".log__notes li").length,
+          }));
+          expect(log.versions.length >= 8 && log.notes > 20, `the changelog should list the updates, got ${JSON.stringify(log)}`);
+          const sorted = [...log.dates].sort().reverse();
+          expect(log.dates.join() === sorted.join(), `entries should run newest first, got ${log.dates}`);
+          await page.keyboard.press("Escape");
+          await page.waitForFunction(() => document.querySelector(".layer--changelog").hasAttribute("inert"), null, { timeout: 10_000 });
+          await expectClean(page, errors);
+          return `${log.versions.length} entries (${log.versions[0]} … ${log.versions.at(-1)}), ${log.notes} notes`;
         },
       },
       {

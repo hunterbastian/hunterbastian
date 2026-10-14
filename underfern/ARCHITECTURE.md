@@ -676,6 +676,7 @@ export class Menu {
   constructor(root, { species /* SpeciesDef[] (playable, in order) */ })
   show({ save = null } = {}); hide();                  // save = { speciesId, speciesName, growth, day } | null
   onStart = (speciesId, { creative }) => {};  onContinue = () => {};  // creative: the title's Creative card
+  showChangelog()     // the title's Changelog link: ui/changelog.js CHANGELOG ({ v, date, title, notes[] }, newest first)
   setLoading(progress /* 0..1 */, label)               // loading state before the world is ready
   settings;                                            // { style: "detailed"|"pixel", quality: "auto"|"high"|"low",
                                                        //   muted: bool, sensitivity: 0.5..2 } — a Settings panel on the title

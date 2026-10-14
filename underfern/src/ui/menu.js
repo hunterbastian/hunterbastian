@@ -11,6 +11,7 @@
 
 import { clamp, lerp } from "../core/math.js";
 import { makeRng, hash } from "../core/rng.js";
+import { CHANGELOG } from "./changelog.js";
 
 /* --- Icons ----------------------------------------------------------------- */
 
@@ -897,6 +898,7 @@ export class Menu {
     this._close(this.el);
     this.el.classList.remove("is-loading-only");
     this._closeLayer(this.controlsLayer, false);
+    this._closeLayer(this.changelogLayer, false);
     if (layerOpen(this.settingsLayer)) this.hideSettings();
   }
 
@@ -962,6 +964,11 @@ export class Menu {
     this._openLayer(this.controlsLayer);
   }
 
+  /** Open the changelog (the game's update history, newest first). */
+  showChangelog() {
+    this._openLayer(this.changelogLayer);
+  }
+
   /** Remove the menu's DOM and listeners. */
   dispose() {
     this._ac.abort();
@@ -971,6 +978,7 @@ export class Menu {
     this.el.remove();
     this.settingsLayer.remove();
     this.controlsLayer.remove();
+    this.changelogLayer.remove();
   }
 
   /* --- Construction --- */
@@ -996,7 +1004,6 @@ export class Menu {
       </header>
 
       <div class="screen screen--title" data-screen="title">
-        <p class="eyebrow title__eyebrow">An island out of time · 150–&#8288;66&nbsp;million&nbsp;years&nbsp;ago</p>
         <h1 class="wordmark">Underfern</h1>
         <p class="tagline">Hatch small. Stay hidden. Grow into something the island fears.</p>
         <div class="loading" role="progressbar" aria-label="Preparing the island" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
@@ -1013,6 +1020,11 @@ export class Menu {
             <span class="mode__body"><span class="mode__name">Creative</span><span class="mode__desc">Roam full grown — no hunger, no thirst, no death.</span></span>
             <span class="mode__go" aria-hidden="true">${icon("arrowRight")}</span>
           </button>
+          <nav class="title__links" aria-label="More">
+            <button type="button" class="title__link" data-act="controls">Controls</button>
+            <button type="button" class="title__link" data-act="settings">Settings</button>
+            <button type="button" class="title__link" data-act="changelog">Changelog</button>
+          </nav>
         </div>
       </div>
 
@@ -1039,11 +1051,7 @@ export class Menu {
             ${icon("egg")}<span class="hatch__text">Hatch</span><kbd class="kbd kbd--on-light hatch__kbd">Enter</kbd>
           </button>
         </footer>
-      </div>
-
-      <footer class="menu__foot">
-        <p class="plate"><span class="plate__no">Pl. I</span> The island, from the air.<br />No map of any age shows it.</p>
-      </footer>`;
+      </div>`;
 
     this.el = el;
     this.root.appendChild(el);
@@ -1068,6 +1076,7 @@ export class Menu {
     this._buildCards();
     this._buildSettings();
     this._buildControls();
+    this._buildChangelog();
   }
 
   _buildCards() {
@@ -1192,6 +1201,33 @@ export class Menu {
     this._close(layer);
   }
 
+  _buildChangelog() {
+    const id = this._id;
+    const day = (iso) => new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+    const entries = CHANGELOG.map(
+      (e) => `
+        <article class="log__entry">
+          <header class="log__head"><span class="log__v">${escapeHtml(e.v)}</span><time class="log__date" datetime="${escapeHtml(e.date)}">${day(e.date)}</time></header>
+          <h3 class="log__title">${escapeHtml(e.title)}</h3>
+          <ul class="log__notes">${e.notes.map((n) => `<li>${escapeHtml(n)}</li>`).join("")}</ul>
+        </article>`,
+    ).join("");
+    const layer = document.createElement("div");
+    layer.className = "layer layer--changelog";
+    layer.innerHTML = `
+      <div class="layer__backdrop" data-act="close-changelog"></div>
+      <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="${id}-log-title">
+        <header class="sheet__head">
+          <div><p class="eyebrow">Field journal</p><h2 class="sheet__title" id="${id}-log-title">Changelog</h2></div>
+          <button type="button" class="icon-btn" data-act="close-changelog" aria-label="Close changelog">${icon("close")}</button>
+        </header>
+        <div class="sheet__body log">${entries}</div>
+      </section>`;
+    this.root.appendChild(layer);
+    this.changelogLayer = layer;
+    this._close(layer);
+  }
+
   /* --- Events --- */
 
   _bind() {
@@ -1228,6 +1264,12 @@ export class Menu {
         case "close-controls":
           this._closeLayer(this.controlsLayer);
           break;
+        case "changelog":
+          this.showChangelog();
+          break;
+        case "close-changelog":
+          this._closeLayer(this.changelogLayer);
+          break;
         case "strip-prev":
         case "strip-next":
           this._pageStrip(t.dataset.act === "strip-next" ? 1 : -1);
@@ -1237,7 +1279,7 @@ export class Menu {
           break;
       }
     };
-    for (const el of [this.el, this.settingsLayer, this.controlsLayer]) el.addEventListener("click", onClick, sig);
+    for (const el of [this.el, this.settingsLayer, this.controlsLayer, this.changelogLayer]) el.addEventListener("click", onClick, sig);
 
     // Species cards: click selects, double-click hatches.
     this._list.addEventListener(
@@ -1322,13 +1364,14 @@ export class Menu {
   _onKey(e) {
     const settingsOpen = layerOpen(this.settingsLayer);
     const controlsOpen = layerOpen(this.controlsLayer);
-    if (settingsOpen || controlsOpen) {
-      const layer = settingsOpen ? this.settingsLayer : this.controlsLayer;
+    const logOpen = layerOpen(this.changelogLayer);
+    if (settingsOpen || controlsOpen || logOpen) {
+      const layer = settingsOpen ? this.settingsLayer : controlsOpen ? this.controlsLayer : this.changelogLayer;
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
         if (settingsOpen) this.hideSettings();
-        else this._closeLayer(this.controlsLayer);
+        else this._closeLayer(layer);
       } else if (e.key === "Tab") {
         trapTab(e, layer);
       }
