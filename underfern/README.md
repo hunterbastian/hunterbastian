@@ -4,9 +4,18 @@
 on a misty island out of time, where animals some eighty million years apart share
 one coast, and have to eat, drink, hide, fight and grow from a fragile juvenile
 into a full-grown adult, while carnivores and herbivores driven by their own AI
-hunt, graze, herd and sleep around you. It leans on the moody
-naturalism of *The Isle*: ochre grasslands, dark conifer forests, golden dawn mist
-and deep blue moonlit nights, with the fog and light doing much of the work.
+hunt, graze, herd and sleep around you.
+
+The look is a mysterious, painterly island somewhere between *Breath of the Wild*
+and *Skyrim*. Warm sunlight falls on cool blue-violet shadows, and a rim of light
+picks the dinosaurs out against the land. Lush grass ripples as gusts roll across
+it, and the hills fade into blue-green haze. Painted clouds drift overhead and the
+light turns gold at either end of the day. The peaks are snow-capped, mist lies in
+the valleys at dawn and cloud clings to the summits. Every day has its own weather,
+and some clear nights end under green and violet auroras. Nothing on the island
+was ever built. Its wonders are colossal fossils half-buried in the grass, sea
+stacks, a stone arch, basalt columns, glowing fungi in the caves and fireflies in
+the woods at dusk.
 
 You play as one of eight dinosaurs, in third person.
 
@@ -120,7 +129,7 @@ Playable, in menu order:
 | --- | --- | --- | --- |
 | **Dryosaurus** | herbivore | 3.5 m · 90 kg | Tiny and fragile but the fastest thing on the island. Stay with the herd. |
 | **Utahraptor** | carnivore | 6 m · 500 kg | Agile pack hunter; feathered, with a sickle claw and bleeding bites. |
-| **Ceratosaurus** | carnivore | 7 m · 900 kg | Horned ambusher of swamps and riverbanks, and an excellent swimmer. |
+| **Ceratosaurus** | carnivore | 7 m · 900 kg | Horned ambusher of the wet woods and riverbanks, and an excellent swimmer. |
 | **Stegosaurus** | herbivore | 9 m · 4.5 t | Slow and steady; its tail spikes cause terrible bleeding. |
 | **Allosaurus** | carnivore | 9.5 m · 2.3 t | Utah's state fossil, and the Jurassic's apex predator. |
 | **Brontosaurus** | herbivore | 22 m · 15 t | Hatches the size of a dog and grows into a mountain. |
@@ -141,20 +150,42 @@ ago. Allosaurus is still Utah's state fossil.
 
 ### The island
 
-Ochre plains, conifer forest, swamps, freshwater lakes and rivers ring a central
-**massif**: three or four horn peaks up to about 190 m, joined by a jagged ridge and
-walled with cliff bands. Cliffs are too steep to climb. The ways up are a pass valley
-or two that cut right through the range, and switchback trails that climb to
-**lookouts** high on the ridge, with the whole island below.
+The island has three living biomes around a central **massif**:
+- **Coast**: a wide belt of beach, dunes held by marram grass, and salt grass with
+  palms, cycads and driftwood.
+- **Plains**: open grassland, mostly green with golden patches, rising to upland
+  meadows on the massif's lower slopes.
+- **Forest**: dark conifer and araucaria woods, wet and fern-filled in the lowlands.
+
+Freshwater lakes and rivers run between them. The massif has three or four horn
+peaks up to about 190 m, snow-capped and joined by a jagged ridge. Its sides are
+bands of layered rock, and the cliffs are too steep to climb. One or two pass
+valleys cut right through the range, and switchback trails climb to **lookouts**
+high on the ridge, with the whole island below.
+
+The island's **landmarks** are all from deep time, older and far bigger than
+anything alive on it:
+- the bones of colossal animals: a ribcage you can walk through, a great
+  half-buried skull and a buried neck arching out of the grass;
+- a natural stone arch, sea stacks standing in the shallows and a basalt causeway.
+
+Creatures walk around the landmarks, and nothing spawns inside one.
 
 There are **caves** to find: a great cavern with a skylight, a tunnel with a mouth at
 each end and a few small dens. A den's mouth is barely 3 m high, so a raptor can rest
 inside but an adult Allosaurus can't follow it in, and nothing the size of a
-Brontosaurus gets into any of them. It's dark and echoing inside, and nothing grows or
-spawns there.
+Brontosaurus gets into any of them. Inside it's dark and echoing. Light falls in
+shafts through the skylight, and deep in, glowing lichen and pale fungi are the only
+light. Nothing spawns there.
 
-The map (M) marks the summits with their heights, the passes, the trails to the
-lookouts and the cave mouths. Every island comes from its seed (`?seed=N`).
+The map (M) marks:
+- the summits, with their heights;
+- the passes and the trails to the lookouts;
+- the cave mouths;
+- the landmarks, by name.
+
+Every island comes from its seed (`?seed=N`), and so does each day's weather:
+clear, fair, overcast or misty.
 
 ## Controls
 
@@ -197,6 +228,9 @@ device.
     and fine surface detail.
 - **Pixel size:** *Fine*, *In between* (default) or *Chunky*, applied live.
   Pixels stay square and even on any screen.
+- Both styles have the same lighting, mist, haze and colour grade. They are
+  computed in each surface's own shader rather than in a post-processing pass, so
+  they cost nothing extra on a phone.
 - **Quality:**
   - *Auto* picks *Low* on phones, small screens and ≤ 4-core machines (lighter
     terrain, sparser vegetation, no grass or shadows, fewer dinosaurs) and *High*
@@ -217,11 +251,14 @@ URL parameters, handy for sharing a moment or testing:
 | `?style=pixel\|detailed` · `?pixel=0..1` | render style · pixel size |
 | `?quality=low\|high` | force a quality profile |
 | `?seed=N` | a different island |
+| `?weather=clear\|fair\|overcast\|misty` | hold one weather instead of the day's own |
+| `?aurora=0\|1` | force tonight's aurora off or on |
 | `?mute=1` · `?debug=1` | start muted · fps / draw-call overlay |
 | `?rotate=0\|1` | never turn the game sideways on a phone held upright · turn it for any portrait window (testing on desktop) |
 
 For example, `index.html?species=allosaurus&growth=1&t=0.27` drops you in as an
-adult Allosaurus at dawn.
+adult Allosaurus at dawn, and `?species=dryosaurus&t=0.27&weather=misty` shows a
+dawn in thick valley mist.
 
 ## Tests
 
@@ -241,8 +278,13 @@ there is one and otherwise falls back to the global install.
   Chromium with software WebGL (SwiftShader).
 - **Unit tests** (`tests/unit.html`, also viewable in a browser) cover:
   - the seeded RNG and noise
-  - terrain determinism and its queries (height, normals, biomes, fresh water,
-    spawn points)
+  - terrain determinism and its queries (height, normals, the three living
+    biomes and the coastal belt, fresh water, spawn points)
+  - landmark placement: same seed, same places, always on dry ground and clear of
+    caves, lakes, rivers, passes and trails, with colliders that creatures bump
+    into and keep-outs that spawns respect
+  - the weather schedule: one deterministic state per day, every kind turns up,
+    and auroras only follow clear or fair days
   - every species definition
   - wind/scent
   - creature metabolism, damage, armour and death, the ecosystem's carcass flow
@@ -271,10 +313,19 @@ Plain ES modules under `src/`, loaded by `index.html` through an import map:
 - `core/screen.js`: the app frame (`#app`). On a phone held upright it lays the
   game out at landscape size and rotates it 90°; everything that reads pointer
   positions or the screen size goes through it
-- `world/`: terrain (heightfield island with a mountain massif, passes, trails,
-  lakes and rivers, procedural surface shader), caves (carved floors under rock
-  vaults, with a clearance and darkness query), water, sky and day/night,
-  vegetation (instanced forests and food plants), wind
+- `world/`:
+  - terrain: a heightfield island with a mountain massif, passes, trails, lakes
+    and rivers, and a procedural surface shader with painted rock, strata and
+    snow
+  - caves: carved floors under rock vaults, with a clearance and darkness query
+  - water
+  - sky: day and night, the weather and auroras
+  - vegetation: instanced forests and food plants
+  - wind
+  - `look.js`: the painterly lighting, mist, haze and grade shared by every
+    material
+  - `landmarks.js`: the fossils and stone wonders
+  - `atmosphere.js`: fireflies, light shafts, peak wisps and cave fungi
 - `creatures/`:
   - species data and the procedural skinned dinosaur models
   - the shared survival simulation (`creature.js`)
@@ -298,3 +349,6 @@ numbers.
   License).
 - Inspired by *The Isle* (Afterthought). Underfern is an independent fan project,
   not affiliated with it.
+- The art direction nods to *The Legend of Zelda: Breath of the Wild* and *The
+  Elder Scrolls V: Skyrim*. All of Underfern's art is procedural, and none of it
+  comes from either game.

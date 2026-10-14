@@ -36,20 +36,30 @@ working (add, don't rename) and note it in your report.
   should read as hard-edged stone), plus **procedural surface detail in shaders**:
   noise-blended grass/dirt/rock/sand/mud on the terrain, bark, leaf/frond cards with
   alpha cut-outs, scaled/banded dinosaur skin with countershading, roughness
-  variation, small normal perturbations. Mood: *The Isle*'s moody naturalism —
-  muted greens, ochre grasslands, dark conifer forests, soft golden dawn mist, deep
-  blue moonlit nights; fog and light do a lot of the work. Generate textures
-  procedurally at load (canvas / DataTexture, mip-mapped, `SRGBColorSpace` for
-  colour maps) — no image files. Keep it fast: instancing, LOD where it pays,
-  shared materials, texture atlases.
-- **Two render styles, same assets.** `"detailed"` (default — full resolution, MSAA)
-  and `"pixel"` (retro, late-'90s / PS1 vibe: the 3D scene is rendered to a
-  low-resolution target — ≈ 270–400 px tall — and upscaled with nearest-neighbour,
-  with optional ordered dithering and gentle colour quantisation; the DOM UI stays
-  crisp on top). `main.js` owns this pipeline (settings + `?style=pixel`). Assets
-  must look good in both: avoid high-frequency detail that shimmers when
-  pixelated (mip-mapped textures, smooth shader noise, alpha-to-coverage or
-  alphaTest with mips for foliage).
+  variation, small normal perturbations. Generate textures procedurally at load
+  (canvas / DataTexture, mip-mapped, `SRGBColorSpace` for colour maps) — no image
+  files. Keep it fast: instancing, LOD where it pays, shared materials, texture
+  atlases.
+- **Mood — mysterious, painterly, northern.** *Breath of the Wild*'s luminous
+  painterly light (warm key light, cool blue-violet shadows, wrap lighting, a rim on
+  silhouettes, lush grass with sun-bleached tips and gusts rolling across it, strong
+  blue-green aerial perspective, puffy painted clouds, golden hours) crossed with
+  *Skyrim*'s moody north (snow on the peaks, valley mist at dawn, wisps on the
+  summits, a weather of its own each day, auroras on some clear nights). Mysterious,
+  but **dinosaurs only**: no ruins, buildings or artefacts — the island's wonders are
+  colossal fossils, sea stacks, a stone arch, basalt columns, glowing fungi and
+  fireflies. The look lives **in the materials** (`world/look.js`), never in a
+  post-processing pass, so it costs the same in both render styles.
+- **Two render styles, same assets.** `"pixel"` (default — retro, late-'90s: the 3D
+  scene is drawn straight into a small canvas, ≈ 230–300 rows at "Chunky" and
+  geometrically between that and full resolution at the default "In between", then
+  upscaled by the browser with nearest-neighbour `image-rendering`; the DOM UI stays
+  crisp on top) and `"detailed"` (full resolution, MSAA on high). `main.js` owns this
+  (settings + `?style=`). Neither style has a post pass: anything screen-wide (the
+  grade, the vignette) is done at the end of each material's fragment shader. Assets
+  must look good in both: avoid high-frequency detail that shimmers when pixelated
+  (mip-mapped textures, smooth shader noise, alpha-to-coverage or alphaTest with
+  mips for foliage, derivative-aware fades).
 
 ## Conventions
 
@@ -82,6 +92,9 @@ underfern/
   src/world/sky.js      ATMOSPHERE
   src/world/vegetation.js VEGETATION
   src/world/wind.js     ATMOSPHERE  wind field: scent drift for the AI's sense of smell, vegetation sway
+  src/world/look.js     ATMOSPHERE  the painterly look: shared uniforms + shader hooks patched into every lit material
+  src/world/landmarks.js TERRAIN    colossal fossils and stone wonders: placement, meshes, colliders
+  src/world/atmosphere.js ATMOSPHERE fireflies and motes, light shafts, peak wisps and spindrift, cave fungi
   src/world/world.js    INTEGRATION
   src/creatures/species.js  DINO-ART
   src/creatures/dinoModel.js DINO-ART
@@ -220,7 +233,9 @@ export function ridged2D(noise, x, y, octaves = 5, lacunarity = 2, gain = 0.5) /
 ### `world/terrain.js` (TERRAIN)
 
 ```js
-export const BIOMES = ["ocean", "lake", "beach", "plains", "forest", "swamp", "highland", "rock"];
+export const BIOMES = ["ocean", "lake", "coast", "plains", "forest", "rock"];
+export const LIVING_BIOMES = ["coast", "plains", "forest"]; // the three living biomes; "rock" is the massif's bare stone
+export const SNOW_LINE = 145;  // metres above the sea where the snow caps begin (a dusting reaches lower)
 
 export class Terrain {
   constructor({ size, resolution, seed, seaLevel, maxHeight })
@@ -238,7 +253,10 @@ export class Terrain {
   waterDepthAt(x, z)  // max(0, seaLevel - heightAt)
   inBounds(x, z, margin = 0)
   findSpawnPoint(rng, { biomes, minHeight = 1, maxSlope = 0.35, near, tries = 300 } = {}) // → {x, z} | null
-                      // near = { x, z, minR, maxR } restricts to a ring
+                      // near = { x, z, minR, maxR } restricts to a ring; never inside a keep-out
+  coastAt(x, z)       // 0..1 how far into the coastal belt: 1 on the open sand, ~0.5 in the dunes, 0 inland
+  addKeepOut(x, z, r) // keep spawns out of a circle (Landmarks adds every footprint)
+  keptOut(x, z)       // inside any keep-out circle
   nearestFreshWater(x, z, maxRadius = 400) // → { x, z, dist } | null — a LAND point on the shore
                       // of fresh water (stand there, face the water, drink). Precompute & bucket.
   mapCanvas(px = 512) // → HTMLCanvasElement: shaded-relief overview map (water, biomes, hillshade,
@@ -275,17 +293,33 @@ the ground and may be on top of a cave uses `groundAt(x, z, y)` (creatures, the 
 or `surfaceAt` (props, flyover); spawning code uses `findSpawnPoint`, which skips
 `nearCave`. `biomeAt` is `"rock"` on a cave floor.
 
-Island shape: one main landmass (~0.42 × size radius) with a noisy coastline and
-beaches; a central massif (below) with highlands and rock on steep faces; rolling
-plains; forest bands; swampy lowlands; **3–5 freshwater lakes** and **1–2 rivers**
-carved below sea level (fresh). A few small offshore islets are welcome.
+Island shape: one main landmass (~0.42 × size radius) with a noisy coastline; a
+central massif (below) with bare rock on its steep faces and high ground; **3–5
+freshwater lakes** and **1–2 rivers** carved below sea level (fresh). A few small
+offshore islets are welcome. **Three living biomes**:
+- *coast* — a wide belt (`COAST_W` ≈ 100 m) around the shore: open sand at the sea's
+  edge (`BEACH_W` ≈ 26 m), then low dunes (raised after classification, `_raiseDunes`)
+  held by marram grass, then sandy coastal grass and scrub with palms and cycads,
+  driftwood on the sand;
+- *forest* — dense conifer / araucaria / broadleaf stands, darker floors; its wettest
+  lowlands (moisture > 0.7) are wet forest with mud, horsetails and snags (there is no
+  separate swamp biome);
+- *plains* — everything else on land: open grassland, lush green with golden
+  swathes where it is dry, and upland meadows on the massif's lower slopes.
+
+`biomeAt` returns one of `ocean`, `lake`, `coast`, `plains`, `forest` or `rock`.
 
 **Mountains & caves.** Layout decisions are made on the fixed coarse layout grid
 (256², 6.25 m) from their own seed streams (`"underfern-massif"`, `"underfern-caves"`),
 so the same seed gives the same island at any mesh resolution.
 - *Massif* (`_mountain`, `_peak`): 3–4 horn peaks (main ≈ `maxHeight` 190 m) — concave
   pyramids with arêtes and cirque hollows — joined by a serrated ridge (smooth max),
-  with terraced cliff bands on the faces and per-vertex crags on the sheer rock.
+  with softened cliff bands on the faces and, on the sheer rock, per-vertex crags plus
+  rounded, noise-broken ribs and gullies (`nRib`: across the ridge's spine, radiating
+  on the horns) so big planar facets read as buttresses and chutes. Steep rock takes
+  its vertex normals from a wider difference, so light flows across ribs and bands
+  instead of breaking at every edge (no stair-step stripes); the shader adds the fine
+  crags back.
   Cliffs (slope > the creature's block grade 0.39) are barriers; the way up is elsewhere.
 - *Passes* (`_planPassValleys`): 1–2 notches in the ridge; a U-shaped, meandering valley
   runs from the saddle down both sides to the foot of the range (cut-and-fill floor,
@@ -321,6 +355,18 @@ detail textures (generated once at load, mip-mapped) sampled in world space
 (tri-planar or slope-aware for cliffs so rock doesn't stretch), with macro colour
 variation from low-frequency noise so it never looks tiled. It must hold up both
 at the player's feet (a juvenile is < 1 m tall) and from 300 m away.
+On top of that (all in the one terrain shader, `patchLook` for the light):
+- *Painted rock*: a warm-grey base (cooler up high) under the rock texture's grain;
+  ~8 m strata bands of grey, buff, pale and rust with ~2.5 m beds inside them
+  (blends widen with the screen footprint, so nothing stripes or shimmers); tri-planar
+  crag ribs as a normal perturbation and albedo shading on steep faces, rain streaks,
+  and warmer, lighter crust on ledges that face up.
+- *Snow* above `SNOW_LINE` (patchy below it on ledges): it settles on what faces up,
+  slides off sheer faces except down couloirs, and averages out with distance.
+- *Gusts*: the wind field's travelling bands (look.js `lookGust`) lighten and warm the
+  turf, in step with the grass blades bending.
+- *Caves*: deep in, where no daylight reaches, sparse colonies of glowing blue-green
+  lichen specks.
 
 ### `world/water.js` (ATMOSPHERE)
 
@@ -333,13 +379,23 @@ export class Water {
 ```
 Depth-tinted (shallow murky green-teal → deep blue-teal) via the height texture,
 soft shoreline foam, gentle animated waves/ripples, sun glint, respects scene fog.
+It shares the look's mist, aerial haze, grade and vignette (the LOOK uniforms are
+merged into its own).
 
 ### `world/sky.js` (ATMOSPHERE)
 
 ```js
+export const WEATHER_KINDS = ["clear", "fair", "overcast", "misty"];
+export function weatherForDay(seed, day) // → { kind, aurora } — deterministic; day 1 is fair with an aurora;
+                          //   auroras only ever follow clear or fair days
 export class Sky {
-  constructor(scene, { startPhase, dayLengthSec, viewDistance, shadows, shadowMapSize })
+  constructor(scene, { startPhase, dayLengthSec, viewDistance, shadows, shadowMapSize, seed })
   phase; day;               // day = whole days elapsed (starts at 1)
+  seed; seaLevel;           // seed picks the weather (World passes hash(seed, "sky")); the valley mist settles on seaLevel
+  weather;                  // { kind, next, blend 0..1 (today → tomorrow across the night), aurora 0..1 (tonight, by darkness) }
+  forceWeather;             // null (follow the schedule) | one of WEATHER_KINDS — `?weather=`
+  forceAurora;              // null | true | false — `?aurora=`
+  weatherLabel()            // the weather now: today's, or tomorrow's once the night has turned
   paused;                   // freeze time
   sunLight;                 // THREE.DirectionalLight — sun by day, moon (cool, dim) by night; castShadow per option;
                             // shadow camera ≈ ±60 m box following the focus; its .target is added to the scene
@@ -357,14 +413,27 @@ export class Sky {
 }
 ```
 Owns `scene.fog` (`THREE.Fog`, far ≈ viewDistance, thicker mist at dawn/night) and a
-sky dome (gradient, sun disc + glow, moon, stars at night, optional soft clouds;
-`fog: false`, `depthWrite: false`, radius ≤ 1500 — camera far is 2000).
+sky dome (gradient, sun disc with a soft bloom, moon, stars at night, painted puffy
+clouds from a Worley-puff texture, aurora curtains — green with violet hems,
+ray-marched as a few ribbons — on aurora nights; `fog: false`, `depthWrite: false`,
+`toneMapped: false`, radius ≤ 1500 — camera far is 2000). The fog colour **is** the
+dome's horizon (see the colour-pipeline note at the top of `sky.js`).
+
+**Weather.** Each day's weather comes from `weatherForDay(seed, day)` (its own stream,
+`"underfern-weather"`): clear, fair, overcast or misty, blended into the next day's
+across the night. It scales cloud cover and greyness, the sun and hemisphere light,
+shadow strength, fog distance, the valley mist (how much lingers all day, how deep)
+and how pale the grade is. Each frame the Sky also writes the look's shared uniforms
+(`LOOK` in `look.js`): mist density, depth and colour, the sun's direction and the
+haze's glow toward it, the aerial blue, the cool fill (× the key light), the grade
+(vibrance, split tone — eased at night, rim strength — eased at night).
 
 ### `world/vegetation.js` (VEGETATION)
 
 ```js
 export class Vegetation {
-  constructor(terrain, { seed, density = 1, grass = true })
+  constructor(terrain, { seed, density = 1, grass = true, renderer, landmarks })
+                            // landmarks: their colliders join collidersNear; no tree, rock or log on their footprints
   group;                    // THREE.Group of InstancedMeshes (add to scene)
   plants;                   // FoodPlant[] — { id, kind, x, y, z, food, maxFood, regrow }
                             //   kind: "fern" | "cycad" | "horsetail" | "shrub"
@@ -376,10 +445,17 @@ export class Vegetation {
 }
 ```
 Default `maxFood` (kg): fern 40, horsetail 60, shrub 80, cycad 140; regrow ≈ 1–2% of
-max per second after eaten. Biome-driven placement (dense conifer/araucaria forest,
-scattered trees + ferns on plains, horsetails & dead snags in swamps, sparse
-conifers + boulders on highlands, cycads/palms near beaches). Spatial hashing for
-queries. Respect `density`.
+max per second after eaten. Biome-driven placement over the three living biomes:
+dense conifer / araucaria / ginkgo forest (tree ferns, horsetails and the odd dead
+snag where it runs wet); scattered groves, trees and ferns on the plains, thinning to
+sparse conifers and boulders on the upland meadows (plains above ~40 m); on the
+coast nothing on the open sand, marram grass on the dunes, then palms, cycads, tree
+ferns and salt scrub in clumps behind them, and bleached driftwood on the beach.
+Grass: dark, cool roots rising to sun-bleached tips, bent and lightened by the gust
+bands (look.js) as they roll across; mostly lush green, golden where the ground runs
+dry. Foliage keeps little specular, and its alpha test is custom (alpha-to-coverage
+up close, plain on/off far away) so distant canopies never glitter. Spatial hashing
+for queries. Respect `density`.
 
 ### `world/wind.js` (ATMOSPHERE)
 
@@ -393,6 +469,93 @@ export class Wind {
   scentFactor(fromX, fromZ, toX, toZ) // scent from → to: ≈1.6 straight downwind, ≈1 crosswind, ≈0.15 upwind (blend with strength)
 }
 ```
+
+### `world/look.js` (ATMOSPHERE) — the painterly look
+
+```js
+export const LOOK;                 // shared uniform objects (uLookMist, uLookMistColor, uLookMistSun, uLookSun,
+                                   //   uLookHazeGlow, uLookAerial, uLookFill, uLookGrade, uLookShadowTint,
+                                   //   uLookHighTint, uLookScreen, uLookWind) — Sky and Vegetation write them
+export const LOOK_PARS, LOOK_NOISE_GLSL, LOOK_ATMOS_GLSL, LOOK_GRADE_GLSL; // GLSL for ShaderMaterials (dome, water, atmosphere)
+export function patchLook(shader, { wrap = 0.45, rim = 0, fill = 1 } = {}) // inside a MeshStandardMaterial's onBeforeCompile
+export function setLookScreen(w, h) // drawing-buffer size, for the vignette (main.js on resize)
+```
+Every lit material in the world (terrain and caves, vegetation, rocks, landmarks,
+dinosaurs) calls `patchLook` after its own patches. It changes three.js's standard
+lighting and fog chunks:
+- **wrap lighting** — the key light bleeds `wrap` past the terminator, so forms turn
+  softly;
+- **cool fill** — where the key light is shadowed or turned away, `uLookFill` (a
+  blue-violet sky bounce, × the key light) fills in: shadows are airy, never black;
+- **rim** (`rim > 0`; dinosaurs 1, feathered 0.8, bone 0.45, plants 0) — a thin edge of
+  the key light's colour when it is behind the subject, of the sky's otherwise;
+- **grade** right after tone mapping: vibrance, split tone (cool shadows, warm
+  highlights — warmest at golden hour), a soft S-curve;
+- **atmosphere** in place of three's fog: exponential height mist (closed-form
+  integral along the view ray, drifting banks, lit from behind toward the sun),
+  then the sky's haze — two-tone aerial perspective (blue in the middle distance,
+  the horizon's colour far away, warmer toward the sun's azimuth) and thinned with
+  altitude, so ridges stack in layers. It still reaches exactly `scene.fog.color` at
+  the far plane, so land melts into the dome;
+- **vignette** as the last multiply.
+
+All of it runs in the materials' own fragment shaders: no extra pass, the same cost
+in both render styles. Shader cache keys stay what they were (`"sauria-…"` keys
+included) — every program of a key gets the same patch.
+
+### `world/landmarks.js` (TERRAIN) — the island's wonders
+
+```js
+export const LANDMARK_KINDS = ["ribcage", "skull", "vertebrae", "arch", "stacks", "basalt"];
+export function planLandmarks(terrain, seed) // → [{ id, kind, label, fossil, x, z, y, yaw, r, seed }] — pure, deterministic
+export class Landmarks {
+  constructor(terrain, { seed, shadows, detail /* 0.5 low … 1 */ })
+  sites;          // planLandmarks' sites, each with colliders: [{ x, z, r ≤ 4.5, height, kind: "landmark" }]
+  colliders;      // all of them; World hands the Landmarks to Vegetation, whose collidersNear reports them
+  group; meshes;  // one mesh per site (bone or stone material); hidden past the haze
+  stats;          // { sites, triangles, genMs }
+  update(camera, fogFar)
+  siteAt(x, z)    // the site whose footprint covers (x, z), or null
+  dispose()
+}
+```
+Dinosaurs only — nothing made: a colossal **ribcage** to walk through (plains or
+coast), a great half-buried theropod **skull** rolled on its cheek (plains), a buried
+neck arching out of the ground in **vertebrae** (plains or forest), a natural stone
+**arch** (coast or plains), a cluster of bedded **sea stacks** in the shallows off a
+shore, and a **basalt** causeway of hexagonal columns (coast or plains). Placement
+(`"underfern-landmarks"` stream, per kind) takes the first seeded spot that is dry,
+gentle and roomy ground in the kind's biomes (the stacks: 2–7 m of open sea a short
+swim off a shore), clear of caves and their mouths, lakes, rivers and river mouths,
+the pass valleys, trails and lookouts, and ≥ 170 m from the other landmarks.
+Footprints become `terrain.addKeepOut` circles (no spawns) and clearings for trees,
+rocks and logs. Geometry is lofted tubes, deformed blobs and hexagonal prisms with
+vertex paint; the shader adds world-space grain, strata (stone) or fine cracks
+(bone), lichen on what faces up and soil staining at the ground. Shader cache keys
+`"underfern-landmark-bone"` / `"underfern-landmark-stone"`.
+
+### `world/atmosphere.js` (ATMOSPHERE) — small lights and airs
+
+```js
+export class Atmosphere {
+  constructor(terrain, { seed, landmarks, low })
+  group; motes; beams; wisps; fungi; stats;
+  update(dt, focus, sky, camera, bufferHeight)
+  dispose()
+}
+```
+Four draw calls, no passes, everything faded by time of day, weather and cave
+shelter from the Sky:
+- **motes** — fireflies (dusk and night, in forest, by wet ground and around the old
+  bones) and pale drifting motes (night, aurora nights): one `Points` cloud on a
+  torus wrapped around the focus, glow and blink in the shaders;
+- **beams** — god rays: additive camera-facing quads along the key light through the
+  forest canopy around the focus (strongest with a low sun, in mist, looking toward
+  the light), and fixed shafts down each cave skylight;
+- **wisps** — painted cloud puffs clinging to the peaks and plumes of spindrift off the
+  summits, alpha-blended and fogged;
+- **fungi** — instanced glowing mushroom clusters on cave floors where no daylight
+  reaches.
 
 ### `creatures/species.js` (DINO-ART)
 
@@ -420,7 +583,7 @@ export function growthStage(growth)          // → "juvenile" | "subadult" | "a
   swim /* 0..1 ability */,
   social: "solo" | "pair" | "pack" | "herd", groupSize: [min, max],
   aggression /* 0..1 */, perception /* m */,
-  spawnWeight, biomes: [..preferred],
+  spawnWeight, biomes: [..preferred] /* of LIVING_BIOMES: "coast" | "plains" | "forest" */,
   call: { kind: "roar" | "bellow" | "honk" | "chirp" | "shriek" | "hoot" | "rumble" | "rattle",
           pitch /* Hz */, duration /* s, pose ≤ 3.5 */, open?, lift?, swell? /* call-pose shaping, model-only */ },
   colors: { ... }, body: { ... }         // model-only, free-form (DINO-ART decides)
@@ -431,7 +594,7 @@ export function growthStage(growth)          // → "juvenile" | "subadult" | "a
   juvenileSpeed /* hatchling speed × (0.85), blends to 1 with growth */,
   smell /* scent-range multiplier for AI smell, carcass finding and the player's sniff (1) */,
   swimDepth /* hip depth while floating, in hip heights, 0.3..1.3 (0.6 quadrupeds / 0.75 bipeds) */,
-  waterAffinity /* 0..1 (0): spawn weight ×(1 + 2.5a) by fresh water / on beaches and ×(1 − 0.8a) inland,
+  waterAffinity /* 0..1 (0): spawn weight ×(1 + 2.5a) by fresh water / on the coast and ×(1 − 0.8a) inland,
                    patrols banks, prefers drinking/wading/swimming prey, hits wet prey harder */,
   maxAlive /* never more than this many wild NPCs at once (no cap); a player of the kind doesn't count */,
   pairChance /* 0..1 (0): a "solo" species spawns as a pair (shared group, sometimes parent + young) */,
@@ -677,11 +840,13 @@ export class Menu {
   onSettingsChange = (settings) => {};                 //   screen (and reachable from pause) edits these; main applies + saves
 }
 export class MapView {
-  constructor(root, terrain)
+  constructor(root, terrain, { landmarks } = {}) // landmarks: drawn as named glyphs (bones / stone)
   open; toggle(); close();
   update(dt, { player, cameraYaw, markers })
 }
 ```
+The map's terrain readout names the biomes *Coast*, *Plains* (*Upland meadow* above
+45 m), *Forest* and *Bare rock*; the legend lists the old bones and the stone wonders.
 **Design tokens** (UI defines them on `:root` in `style.css` — the safe areas and gutters on
 `#app`, since they're measured in the app frame):
 `--font-display`, `--font-ui`, `--font-mono`, `--c-bone`, `--c-paper`, `--c-ink`, `--c-moss`,
@@ -717,19 +882,24 @@ export class World {
   scene; camera; renderer; quality; seed; events /* EventBus */; rng; time;
   terrain; water; vegetation; sky; ecosystem;
   wind;                   // Wind (world/wind.js) — scent drift for the AI's smell; AI guards for null
+  landmarks;              // Landmarks (world/landmarks.js), built before the vegetation
+  atmosphere;             // Atmosphere (world/atmosphere.js), built after it
   get player()            // ecosystem.player
-  update(dt, focus)       // sky → vegetation → ecosystem → water
+  update(dt, focus)       // sky → landmarks → vegetation → atmosphere → ecosystem → water
 }
 ```
 `main.js` boots the renderer (ACES tone mapping, sRGB, PCF soft shadows when
-enabled), owns the render-style pipeline (`"detailed"` direct render vs `"pixel"`
-low-res target + nearest upscale + dither pass), picks quality, builds the world, runs the state machine
+enabled), owns the render style (`"pixel"`, the default: a small drawing buffer
+upscaled by CSS nearest-neighbour; `"detailed"`: full resolution — both draw
+straight to the canvas, no post pass), keeps the look's screen size current
+(`setLookScreen`), picks quality, builds the world, runs the state machine
 (`menu` → `playing` ⇄ `paused` → `dead`), saves/loads, handles resize/visibility,
 and exposes a test hook `window.__underfern`.
 
 URL params: `?species=<id>` autostart · `?growth=0..1` · `?t=0..1` time of day
-(pauses the clock) · `?seed=N` · `?quality=low|high` · `?style=detailed|pixel` · `?debug=1` (fps/overlay) ·
-`?pos=x,z` spawn position · `?mute=1`.
+(pauses the clock) · `?seed=N` · `?quality=low|high` · `?style=detailed|pixel` · `?pixel=0..1` ·
+`?debug=1` (fps/overlay) · `?pos=x,z` spawn position · `?mute=1` ·
+`?weather=clear|fair|overcast|misty` (hold one weather) · `?aurora=0|1` (force tonight's aurora off / on).
 
 ---
 
@@ -764,3 +934,13 @@ Large per-frame things (footsteps, gait) are polled, not evented.
   blends the render resolution between full and chunky; `?pixel=0..1` overrides it.
 - Test hook: `window.__underfern.advance(seconds, dt = 0.05)` runs the state machine
   without drawing. `node tests/run-tests.mjs` runs unit + smoke tests headlessly.
+- **Three living biomes.** `beach`, `swamp` and `highland` are gone: the beach widened
+  into the `coast` belt, swamps became wet forest (still `forest`; mud, horsetails and
+  frogs by moisture), highland plateaus became upland meadow (`plains`). Everything
+  that names biomes uses the new set — species `biomes`, the ecosystem's shore
+  weighting (`coast`), the AI's cover (`forest` hides; `plains` and `coast` are open),
+  vegetation tables, audio (footsteps by `coastAt`, slope and moisture), the map.
+- **The painterly look, landmarks and atmosphere** (`look.js`, `landmarks.js`,
+  `atmosphere.js`; see their contracts above) — in-material lighting and haze, six
+  deterministic wonders with colliders, and the small lights and airs; plus the Sky's
+  daily weather and auroras.
