@@ -1,5 +1,5 @@
 // World — owns everything that exists on the island: terrain, water, sky,
-// vegetation, wind and the ecosystem of creatures. main.js builds one per seed
+// landmarks, vegetation, wind and the ecosystem of creatures. main.js builds one per seed
 // and drives it with update(dt, focus) every frame.
 
 import { WORLD, TIME, GAME, QUALITY } from "../config.js";
@@ -10,6 +10,8 @@ import { Water } from "./water.js";
 import { Sky } from "./sky.js";
 import { Vegetation } from "./vegetation.js";
 import { Wind } from "./wind.js";
+import { Landmarks } from "./landmarks.js";
+import { Atmosphere } from "./atmosphere.js";
 import { Ecosystem } from "../creatures/ecosystem.js";
 import { SPECIES } from "../creatures/species.js";
 import { prewarmDinoGeometry } from "../creatures/dinoModel.js";
@@ -45,6 +47,10 @@ export class World {
     this.sky = null;
     this.vegetation = null;
     this.wind = null;
+    /** Landmarks (world/landmarks.js): fossils and stone wonders, with colliders. */
+    this.landmarks = null;
+    /** Atmosphere (world/atmosphere.js): fireflies, light shafts, peak wisps, cave fungi. */
+    this.atmosphere = null;
     this.ecosystem = null;
 
     if (!deferred) for (const step of this._steps()) step.run();
@@ -92,7 +98,9 @@ export class World {
       this.sky.shelter = ceil !== Infinity && cam.y < ceil + 0.5 ? t.shelterAt(cam.x, cam.z) : 0;
     }
     this.sky.update(dt, focus, this.camera);
+    if (this.landmarks) this.landmarks.update(this.camera, this.sky.fog.far);
     if (this.vegetation) this.vegetation.update(dt, focus);
+    if (this.atmosphere) this.atmosphere.update(dt, focus, this.sky, this.camera, this.renderer ? this.renderer.domElement.height : 720);
     this.ecosystem.update(dt, focus);
     this.water.update(dt, this.sky);
   }
@@ -108,6 +116,8 @@ export class World {
       this.scene.remove(this.water.mesh);
       this.water.dispose?.();
     }
+    this.landmarks?.dispose();
+    this.atmosphere?.dispose();
     this.sky?.dispose?.();
     if (this.terrain) {
       this.scene.remove(this.terrain.mesh);
@@ -145,7 +155,9 @@ export class World {
             viewDistance: q.viewDistance,
             shadows: q.shadows,
             shadowMapSize: q.shadowMapSize,
+            seed: hash(this.seed, "sky"),
           });
+          this.sky.seaLevel = this.terrain.seaLevel;
           this.sky.onNewDay = (day) => this.events.emit("newDay", { day });
           this.water = new Water(this.terrain);
           this.scene.add(this.water.mesh);
@@ -153,18 +165,37 @@ export class World {
         },
       },
       {
+        label: "Unearthing the old bones",
+        weight: 0.03,
+        run: () => {
+          this.landmarks = new Landmarks(this.terrain, {
+            seed: this.seed,
+            shadows: !!q.shadows,
+            detail: (q.vegetationDensity ?? 1) < 0.7 ? 0.5 : 1,
+          });
+          this.scene.add(this.landmarks.group);
+        },
+      },
+      {
         label: "Growing the forests",
-        weight: 0.3,
+        weight: 0.27,
         run: () => {
           this.vegetation = new Vegetation(this.terrain, {
             seed: hash(this.seed, "vegetation"),
             density: q.vegetationDensity,
             grass: q.grass,
             renderer: this.renderer,
+            landmarks: this.landmarks,
           });
           // Sway follows the same wind that carries scent.
           if (this.wind) this.vegetation.wind = this.wind;
           this.scene.add(this.vegetation.group);
+          this.atmosphere = new Atmosphere(this.terrain, {
+            seed: this.seed,
+            landmarks: this.landmarks,
+            low: (q.vegetationDensity ?? 1) < 0.7,
+          });
+          this.scene.add(this.atmosphere.group);
         },
       },
       {
