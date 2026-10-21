@@ -1,7 +1,7 @@
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/summit-default-dark.gif">
-  <source media="(prefers-color-scheme: light)" srcset="assets/summit-default-light.gif">
-  <img src="assets/summit-default-dark.gif" alt="Animated ASCII art of a snowy mountain peak above drifting clouds" width="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/cliff-village-dark.gif">
+  <source media="(prefers-color-scheme: light)" srcset="assets/cliff-village-light.gif">
+  <img src="assets/cliff-village-dark.gif" alt="Animated ASCII art of a whitewashed cliff village above the sea" width="100%">
 </picture>
 
 # Hunter Bastian  

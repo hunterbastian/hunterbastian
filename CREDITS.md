@@ -1,12 +1,12 @@
 # Credits
 
-The header animation is derived from [Aurora Cabin Snowfall](https://www.ascii-magic.com/ascii/aurora-cabin-snowfall) by ASCII Magic.
+The header animation is derived from [Whitewashed Cliff Village](https://www.ascii-magic.com/ascii/cliff-village-sea) by ASCII Magic.
 
-An earlier header, kept in this repo as `assets/summit-dark.gif` and `assets/summit-light.gif`, is derived from [Summit Above Clouds](https://www.ascii-magic.com/ascii/summit-cloud-sea) by ASCII Magic.
+Earlier headers remain in the repo. [Aurora Cabin Snowfall](https://www.ascii-magic.com/ascii/aurora-cabin-snowfall) is kept as `assets/aurora-cabin-snowfall-dark.gif` and `assets/aurora-cabin-snowfall-light.gif`. [Summit Above Clouds](https://www.ascii-magic.com/ascii/summit-cloud-sea) is kept as `assets/summit-dark.gif` and `assets/summit-light.gif` (cool blue-white) and as `assets/summit-default-dark.gif` and `assets/summit-default-light.gif` (the original palette).
 
 Copyright (c) 2026 ASCII Magic (ascii-magic.com)
 
-Both pieces are released under the MIT License:
+These pieces are released under the MIT License:
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
