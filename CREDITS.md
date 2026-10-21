@@ -1,10 +1,12 @@
 # Credits
 
-The header animation is derived from [Summit Above Clouds](https://www.ascii-magic.com/ascii/summit-cloud-sea) by ASCII Magic.
+The header animation is derived from [Aurora Cabin Snowfall](https://www.ascii-magic.com/ascii/aurora-cabin-snowfall) by ASCII Magic.
+
+An earlier header, kept in this repo as `assets/summit-dark.gif` and `assets/summit-light.gif`, is derived from [Summit Above Clouds](https://www.ascii-magic.com/ascii/summit-cloud-sea) by ASCII Magic.
 
 Copyright (c) 2026 ASCII Magic (ascii-magic.com)
 
-The piece is released under the MIT License:
+Both pieces are released under the MIT License:
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

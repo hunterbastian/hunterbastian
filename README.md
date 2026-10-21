@@ -1,7 +1,7 @@
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/alpine-night-dark.gif">
-  <source media="(prefers-color-scheme: light)" srcset="assets/alpine-night-light.gif">
-  <img src="assets/alpine-night-dark.gif" alt="Animated ASCII art of a snowy mountain peak above drifting clouds" width="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="assets/aurora-cabin-snowfall-dark.gif">
+  <source media="(prefers-color-scheme: light)" srcset="assets/aurora-cabin-snowfall-light.gif">
+  <img src="assets/aurora-cabin-snowfall-dark.gif" alt="Animated ASCII art of a snowy cabin under northern lights" width="100%">
 </picture>
 
 # Hunter Bastian  
