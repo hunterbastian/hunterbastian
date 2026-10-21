@@ -480,7 +480,7 @@ const SUITES = [
     mobile: true,
     steps: [
       {
-        name: "touch (iPhone-sized, pixel default): joystick moves the player",
+        name: "touch (iPhone-sized, Retro HD default): joystick moves the player",
         async run({ page, ctx, errors }) {
           await waitState(page, "playing");
           const setup = await page.evaluate(() => ({
@@ -493,7 +493,7 @@ const SUITES = [
             buttons: document.querySelectorAll(".touch-btn").length,
           }));
           expect(setup.isTouch, "input should detect touch on a mobile context");
-          expect(setup.style === "pixel", `the default style should be pixel, got ${setup.style}`);
+          expect(setup.style === "retro", `the default style should be Retro HD, got ${setup.style}`);
           expect(setup.zone && setup.zone.w > 50, "no joystick zone (.touch-zone--move)");
           expect(setup.buttons >= 5, `expected touch buttons, found ${setup.buttons}`);
           const client = await ctx.newCDPSession(page);
@@ -604,9 +604,47 @@ const SUITES = [
         },
       },
       {
-        name: "settings: Pixel size slider (pause → Settings) changes the render resolution",
+        name: "Retro HD: a sub-HD frame through the post pass — the scene drawn, bright parts blooming",
+        async run({ page, errors }) {
+          await page.evaluate(() => __underfern.advance(0.5));
+          await frames(page, 2);
+          const r = await page.evaluate(() => {
+            const c = __underfern.renderer.domElement;
+            const p = __underfern.retro;
+            return { buf: [c.width, c.height], css: getComputedStyle(c).imageRendering, post: p ? p.stats() : null };
+          });
+          expect(r.post, "the Retro HD style should draw through its post pass");
+          expect(r.post.width === r.buf[0] && r.post.height === r.buf[1], `the post pass should match the drawing buffer, got ${JSON.stringify(r)}`);
+          expect(r.buf[1] <= 540, `on Low the retro frame is at most 540 rows, got ${r.buf[1]}`);
+          expect(r.css !== "pixelated", "the retro frame is stretched smoothly, not pixelated");
+          const lum = (c) => 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2];
+          expect(lum(r.post.scene) > 25, `the scene target should hold the frame, got mean ${r.post.scene}`);
+          // Whatever this view holds, with the bright pass opened right up the
+          // whole frame must come through the bloom chain.
+          const open = await page.evaluate(async () => {
+            const t = __underfern.retro.tuning;
+            const was = t.threshold;
+            t.threshold = 0;
+            await new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)));
+            const s = __underfern.retro.stats();
+            t.threshold = was;
+            return s;
+          });
+          expect(lum(open.bloom) > lum(open.scene) * 0.25, `with no threshold the bloom should carry the frame, got ${open.bloom} for a scene of ${open.scene}`);
+          await expectClean(page, errors);
+          return `${r.buf[0]}×${r.buf[1]}; scene mean ${r.post.scene}, bloom mean ${r.post.bloom} (${open.bloom} wide open)`;
+        },
+      },
+      {
+        name: "settings: switching to Pixel, then its size slider (pause → Settings), changes the render resolution",
         async run({ page, errors }) {
           await page.locator(".pause__item[data-act='settings']").click({ timeout: 60_000 });
+          const opts = page.locator(".style-opt");
+          await opts.first().waitFor({ state: "visible", timeout: 60_000 });
+          expect((await opts.count()) === 3, `Settings should offer three styles, found ${await opts.count()}`);
+          await page.locator(".style-opt:has(input[value='pixel'])").click({ timeout: 60_000 });
+          const after = await page.evaluate(() => ({ style: __underfern.style, post: !!__underfern.retro }));
+          expect(after.style === "pixel" && !after.post, `picking Pixel should switch styles and drop the post pass, got ${JSON.stringify(after)}`);
           const slider = page.locator("input[type=range][id$='-pix']").first();
           await slider.waitFor({ state: "visible", timeout: 60_000 });
           const rowsAt = (v) =>

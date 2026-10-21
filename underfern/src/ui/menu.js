@@ -517,7 +517,10 @@ export function speciesSilhouette(species, { scale = true } = {}) {
 /* --- Settings ------------------------------------------------------------------------ */
 
 /** Default player settings (see Menu#settings). */
-export const DEFAULT_SETTINGS = Object.freeze({ style: "pixel", pixelSize: 0.5, quality: "auto", muted: false, sensitivity: 1 });
+export const DEFAULT_SETTINGS = Object.freeze({ style: "retro", pixelSize: 0.5, quality: "auto", muted: false, sensitivity: 1, styleVersion: 2 });
+
+/** The render styles, in the order Settings lists them. */
+export const STYLES = ["retro", "detailed", "pixel"];
 
 /** Words for the pixel-size slider (0 fine … 1 chunky). */
 export const pixelSizeLabel = (v) => (v < 0.34 ? "Fine" : v < 0.67 ? "In between" : "Chunky");
@@ -528,11 +531,13 @@ export function normalizeSettings(s = {}) {
   const sens = Number(src.sensitivity);
   const pix = Number(src.pixelSize);
   return {
-    style: src.style === "detailed" ? "detailed" : "pixel",
+    style: STYLES.includes(src.style) ? src.style : "retro",
     pixelSize: Number.isFinite(pix) ? clamp(Math.round(pix * 100) / 100, 0, 1) : 0.5,
     quality: ["auto", "high", "low"].includes(src.quality) ? src.quality : "auto",
     muted: Boolean(src.muted),
     sensitivity: Number.isFinite(sens) ? clamp(Math.round(sens * 100) / 100, 0.5, 2) : 1,
+    // Bumped when the default style changes (core/migrate.js moves older settings over once).
+    styleVersion: 2,
   };
 }
 
@@ -546,8 +551,12 @@ const BAYER4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
  * sauropod — painted into `canvas` at its own resolution. The pixel preview
  * paints the very same scene at a fraction of the size, then quantises it with
  * an ordered dither: exactly what the "pixel" render style does to the island.
+ * The retro preview paints it a little under size (the browser stretches it
+ * softly), then blooms the bright parts, drains a little colour and adds grain.
+ * @param {HTMLCanvasElement} canvas
+ * @param {"retro" | "detailed" | "pixel"} mode
  */
-function paintVista(canvas, pixel) {
+function paintVista(canvas, mode) {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
   const w = canvas.width;
@@ -641,7 +650,11 @@ function paintVista(canvas, pixel) {
   ctx.fillStyle = fg;
   ctx.fillRect(0, h * 0.88, w, h * 0.12);
 
-  if (!pixel) return;
+  if (mode === "retro") {
+    retroFinish(canvas, ctx);
+    return;
+  }
+  if (mode !== "pixel") return;
   // Ordered dither + gentle quantisation, like the pixel render pass.
   const img = ctx.getImageData(0, 0, w, h);
   const d = img.data;
@@ -654,6 +667,57 @@ function paintVista(canvas, pixel) {
       const t = (BAYER4[(y & 3) * 4 + (x & 3)] / 16 - 0.5) * step * 0.55;
       for (let c = 0; c < 3; c++) d[o + c] = Math.round(clamp(d[o + c] + t, 0, 255) / step) * step;
     }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+/** The retro preview's finish: bloom, a bronzed grade and film grain (2D, once). */
+function retroFinish(canvas, ctx) {
+  const w = canvas.width;
+  const h = canvas.height;
+  // Bloom: shrink the picture (the browser's smoothing blurs it), keep only
+  // its bright parts, and screen it back on, stretched.
+  const sw = Math.max(1, Math.round(w / 8));
+  const sh = Math.max(1, Math.round(h / 8));
+  const small = document.createElement("canvas");
+  small.width = sw;
+  small.height = sh;
+  const sctx = small.getContext("2d");
+  if (sctx) {
+    sctx.drawImage(canvas, 0, 0, sw, sh);
+    const glow = sctx.getImageData(0, 0, sw, sh);
+    const g = glow.data;
+    for (let i = 0; i < g.length; i += 4) {
+      const peak = Math.max(g[i], g[i + 1], g[i + 2]) / 255;
+      const k = clamp((peak - 0.55) / 0.3, 0, 1);
+      for (let c = 0; c < 3; c++) g[i + c] = g[i + c] * k * k * (3 - 2 * k);
+    }
+    sctx.putImageData(glow, 0, 0);
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+    ctx.imageSmoothingEnabled = true;
+    ctx.globalAlpha = 0.85;
+    ctx.drawImage(small, 0, 0, w, h);
+    ctx.restore();
+  }
+  const img = ctx.getImageData(0, 0, w, h);
+  const d = img.data;
+  const rng = makeRng(hash("vista-grain", 3));
+  for (let i = 0; i < d.length; i += 4) {
+    let r = d[i] / 255;
+    let g = d[i + 1] / 255;
+    let b = d[i + 2] / 255;
+    const l = 0.299 * r + 0.587 * g + 0.114 * b;
+    r = l + (r - l) * 0.86;
+    g = l + (g - l) * 0.86;
+    b = l + (b - l) * 0.86;
+    const t = clamp((l - 0.15) / 0.6, 0, 1);
+    r *= 0.95 + 0.09 * t;
+    b *= 1 - 0.1 * t;
+    const n = (rng() + rng() - 1) * 0.06;
+    d[i] = clamp((r + n) * 255, 0, 255);
+    d[i + 1] = clamp((g + n) * 255, 0, 255);
+    d[i + 2] = clamp((b + n) * 255, 0, 255);
   }
   ctx.putImageData(img, 0, 0);
 }
@@ -1122,16 +1186,22 @@ export class Menu {
             <legend class="field__label">Graphics style</legend>
             <div class="style-pick">
               <label class="style-opt">
+                <input type="radio" name="${id}-style" value="retro" />
+                <span class="style-opt__img"><canvas width="192" height="100" aria-hidden="true"></canvas></span>
+                <span class="style-opt__name">Retro HD</span>
+                <span class="style-opt__desc">720p, bloom and film grain — a late-2000s console look.</span>
+              </label>
+              <label class="style-opt">
                 <input type="radio" name="${id}-style" value="detailed" />
                 <span class="style-opt__img"><canvas width="336" height="176" aria-hidden="true"></canvas></span>
                 <span class="style-opt__name">Detailed</span>
-                <span class="style-opt__desc">Full resolution — soft light, drifting mist, fine surface detail.</span>
+                <span class="style-opt__desc">Full resolution — soft light and fine surface detail.</span>
               </label>
               <label class="style-opt">
                 <input type="radio" name="${id}-style" value="pixel" />
                 <span class="style-opt__img style-opt__img--pixel"><canvas width="64" height="34" aria-hidden="true"></canvas></span>
-                <span class="style-opt__name">Pixel <em>retro</em></span>
-                <span class="style-opt__desc">Low-res render, crisp nearest-neighbour upscale — a late-'90s look.</span>
+                <span class="style-opt__name">Pixel</span>
+                <span class="style-opt__desc">Chunky low-res pixels — a late-'90s look.</span>
               </label>
             </div>
           </fieldset>
@@ -1177,9 +1247,10 @@ export class Menu {
     this._pixOut = layer.querySelector(`output[for="${id}-pix"]`);
     this._soundBtn = layer.querySelector(".switch");
     this._qualityHint = layer.querySelector('[data-hint="quality"]');
-    const [detailed, pixel] = layer.querySelectorAll(".style-opt canvas");
-    paintVista(detailed, false);
-    paintVista(pixel, true);
+    const [retro, detailed, pixel] = layer.querySelectorAll(".style-opt canvas");
+    paintVista(retro, "retro");
+    paintVista(detailed, "detailed");
+    paintVista(pixel, "pixel");
     this._syncSettingsForm();
   }
 

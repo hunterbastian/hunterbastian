@@ -1511,8 +1511,8 @@ button:disabled {
 
 .style-pick {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .style-opt {
@@ -1554,10 +1554,10 @@ button:disabled {
 .style-opt::after {
   content: "";
   position: absolute;
-  top: 16px;
-  right: 16px;
-  width: 20px;
-  height: 20px;
+  top: 14px;
+  right: 14px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
   background: var(--c-ochre)
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2312110d' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E")
@@ -1596,7 +1596,7 @@ button:disabled {
 }
 
 .style-opt__name {
-  font: 400 19px/1.1 var(--font-display);
+  font: 400 18px/1.1 var(--font-display);
   color: var(--c-paper);
 }
 

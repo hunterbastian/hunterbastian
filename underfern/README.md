@@ -19,10 +19,10 @@ the woods at dusk.
 
 You play as one of eight dinosaurs, in third person.
 
-The default look is **Pixel**: the 3D scene is drawn at a few hundred pixels tall
-and scaled up with crisp nearest-neighbour edges (a late-'90s look), while the
-interface stays sharp. You can set the pixel size, or switch to **Detailed** for
-full resolution.
+The default look is **Retro HD**, a late-2000s console look. The island is drawn
+at 720p at most, with bloom, film grain, a soft upscale and a slightly bronzed grade,
+while the interface stays sharp. You can switch to **Detailed** for full resolution,
+or **Pixel** for chunky late-'90s pixels.
 
 There's no build step and there are no npm dependencies. It's plain ES modules plus
 a vendored copy of three.js. Everything is procedural: the island, the forests,
@@ -236,14 +236,18 @@ Open **Settings** from the title screen or the pause menu. Settings are saved on
 device.
 
 - **Graphics style:**
-  - **Pixel** (default): low-resolution render with a crisp nearest-neighbour
-    upscale.
+  - **Retro HD** (default): a sub-HD frame (720 rows on High, 540 on Low, fewer if
+    the screen has fewer), soft quincunx-style anti-aliasing, bloom, a desaturated
+    and bronzed grade, film grain and a little lens fringing at the corners, then a
+    smooth upscale.
   - **Detailed**: full resolution (antialiased on High quality), with soft light
     and fine surface detail.
+  - **Pixel**: low-resolution render with a crisp nearest-neighbour upscale.
 - **Pixel size:** *Fine*, *In between* (default) or *Chunky*, applied live.
   Pixels stay square and even on any screen.
-- Both styles have the same lighting, mist, haze and colour grade. They are
-  computed in each surface's own shader rather than in a post-processing pass, so
+- All three styles have the same lighting, mist, haze and colour grade. They are
+  computed in each surface's own shader rather than in a post-processing pass (Retro
+  HD adds its own short finishing pass on top), so
   they cost nothing extra on a phone.
 - **Quality:**
   - *Auto* picks *Low* on phones, small screens and ≤ 4-core machines (lighter
@@ -263,7 +267,7 @@ URL parameters, handy for sharing a moment or testing:
 | `?creative=1` | with `?species`: Creative mode (full grown, can't be hurt, never saved) |
 | `?pos=x,z` | spawn position in metres |
 | `?t=0..1` | time of day (0 midnight, 0.25 sunrise, 0.5 noon, 0.75 sunset); pauses the clock |
-| `?style=pixel\|detailed` · `?pixel=0..1` | render style · pixel size |
+| `?style=retro\|detailed\|pixel` · `?pixel=0..1` | render style · pixel size |
 | `?quality=low\|high` | force a quality profile |
 | `?seed=N` | a different island |
 | `?weather=clear\|fair\|overcast\|misty` | hold one weather instead of the day's own |
@@ -307,9 +311,11 @@ there is one and otherwise falls back to the global install.
 - **Smoke tests** play the real game:
   - the title screen: Survival → choose a species → Hatch, and a saved life
     (Continue) whose species has left the island
-  - survival in both render styles, keyboard movement, pause, and death → death
-    screen → hatch again
-  - an iPhone-sized touch run (joystick, pause button, Pixel-size slider)
+  - survival in the Pixel and Detailed styles, keyboard movement, pause, and death →
+    death screen → hatch again
+  - an iPhone-sized touch run in the default Retro HD style (joystick, the post
+    pass blooming a daytime frame, pause button, switching to Pixel and its
+    size slider)
   - an upright iPhone: the game turns sideways, the drawing buffer stays
     landscape, and pushing the stick toward the phone's right edge (the app's
     top) walks forward

@@ -16,6 +16,7 @@ import { SPECIES, PLAYABLE, getSpecies, growthScale, growthStage } from "../src/
 import { Wind } from "../src/world/wind.js";
 import { World } from "../src/world/world.js";
 import { planLandmarks, LANDMARK_KINDS } from "../src/world/landmarks.js";
+import { migrateSettings } from "../src/core/migrate.js";
 import { weatherForDay, WEATHER_KINDS } from "../src/world/sky.js";
 import { isRotated, appSize, toApp, onAppResize } from "../src/core/screen.js";
 import { Input } from "../src/player/input.js";
@@ -115,6 +116,16 @@ test("screen: a desktop window isn't turned; the app frame is the viewport", () 
 });
 
 /* --- player/input.js (touch layer) ---------------------------------------- */
+
+test("settings: Retro HD becomes the default once; a Pixel choice made since sticks", () => {
+  const moved = migrateSettings({ style: "pixel", pixelSize: 0.75, muted: true });
+  assert(moved && moved.style === "retro" && moved.styleVersion === 2, `old Pixel settings should move to Retro HD, got ${JSON.stringify(moved)}`);
+  assert(moved.pixelSize === 0.75 && moved.muted === true, "the other settings carry over");
+  assert(migrateSettings({ muted: true }).style === "retro", "settings with no style get the new default");
+  assert(migrateSettings({ style: "detailed" }).style === "detailed", "a Detailed player stays Detailed");
+  assert(migrateSettings({ style: "pixel", styleVersion: 2 }) === null, "Pixel picked after the change is left alone");
+  assert(migrateSettings(null) === null && migrateSettings("pixel") === null, "junk is ignored");
+});
 
 test("input: Bite doubles as a look pad past the slop; Sprint latches", () => {
   // A desktop window, so toApp is the identity and client px are app px.

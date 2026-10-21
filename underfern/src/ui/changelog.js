@@ -4,6 +4,17 @@
 /** @type {{ v: string, date: string, title: string, notes: string[] }[]} */
 export const CHANGELOG = [
   {
+    v: "0.10",
+    date: "2026-10-21",
+    title: "Retro HD",
+    notes: [
+      "A new default look, straight out of a late-2000s console: a 720p frame, soft anti-aliasing and a smooth upscale.",
+      "Bright skies, snow and water bloom; fireflies and glowing fungi glow.",
+      "A bronzed, slightly drained grade, deeper blacks, film grain and a touch of lens fringing at the edges.",
+      "Detailed and Pixel are still in Settings.",
+    ],
+  },
+  {
     v: "0.9",
     date: "2026-10-14",
     title: "A wilder light",

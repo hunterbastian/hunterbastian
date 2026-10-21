@@ -14,6 +14,7 @@ import { clamp } from "./core/math.js";
 import { makeRng, hash } from "./core/rng.js";
 import { World } from "./world/world.js";
 import { setLookScreen } from "./world/look.js";
+import { RetroPass } from "./world/retro.js";
 import { PLAYABLE, getSpecies } from "./creatures/species.js";
 import { Input } from "./player/input.js";
 import { ThirdPersonCamera } from "./player/camera.js";
@@ -82,8 +83,8 @@ const quality = QUALITY[qualityName];
 
 function resolveStyle() {
   const forced = params.get("style");
-  if (forced === "pixel" || forced === "detailed") return forced;
-  return settings.style === "pixel" ? "pixel" : STYLE.default;
+  if (forced === "retro" || forced === "pixel" || forced === "detailed") return forced;
+  return settings.style || STYLE.default;
 }
 let style = resolveStyle();
 
@@ -109,8 +110,12 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 2000);
 camera.position.set(0, 120, 0);
 
+// The retro style's post pass, made the first time that style is drawn.
+let retro = null;
+
 /**
- * Size the drawing buffer. "pixel" draws the 3D scene at a few hundred pixels
+ * Size the drawing buffer. "retro" draws a sub-HD frame (720 rows at most)
+ * through its post pass and lets the browser stretch it smoothly. "pixel" draws the 3D scene at a few hundred pixels
  * tall straight into the canvas and lets CSS upscale it with nearest-neighbour
  * filtering — identical colours/tone mapping to "detailed", zero extra passes,
  * and the DOM UI stays crisp on top. Sized from the app frame (core/screen.js):
@@ -142,6 +147,14 @@ function resize() {
     renderer.setPixelRatio(1);
     renderer.setSize(Math.max(1, Math.round((w * dpr) / k)), Math.max(1, Math.round((h * dpr) / k)), false);
     canvas.style.imageRendering = k > 1 ? "pixelated" : "";
+  } else if (style === "retro") {
+    const dpr = window.devicePixelRatio || 1;
+    const nativeRows = h * Math.min(dpr, quality.pixelRatioCap);
+    const rows = Math.min(nativeRows, STYLE.retroRows[qualityName] || 540);
+    const k = (h * dpr) / rows;
+    renderer.setPixelRatio(1);
+    renderer.setSize(Math.max(1, Math.round((w * dpr) / k)), Math.max(1, Math.round(rows)), false);
+    canvas.style.imageRendering = "";
   } else {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, quality.pixelRatioCap));
     renderer.setSize(w, h, false);
@@ -151,6 +164,13 @@ function resize() {
   canvas.style.height = "100%";
   canvas.dataset.style = style;
   setLookScreen(canvas.width, canvas.height); // the vignette works in drawing-buffer pixels
+  if (style === "retro") {
+    retro ??= new RetroPass(renderer);
+    retro.setSize(canvas.width, canvas.height);
+  } else if (retro) {
+    retro.dispose();
+    retro = null;
+  }
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }
@@ -413,7 +433,7 @@ menu.onSettingsChange = (next) => {
   audio?.setMuted(settings.muted);
   if (game.tpc) game.tpc.sensitivity = settings.sensitivity;
   if (params.get("style") === null && settings.style !== style) {
-    style = settings.style === "pixel" ? "pixel" : "detailed";
+    style = settings.style;
     resize();
   } else if (style === "pixel" && settings.pixelSize !== prev.pixelSize) {
     resize();
@@ -471,7 +491,8 @@ function frame(now) {
 
   step(dt);
 
-  renderer.render(scene, camera);
+  if (retro) retro.render(scene, camera);
+  else renderer.render(scene, camera);
 
   if (DEBUG) updateDebug();
   input.endFrame();
@@ -694,6 +715,10 @@ window.__underfern = {
   },
   get style() {
     return style;
+  },
+  /** The retro style's post pass (null in the other styles). */
+  get retro() {
+    return retro;
   },
   get quality() {
     return qualityName;

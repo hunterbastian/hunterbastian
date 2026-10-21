@@ -25,10 +25,14 @@ export const GAME = {
 
 // Two render profiles. main.js picks one (auto: low on touch / small screens),
 // and `?quality=low|high` overrides it.
-// Render styles (same assets): "detailed" draws at full resolution; "pixel" draws the
-// 3D scene into a low-res target and upscales it with nearest-neighbour filtering.
+// Render styles (same assets): "retro" draws a sub-HD frame through a bloom /
+// grain / grade pass (world/retro.js) and lets the browser upscale it smoothly;
+// "detailed" draws at full resolution; "pixel" draws the 3D scene at a few
+// hundred rows and upscales it with nearest-neighbour filtering.
 export const STYLE = {
-  default: "pixel",
+  default: "retro",
+  // Rows the retro frame is drawn at, at most (a phone's own resolution caps it lower).
+  retroRows: { high: 720, low: 540 },
   // Rows of game pixels at the chunkiest pixel size; "in between" (0.5) sits
   // halfway (geometrically) between this and the full render resolution.
   pixelHeight: { high: 300, low: 230 },
