@@ -1,8 +1,10 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/alpine-night-dark.gif">
   <source media="(prefers-color-scheme: light)" srcset="assets/alpine-night-light.gif">
-  <img src="assets/alpine-night-dark.gif" alt="Animated ASCII scene of snow-capped peaks above a still fjord, with a faint reflection, sparse stars, a quiet aurora, and slow falling snow" width="720">
+  <img src="assets/alpine-night-dark.gif" alt="Summit Above Clouds, animated ASCII art: a snowy peak above a drifting sea of cloud" width="100%">
 </picture>
+
+<sub><a href="https://www.ascii-magic.com/ascii/summit-cloud-sea">Summit Above Clouds</a> by ASCII Magic</sub>
 
 # Hunter Bastian  
 software designer · utah valley university
