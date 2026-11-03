@@ -50,7 +50,21 @@ working (add, don't rename) and note it in your report.
   colossal fossils, sea stacks, a stone arch, basalt columns, glowing fungi and
   fireflies. The look lives **in the materials** (`world/look.js`), never in a
   post-processing pass, so it costs the same in every render style.
-- **Three render styles, same assets.** `"retro"` (default — "Retro HD", a
+- **Four render styles, same assets.** `"sd"` ("Retro SD", a GameCube / PS2 game on
+  a CRT, after gsimone's breakdown: `world/retro-sd.js` draws ~448 lines at a whole
+  number of device pixels per line; the canvas is that multiple of the source, so the
+  final pass can draw even scanlines. The stack, in order:
+  - the scene into a target with a depth texture
+  - a quarter-size bright pass whose alpha marks open sky (depth past 1800 m)
+  - sun shafts: a radial march toward the sun's screen position, taken from
+    `LOOK.uLookSun`
+  - a 4-iteration Kawase bloom
+  - a plain quarter copy, Kawase-blurred for depth of field
+  - a composite at source size: DOF by linear depth, bloom, shafts, a little
+    saturation, and 6-bit colour with a 4×4 Bayer dither
+  - an output pass at canvas size: the GameCube deflicker (¼ ½ ¼ vertical), composite
+    chroma bleed in YIQ, and scanlines.)
+  `"retro"` (default — "Retro HD", a
   late-2000s console look: `world/retro.js` draws the scene into a sub-HD target,
   720 rows on high and 540 on low at most, then one short post pass adds a bright-pass
   bloom at ¼ and ⅛ size, a quincunx-style soften, lens fringe, a desaturated bronze /
@@ -101,6 +115,7 @@ underfern/
   src/world/wind.js     ATMOSPHERE  wind field: scent drift for the AI's sense of smell, vegetation sway
   src/world/look.js     ATMOSPHERE  the painterly look: shared uniforms + shader hooks patched into every lit material
   src/world/retro.js    INTEGRATION the Retro HD render style's post pass: bloom, soften, fringe, grade, grain
+  src/world/retro-sd.js INTEGRATION the Retro SD render style: Kawase bloom, DOF, sun shafts, 6-bit dither, deflicker, composite + CRT
   src/world/landmarks.js TERRAIN    colossal fossils and stone wonders: placement, meshes, colliders
   src/world/atmosphere.js ATMOSPHERE fireflies and motes, light shafts, peak wisps and spindrift, cave fungi
   src/world/world.js    INTEGRATION
@@ -849,7 +864,7 @@ export class Menu {
   onStart = (speciesId, { creative }) => {};  onContinue = () => {};  // creative: the title's Creative card
   showChangelog()     // the title's Changelog link: ui/changelog.js CHANGELOG ({ v, date, title, notes[] }, newest first)
   setLoading(progress /* 0..1 */, label)               // loading state before the world is ready
-  settings;                                            // { style: "retro"|"detailed"|"pixel", quality: "auto"|"high"|"low",
+  settings;                                            // { style: "retro"|"sd"|"detailed"|"pixel", quality: "auto"|"high"|"low",
                                                        //   muted: bool, sensitivity: 0.5..2, styleVersion: 2 } — a Settings panel on the title
   onSettingsChange = (settings) => {};                 //   screen (and reachable from pause) edits these; main applies + saves
 }
@@ -904,7 +919,8 @@ export class World {
 ```
 `main.js` boots the renderer (ACES tone mapping, sRGB, PCF soft shadows when
 enabled), owns the render style (`"retro"`, the default: a sub-HD drawing buffer
-drawn through `RetroPass` and upscaled smoothly by CSS; `"pixel"`: a small drawing
+drawn through `RetroPass` and upscaled smoothly by CSS; `"sd"`: a ~448-line frame
+drawn through `RetroSDPass` onto a canvas a whole multiple of it; `"pixel"`: a small drawing
 buffer upscaled by CSS nearest-neighbour; `"detailed"`: full resolution — those two
 draw straight to the canvas, no post pass), keeps the look's screen size current
 (`setLookScreen`), picks quality, builds the world, runs the state machine
@@ -912,7 +928,7 @@ draw straight to the canvas, no post pass), keeps the look's screen size current
 and exposes a test hook `window.__underfern`.
 
 URL params: `?species=<id>` autostart · `?growth=0..1` · `?t=0..1` time of day
-(pauses the clock) · `?seed=N` · `?quality=low|high` · `?style=retro|detailed|pixel` · `?pixel=0..1` ·
+(pauses the clock) · `?seed=N` · `?quality=low|high` · `?style=retro|sd|detailed|pixel` · `?pixel=0..1` ·
 `?debug=1` (fps/overlay) · `?pos=x,z` spawn position · `?mute=1` ·
 `?weather=clear|fair|overcast|misty` (hold one weather) · `?aurora=0|1` (force tonight's aurora off / on).
 
@@ -952,8 +968,9 @@ Large per-frame things (footsteps, gait) are polled, not evented.
   blends the render resolution between full and chunky; `?pixel=0..1` overrides it.
 - Test hook: `window.__underfern.advance(seconds, dt = 0.05)` runs the state machine
   without drawing. `node tests/run-tests.mjs` runs unit + smoke tests headlessly.
-  `window.__underfern.retro` is the Retro HD post pass (null in the other styles);
-  its `stats()` reads back mean colours of the scene target and the wide bloom.
+  `window.__underfern.retro` is the Retro HD or Retro SD post pass (null in the other
+  styles). Its `stats()` reads back mean colours of the scene target and the bloom.
+  For Retro SD it also gives the finished SD frame, the source size and the scale.
 - `core/migrate.js` `migrateSettings(s)`: settings saved before Retro HD became the
   default (no `styleVersion`) move from Pixel to Retro HD once; a Pixel choice made
   after that sticks.

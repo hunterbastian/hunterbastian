@@ -43,7 +43,7 @@ export const RETRO = {
   tint: 1,
 };
 
-const VERT = /* glsl */ `
+export const VERT = /* glsl */ `
 varying vec2 vUv;
 void main() {
   vUv = uv;
@@ -141,7 +141,8 @@ void main() {
 }
 `;
 
-function target(w, h, options = {}) {
+/** An 8-bit, linearly filtered, mip-less colour target (pass options to override). */
+export function target(w, h, options = {}) {
   const rt = new THREE.WebGLRenderTarget(w, h, {
     type: THREE.UnsignedByteType,
     minFilter: THREE.LinearFilter,
@@ -202,12 +203,7 @@ export class RetroPass {
       toneMapped: false,
     });
 
-    // One full-screen triangle, drawn with whichever material the pass needs.
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3));
-    geo.setAttribute("uv", new THREE.Float32BufferAttribute([0, 0, 2, 0, 0, 2], 2));
-    this.quad = new THREE.Mesh(geo, this.composite);
-    this.quad.frustumCulled = false;
+    this.quad = fullScreenQuad(this.composite);
     this.quadCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     this.width = 1;
     this.height = 1;
@@ -312,3 +308,18 @@ export class RetroPass {
 }
 
 const _bright = new THREE.Vector3();
+
+/** One full-screen triangle, drawn with whichever material a pass needs. */
+export function fullScreenQuad(material) {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3));
+  geo.setAttribute("uv", new THREE.Float32BufferAttribute([0, 0, 2, 0, 0, 2], 2));
+  const quad = new THREE.Mesh(geo, material);
+  quad.frustumCulled = false;
+  return quad;
+}
+
+/** A post-pass material: no depth, no tone mapping (the inputs are display-referred). */
+export function postMaterial(name, uniforms, fragmentShader) {
+  return new THREE.ShaderMaterial({ name, uniforms, vertexShader: VERT, fragmentShader, depthTest: false, depthWrite: false, toneMapped: false });
+}

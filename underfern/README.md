@@ -240,14 +240,19 @@ device.
     the screen has fewer), soft quincunx-style anti-aliasing, bloom, a desaturated
     and bronzed grade, film grain and a little lens fringing at the corners, then a
     smooth upscale.
+  - **Retro SD**: a GameCube / PS2 game on a CRT, after gsimone's breakdown of
+    that look. It draws about 448 lines, at a whole number of screen pixels per
+    line. Then come a Kawase-blurred bloom, distance blur, sun shafts, 6-bit colour
+    with an ordered dither, and the GameCube's deflicker (each line blended with
+    the ones above and below). Last, composite-cable colour bleed and scanlines.
   - **Detailed**: full resolution (antialiased on High quality), with soft light
     and fine surface detail.
   - **Pixel**: low-resolution render with a crisp nearest-neighbour upscale.
 - **Pixel size:** *Fine*, *In between* (default) or *Chunky*, applied live.
   Pixels stay square and even on any screen.
-- All three styles have the same lighting, mist, haze and colour grade. They are
+- All four styles have the same lighting, mist, haze and colour grade. They are
   computed in each surface's own shader rather than in a post-processing pass (Retro
-  HD adds its own short finishing pass on top), so
+  HD and Retro SD add their own short finishing passes on top), so
   they cost nothing extra on a phone.
 - **Quality:**
   - *Auto* picks *Low* on phones, small screens and ≤ 4-core machines (lighter
@@ -267,7 +272,7 @@ URL parameters, handy for sharing a moment or testing:
 | `?creative=1` | with `?species`: Creative mode (full grown, can't be hurt, never saved) |
 | `?pos=x,z` | spawn position in metres |
 | `?t=0..1` | time of day (0 midnight, 0.25 sunrise, 0.5 noon, 0.75 sunset); pauses the clock |
-| `?style=retro\|detailed\|pixel` · `?pixel=0..1` | render style · pixel size |
+| `?style=retro\|sd\|detailed\|pixel` · `?pixel=0..1` | render style · pixel size |
 | `?quality=low\|high` | force a quality profile |
 | `?seed=N` | a different island |
 | `?weather=clear\|fair\|overcast\|misty` | hold one weather instead of the day's own |
@@ -313,9 +318,11 @@ there is one and otherwise falls back to the global install.
     (Continue) whose species has left the island
   - survival in the Pixel and Detailed styles, keyboard movement, pause, and death →
     death screen → hatch again
-  - an iPhone-sized touch run in the default Retro HD style (joystick, the post
-    pass blooming a daytime frame, pause button, switching to Pixel and its
-    size slider)
+  - an iPhone-sized touch run in the default Retro HD style:
+    - the joystick and the pause button
+    - the post pass blooming a daytime frame
+    - switching to Retro SD (a whole-multiple canvas over about 448 lines)
+    - switching to Pixel and using its size slider
   - an upright iPhone: the game turns sideways, the drawing buffer stays
     landscape, and pushing the stick toward the phone's right edge (the app's
     top) walks forward

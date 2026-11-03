@@ -520,7 +520,7 @@ export function speciesSilhouette(species, { scale = true } = {}) {
 export const DEFAULT_SETTINGS = Object.freeze({ style: "retro", pixelSize: 0.5, quality: "auto", muted: false, sensitivity: 1, styleVersion: 2 });
 
 /** The render styles, in the order Settings lists them. */
-export const STYLES = ["retro", "detailed", "pixel"];
+export const STYLES = ["retro", "sd", "detailed", "pixel"];
 
 /** Words for the pixel-size slider (0 fine … 1 chunky). */
 export const pixelSizeLabel = (v) => (v < 0.34 ? "Fine" : v < 0.67 ? "In between" : "Chunky");
@@ -553,10 +553,16 @@ const BAYER4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
  * an ordered dither: exactly what the "pixel" render style does to the island.
  * The retro preview paints it a little under size (the browser stretches it
  * softly), then blooms the bright parts, drains a little colour and adds grain.
+ * The SD preview paints it at half size, dithers it to 6 bits, doubles it back
+ * up softly and draws scanlines over it.
  * @param {HTMLCanvasElement} canvas
- * @param {"retro" | "detailed" | "pixel"} mode
+ * @param {"retro" | "sd" | "detailed" | "pixel"} mode
  */
 function paintVista(canvas, mode) {
+  if (mode === "sd") {
+    paintSD(canvas);
+    return;
+  }
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
   const w = canvas.width;
@@ -669,6 +675,35 @@ function paintVista(canvas, mode) {
     }
   }
   ctx.putImageData(img, 0, 0);
+}
+
+/** The SD preview (2D, once): half-size frame, 6-bit dither, soft 2× and scanlines. */
+function paintSD(canvas) {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const w = canvas.width;
+  const h = canvas.height;
+  const lo = document.createElement("canvas");
+  lo.width = Math.max(1, Math.round(w / 2));
+  lo.height = Math.max(1, Math.round(h / 2));
+  paintVista(lo, "detailed");
+  const lctx = lo.getContext("2d");
+  if (lctx) {
+    const img = lctx.getImageData(0, 0, lo.width, lo.height);
+    const d = img.data;
+    for (let y = 0; y < lo.height; y++) {
+      for (let x = 0; x < lo.width; x++) {
+        const o = (y * lo.width + x) * 4;
+        const t = BAYER4[(y & 3) * 4 + (x & 3)] / 16;
+        for (let c = 0; c < 3; c++) d[o + c] = (Math.floor((d[o + c] / 255) * 63 + t) / 63) * 255;
+      }
+    }
+    lctx.putImageData(img, 0, 0);
+  }
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(lo, 0, 0, w, h);
+  ctx.fillStyle = "rgba(0, 0, 0, 0.28)";
+  for (let y = 1; y < h; y += 2) ctx.fillRect(0, y, w, 1);
 }
 
 /** The retro preview's finish: bloom, a bronzed grade and film grain (2D, once). */
@@ -1192,6 +1227,12 @@ export class Menu {
                 <span class="style-opt__desc">720p, bloom and film grain — a late-2000s console look.</span>
               </label>
               <label class="style-opt">
+                <input type="radio" name="${id}-style" value="sd" />
+                <span class="style-opt__img"><canvas width="336" height="176" aria-hidden="true"></canvas></span>
+                <span class="style-opt__name">Retro SD</span>
+                <span class="style-opt__desc">448 lines over a composite cable to a CRT — an early-2000s console look.</span>
+              </label>
+              <label class="style-opt">
                 <input type="radio" name="${id}-style" value="detailed" />
                 <span class="style-opt__img"><canvas width="336" height="176" aria-hidden="true"></canvas></span>
                 <span class="style-opt__name">Detailed</span>
@@ -1247,8 +1288,9 @@ export class Menu {
     this._pixOut = layer.querySelector(`output[for="${id}-pix"]`);
     this._soundBtn = layer.querySelector(".switch");
     this._qualityHint = layer.querySelector('[data-hint="quality"]');
-    const [retro, detailed, pixel] = layer.querySelectorAll(".style-opt canvas");
+    const [retro, sd, detailed, pixel] = layer.querySelectorAll(".style-opt canvas");
     paintVista(retro, "retro");
+    paintVista(sd, "sd");
     paintVista(detailed, "detailed");
     paintVista(pixel, "pixel");
     this._syncSettingsForm();

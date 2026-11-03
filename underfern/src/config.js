@@ -27,12 +27,16 @@ export const GAME = {
 // and `?quality=low|high` overrides it.
 // Render styles (same assets): "retro" draws a sub-HD frame through a bloom /
 // grain / grade pass (world/retro.js) and lets the browser upscale it smoothly;
+// "sd" draws a ~448-line frame through a GameCube/PS2-style stack and a CRT
+// (world/retro-sd.js);
 // "detailed" draws at full resolution; "pixel" draws the 3D scene at a few
 // hundred rows and upscales it with nearest-neighbour filtering.
 export const STYLE = {
   default: "retro",
   // Rows the retro frame is drawn at, at most (a phone's own resolution caps it lower).
   retroRows: { high: 720, low: 540 },
+  // Lines the Retro SD frame aims for (rounded so each is a whole number of device pixels).
+  sdRows: 448,
   // Rows of game pixels at the chunkiest pixel size; "in between" (0.5) sits
   // halfway (geometrically) between this and the full render resolution.
   pixelHeight: { high: 300, low: 230 },

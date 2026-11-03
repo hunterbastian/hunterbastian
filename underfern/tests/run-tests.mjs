@@ -636,12 +636,26 @@ const SUITES = [
         },
       },
       {
-        name: "settings: switching to Pixel, then its size slider (pause → Settings), changes the render resolution",
+        name: "settings (pause → Settings): Retro SD draws ~448 lines at a whole multiple; then Pixel and its size slider",
         async run({ page, errors }) {
           await page.locator(".pause__item[data-act='settings']").click({ timeout: 60_000 });
           const opts = page.locator(".style-opt");
           await opts.first().waitFor({ state: "visible", timeout: 60_000 });
-          expect((await opts.count()) === 3, `Settings should offer three styles, found ${await opts.count()}`);
+          expect((await opts.count()) === 4, `Settings should offer four styles, found ${await opts.count()}`);
+          await page.locator(".style-opt:has(input[value='sd'])").click({ timeout: 60_000 });
+          await frames(page, 2);
+          const sd = await page.evaluate(() => {
+            const c = __underfern.renderer.domElement;
+            const p = __underfern.retro;
+            return { style: __underfern.style, buf: [c.width, c.height], post: p && p.constructor.name, stats: p ? p.stats() : null };
+          });
+          expect(sd.style === "sd" && sd.post === "RetroSDPass", `picking Retro SD should switch to its pass, got ${JSON.stringify(sd)}`);
+          const st = sd.stats;
+          expect(st.height >= 300 && st.height <= 600, `Retro SD should draw a few hundred lines, got ${st.height}`);
+          expect(sd.buf[0] === st.width * st.scale && sd.buf[1] === st.height * st.scale, `the canvas should be a whole multiple of the SD frame, got ${JSON.stringify(sd)}`);
+          const lum = (c) => 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2];
+          expect(lum(st.frame) > 25, `the SD frame should hold the picture, got mean ${st.frame}`);
+          await shot(page, "touch-retro-sd");
           await page.locator(".style-opt:has(input[value='pixel'])").click({ timeout: 60_000 });
           const after = await page.evaluate(() => ({ style: __underfern.style, post: !!__underfern.retro }));
           expect(after.style === "pixel" && !after.post, `picking Pixel should switch styles and drop the post pass, got ${JSON.stringify(after)}`);
@@ -664,7 +678,7 @@ const SUITES = [
           await frames(page, 1);
           await shot(page, "touch-settings");
           await expectClean(page, errors);
-          return `rows: fine ${fine} · in between ${mid} · chunky ${chunky}`;
+          return `Retro SD ${st.width}×${st.height} ×${st.scale}; pixel rows: fine ${fine} · in between ${mid} · chunky ${chunky}`;
         },
       },
     ],

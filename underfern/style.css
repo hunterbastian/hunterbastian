@@ -1511,7 +1511,7 @@ button:disabled {
 
 .style-pick {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -4204,9 +4204,26 @@ button:disabled {
   }
 
   /* Phones on their side: the names say enough, and dropping the blurbs
-     brings the Pixel size slider up into view without scrolling. */
+     brings the Pixel size slider up into view without scrolling. Names only,
+     the four styles fit on one row. */
   .style-opt__desc {
     display: none;
+  }
+
+  .style-pick {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .style-opt__name {
+    font-size: 16px;
+  }
+
+  .style-opt::after {
+    top: 5px;
+    right: 5px;
+    width: 14px;
+    height: 14px;
+    background-size: 9px;
   }
 
   .pause__title {

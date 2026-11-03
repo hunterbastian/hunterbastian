@@ -4,6 +4,17 @@
 /** @type {{ v: string, date: string, title: string, notes: string[] }[]} */
 export const CHANGELOG = [
   {
+    v: "0.11",
+    date: "2026-11-03",
+    title: "Retro SD",
+    notes: [
+      "A fourth look in Settings: the island as a GameCube or PS2 game on a CRT.",
+      "448 lines, a Kawase-blurred bloom, distance blur, and sun shafts through the trees.",
+      "6-bit colour with an ordered dither, and the GameCube's deflicker softening every line.",
+      "Colour bleeds sideways like a composite cable, with scanlines on top.",
+    ],
+  },
+  {
     v: "0.10",
     date: "2026-10-21",
     title: "Retro HD",

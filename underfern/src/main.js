@@ -15,6 +15,7 @@ import { makeRng, hash } from "./core/rng.js";
 import { World } from "./world/world.js";
 import { setLookScreen } from "./world/look.js";
 import { RetroPass } from "./world/retro.js";
+import { RetroSDPass } from "./world/retro-sd.js";
 import { PLAYABLE, getSpecies } from "./creatures/species.js";
 import { Input } from "./player/input.js";
 import { ThirdPersonCamera } from "./player/camera.js";
@@ -83,7 +84,7 @@ const quality = QUALITY[qualityName];
 
 function resolveStyle() {
   const forced = params.get("style");
-  if (forced === "retro" || forced === "pixel" || forced === "detailed") return forced;
+  if (["retro", "sd", "pixel", "detailed"].includes(forced)) return forced;
   return settings.style || STYLE.default;
 }
 let style = resolveStyle();
@@ -110,8 +111,11 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 2000);
 camera.position.set(0, 120, 0);
 
-// The retro style's post pass, made the first time that style is drawn.
+// The post pass of the style drawn through one (Retro HD, Retro SD), made the
+// first time that style is drawn and dropped when another is picked.
+const POST = { retro: RetroPass, sd: RetroSDPass };
 let retro = null;
+let sdSize = null; // Retro SD: { w, h, k } — source lines and screen pixels per line
 
 /**
  * Size the drawing buffer. "retro" draws a sub-HD frame (720 rows at most)
@@ -155,6 +159,19 @@ function resize() {
     renderer.setPixelRatio(1);
     renderer.setSize(Math.max(1, Math.round((w * dpr) / k)), Math.max(1, Math.round(rows)), false);
     canvas.style.imageRendering = "";
+  } else if (style === "sd") {
+    // About 448 lines, at a whole number of device pixels per line so the
+    // scanlines are even; the canvas is that multiple of the source, and CSS
+    // stretches it the last pixel or two to the window.
+    const dpr = window.devicePixelRatio || 1;
+    const deviceH = h * dpr;
+    const k = Math.max(1, Math.round(deviceH / STYLE.sdRows));
+    const rows = Math.max(1, Math.floor(deviceH / k));
+    const cols = Math.max(1, Math.round((w * dpr) / k));
+    sdSize = { w: cols, h: rows, k };
+    renderer.setPixelRatio(1);
+    renderer.setSize(cols * k, rows * k, false);
+    canvas.style.imageRendering = "";
   } else {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, quality.pixelRatioCap));
     renderer.setSize(w, h, false);
@@ -164,12 +181,17 @@ function resize() {
   canvas.style.height = "100%";
   canvas.dataset.style = style;
   setLookScreen(canvas.width, canvas.height); // the vignette works in drawing-buffer pixels
-  if (style === "retro") {
-    retro ??= new RetroPass(renderer);
-    retro.setSize(canvas.width, canvas.height);
-  } else if (retro) {
+  const Post = POST[style] ?? null;
+  if (retro && retro.constructor !== Post) {
     retro.dispose();
     retro = null;
+  }
+  if (Post) retro ??= new Post(renderer);
+  if (style === "sd") {
+    retro.setSize(sdSize.w, sdSize.h, sdSize.k);
+    setLookScreen(sdSize.w, sdSize.h); // the scene is drawn at the source size
+  } else if (retro) {
+    retro.setSize(canvas.width, canvas.height);
   }
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
@@ -716,7 +738,7 @@ window.__underfern = {
   get style() {
     return style;
   },
-  /** The retro style's post pass (null in the other styles). */
+  /** The Retro HD / Retro SD post pass (null in the other styles). */
   get retro() {
     return retro;
   },
