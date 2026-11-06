@@ -11,7 +11,7 @@ html, body {
   overflow: hidden;
   background: var(--bg);
   color: var(--ink);
-  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -24,6 +24,9 @@ main {
 
 #game {
   display: block;
+  /* the game is drawn at 240 × 210; keep its pixels square and sharp */
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
   /* the game handles its own drags; don't let the page scroll or zoom */
   touch-action: none;
   user-select: none;

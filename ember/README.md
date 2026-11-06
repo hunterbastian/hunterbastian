@@ -1,14 +1,19 @@
 # ember
 
-A very small, very minimal turn-based game. You are a small light on a dark
-path, and a moth called **dusk** won't stop flying at you. You can fight it, or
-you can calm it down and let it go.
+A very small pixel game about a small light walking a dark path.
 
-Each turn you pick an action. Then the moth attacks, and you steer your ember
-around a box to dodge the dust it throws.
+Your ember walks the path on its own and gathers **warmth**, even while the page
+is closed. Every so often something is waiting on the path ahead: a moth, a
+firefly, an owl. Each one is a short turn-based encounter where you dodge its
+attacks inside a box. You can fight it, or calm it down until you can part ways.
 
-No build step and no JavaScript dependencies. Just open it. It loads IBM Plex
-Mono from Google Fonts and falls back to the system monospace font when offline.
+- **Spare it** and it follows your light, adding warmth every second from then on.
+- **Strike it down** and you get one burst of warmth, and it's gone.
+
+Spend warmth at the **campfire** on upgrades. After the owl, the path loops
+into the next night with tougher creatures that give more warmth.
+
+No build step and no dependencies, not even a web font. Just open it.
 
 ## Run it
 
@@ -26,46 +31,72 @@ python3 -m http.server 8000
 | --- | --- | --- |
 | choose | arrow keys / WASD | tap an option |
 | confirm, advance text | Z / Enter / Space | tap |
-| back | X / Shift / Esc | tap another option |
+| back | X / Shift / Esc | tap the open option again |
 | move while dodging | arrow keys / WASD | drag anywhere |
 | move carefully | hold X or Shift | — |
 | sound on / off | M | speaker icon, top right |
 
 ## How to play
 
+**On the path:** `approach` lights up when you reach the next creature.
+`campfire` lists the upgrades, and `friends` shows who is following you and how
+much warmth each one adds.
+
+**In an encounter**, pick one action each turn:
+
 - **strike**: a line sweeps across the box. Stop it near the center to hit harder.
-- **talk**: `check`, `dim`, `hum`, and `hold still`. Some of these calm the moth,
-  and some only work once it's already a little calm.
-- **mend**: heal up to 10 hp. You get three.
-- **part**: leave. It only works once dusk doesn't want to fight anymore.
-  When that happens, its name and the `part` option turn amber.
+- **talk**: each creature has its own four options. Some calm it right away;
+  others only work once it's already a little calm. Try `check` first.
+- **mend**: heal half your hp. You get three per fight, plus campfire upgrades.
+- **part**: leave. This only works once the creature doesn't want to fight
+  anymore. When that happens, its name and `part` turn amber.
 
-Each attack pattern in turn: falling dust, sideways gusts with a gap, little
-moths that chase your light, a spinning spiral, and closing rings. The calmer
-dusk gets, the gentler it attacks. Hitting it makes it angrier.
+If your light goes out, you wake up at the campfire. You keep your warmth and
+friends, and the creature is still waiting.
 
-There are two endings. The title screen remembers which ones you've found.
+**Campfire upgrades:**
 
-Respects `prefers-reduced-motion`: no screen shake, and the moth jitters less.
+| upgrade | effect |
+| --- | --- |
+| hearth | +0.5 warmth / s |
+| kindling | +4 max hp |
+| spare wick | +1 mend each fight |
+| soft glow | talking calms more |
+| steady hand | slower strike line |
+| long stride | walk faster |
+
+Warmth keeps adding up while the page is closed, for up to 8 hours. Progress
+is saved in your browser's local storage. To reset it, choose `start over` on
+the title screen.
+
+Respects `prefers-reduced-motion`: no screen shake, steadier flicker, and less
+jitter.
 
 ## How it works
 
-Everything renders to one `<canvas>` at a fixed 480 × 420 logical size, scaled
-to fit the window.
+Everything is laid out in 480 × 420 logical units, then drawn into a 240 × 210
+pixel buffer. Each frame, that buffer is snapped to an 8-color palette with
+4 × 4 ordered (Bayer) dithering, so glows and fades turn into dither patterns.
+Then it's scaled up with hard pixel edges. Text uses a hand-made 5 × 7
+lowercase bitmap font, and the small sprites are bitmaps in the code.
 
-- `ember.js` — game state, a fixed-timestep loop (60 ticks/s), the typewriter
-  text, the attack patterns, and all the drawing. Sound is synthesized with
-  the Web Audio API, so there are no audio files.
-- `style.css` — centers the canvas and turns off page scrolling while you drag.
+- `ember.js` — the font and sprites, the save and offline-warmth logic, the
+  creatures and their attack patterns, a fixed-timestep loop (60 ticks/s), and
+  all the drawing. Sound is synthesized with the Web Audio API.
+- `style.css` — centers the canvas, keeps its pixels sharp, and turns off page
+  scrolling while you drag.
 - `index.html` — the canvas plus a screen-reader live region that mirrors the
   on-screen text.
 
-`window.ember` exposes the game state, if you want to poke at it from the console.
+`window.ember` exposes the game state (`ember.save` is your progress), if you
+want to poke at it from the console.
 
 ## Smoke test
 
-`smoke-test.mjs` plays through both endings with scripted key presses, saves
-screenshots, and fails on any page error. It needs Playwright with Chromium:
+`smoke-test.mjs` plays through the loop with scripted key presses. It spares
+the moth, buys an upgrade, strikes down the firefly, and loses to the owl. Then
+it checks that warmth built up while the page was closed. It saves screenshots
+and fails on any page error. It needs Playwright with Chromium:
 
 ```bash
 cd ember

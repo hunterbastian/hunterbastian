@@ -1,33 +1,53 @@
-// ember — a very small game about a small light and a moth.
+// ember — a very small game about a small light on a dark path.
 //
-// No build step and no dependencies. Everything is drawn on one canvas at a
-// fixed logical size (480 × 420) and scaled to fit the window, so all of the
-// layout math below is in those logical pixels.
+// No build step and no dependencies. The game is laid out in 480 × 420
+// logical units, drawn into a 240 × 210 pixel buffer, snapped to a small
+// palette with ordered dithering, and scaled up with hard pixel edges.
+//
+// The loop: your ember walks on its own and gathers warmth, even while the
+// page is closed. Every so often something is waiting on the path. Strike it
+// down for a burst of warmth, or calm it until you can part ways, and it
+// follows you and keeps you warm from then on. Spend warmth at the campfire.
 
 /* ----------------------------------------------------------------------- */
 /* Constants & helpers                                                     */
 /* ----------------------------------------------------------------------- */
 const W = 480;
 const H = 420;
+const PX = 2; // logical units per buffer pixel
+const BW = W / PX;
+const BH = H / PX;
 const TAU = Math.PI * 2;
 const STEP = 1000 / 60;
+const MAX_AWAY = 8 * 3600; // offline warmth is capped at 8 hours
 
 const C = {
   bg: "#0b0b0c",
-  ink: "#ecebe6",
-  dim: "#7a7872",
   faint: "#2c2b29",
+  dim: "#7a7872",
+  ink: "#ecebe6",
   ember: "#ffb35c",
   core: "#fff1dc",
+  warm: "#5a3a1c",
+  deep: "#2a1b0f",
 };
 const EMBER_RGB = "255, 179, 92";
-const FONT = '"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+const CORE_RGB = "255, 241, 220";
 const REDUCED = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const lerp = (a, b, t) => a + (b - a) * t;
 const rand = (lo, hi) => lo + Math.random() * (hi - lo);
-const ease = (t) => 1 - Math.pow(1 - clamp(t, 0, 1), 3);
+const snap = (v) => Math.round(v / PX) * PX;
+const hash = (n) => {
+  const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+  return x - Math.floor(x);
+};
+const fmt = (n) => Math.floor(n).toLocaleString("en-US");
+const fmtRate = (r) => {
+  const v = Math.round(r * 10) / 10;
+  return Number.isInteger(v) ? String(v) : v.toFixed(1);
+};
 
 const storage = {
   get(key) {
@@ -39,17 +59,27 @@ const storage = {
 };
 
 /* ----------------------------------------------------------------------- */
-/* Canvas                                                                  */
+/* Canvas: draw small, snap to the palette, scale up sharp                 */
 /* ----------------------------------------------------------------------- */
 const canvas = document.getElementById("game");
-const ctx = canvas.getContext("2d");
+const screen = canvas.getContext("2d");
+const stage = document.getElementById("stage");
 const live = document.getElementById("live");
 
+const buf = document.createElement("canvas");
+buf.width = BW;
+buf.height = BH;
+const ctx = buf.getContext("2d", { willReadFrequently: true });
+
 function resize() {
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const scale = clamp(Math.min((window.innerWidth - 16) / W, (window.innerHeight - 16) / H), 0.4, 2);
-  const cw = Math.round(W * scale);
-  const ch = Math.round(H * scale);
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  const aw = (stage?.clientWidth || window.innerWidth) - 8;
+  const ah = (stage?.clientHeight || window.innerHeight) - 8;
+  let s = Math.min(aw / BW, ah / BH);
+  if (s >= 2) s = Math.floor(s); // whole-number scaling keeps every pixel the same size
+  s = Math.max(s, 0.75);
+  const cw = Math.round(BW * s);
+  const ch = Math.round(BH * s);
   canvas.style.width = `${cw}px`;
   canvas.style.height = `${ch}px`;
   canvas.width = Math.round(cw * dpr);
@@ -63,12 +93,220 @@ function toLogical(e) {
   return { x: ((e.clientX - r.left) / r.width) * W, y: ((e.clientY - r.top) / r.height) * H };
 }
 
+// Snap every pixel that isn't already a palette color to the nearest one,
+// nudged by a 4×4 Bayer matrix so glows and fades turn into dither patterns.
+const PAL = Object.values(C).map((h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)));
+const PAL_KEYS = new Set(PAL.map(([r, g, b]) => (r << 16) | (g << 8) | b));
+const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((v) => (v + 0.5) / 16 - 0.5);
+const SPREAD = 36;
+
+function pixelate() {
+  const img = ctx.getImageData(0, 0, BW, BH);
+  const d = img.data;
+  for (let y = 0; y < BH; y++) {
+    for (let x = 0; x < BW; x++) {
+      const i = (y * BW + x) * 4;
+      const r = d[i];
+      const g = d[i + 1];
+      const b = d[i + 2];
+      if (PAL_KEYS.has((r << 16) | (g << 8) | b)) continue;
+      const bias = BAYER[((y & 3) << 2) | (x & 3)] * SPREAD;
+      let best = 0;
+      let bestD = Infinity;
+      for (let p = 0; p < PAL.length; p++) {
+        const c = PAL[p];
+        const dr = r + bias - c[0];
+        const dg = g + bias - c[1];
+        const db = b + bias - c[2];
+        const dist = 2 * dr * dr + 4 * dg * dg + 3 * db * db;
+        if (dist < bestD) {
+          bestD = dist;
+          best = p;
+        }
+      }
+      const c = PAL[best];
+      d[i] = c[0];
+      d[i + 1] = c[1];
+      d[i + 2] = c[2];
+      d[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+function present() {
+  pixelate();
+  screen.setTransform(1, 0, 0, 1, 0, 0);
+  screen.imageSmoothingEnabled = false;
+  screen.drawImage(buf, 0, 0, canvas.width, canvas.height);
+}
+
 // Mirror on-screen text into a live region so screen readers can follow along.
 let lastSaid = "";
 function say(msg) {
   if (!msg || msg === lastSaid) return;
   lastSaid = msg;
   live.textContent = msg;
+}
+
+/* ----------------------------------------------------------------------- */
+/* Pixel font & sprites                                                    */
+/* ----------------------------------------------------------------------- */
+// 5 × 7 lowercase glyphs; g, j, p, q, y and , drop two rows below the line.
+const FONT = {
+  a: [".....", ".....", ".###.", "....#", ".####", "#...#", ".####"],
+  b: ["#....", "#....", "####.", "#...#", "#...#", "#...#", "####."],
+  c: [".....", ".....", ".###.", "#....", "#....", "#....", ".###."],
+  d: ["....#", "....#", ".####", "#...#", "#...#", "#...#", ".####"],
+  e: [".....", ".....", ".###.", "#...#", "#####", "#....", ".###."],
+  f: ["..##.", ".#...", "####.", ".#...", ".#...", ".#...", ".#..."],
+  g: [".....", ".....", ".####", "#...#", "#...#", "#...#", ".####", "....#", ".###."],
+  h: ["#....", "#....", "####.", "#...#", "#...#", "#...#", "#...#"],
+  i: ["..#..", ".....", ".##..", "..#..", "..#..", "..#..", ".###."],
+  j: ["...#.", ".....", "..##.", "...#.", "...#.", "...#.", "...#.", "#..#.", ".##.."],
+  k: ["#....", "#....", "#..#.", "#.#..", "##...", "#.#..", "#..#."],
+  l: [".##..", "..#..", "..#..", "..#..", "..#..", "..#..", ".###."],
+  m: [".....", ".....", "##.#.", "#.#.#", "#.#.#", "#.#.#", "#.#.#"],
+  n: [".....", ".....", "####.", "#...#", "#...#", "#...#", "#...#"],
+  o: [".....", ".....", ".###.", "#...#", "#...#", "#...#", ".###."],
+  p: [".....", ".....", "####.", "#...#", "#...#", "#...#", "####.", "#....", "#...."],
+  q: [".....", ".....", ".####", "#...#", "#...#", "#...#", ".####", "....#", "....#"],
+  r: [".....", ".....", "#.##.", "##..#", "#....", "#....", "#...."],
+  s: [".....", ".....", ".####", "#....", ".###.", "....#", "####."],
+  t: [".#...", ".#...", "####.", ".#...", ".#...", ".#...", "..##."],
+  u: [".....", ".....", "#...#", "#...#", "#...#", "#...#", ".####"],
+  v: [".....", ".....", "#...#", "#...#", "#...#", ".#.#.", "..#.."],
+  w: [".....", ".....", "#...#", "#...#", "#.#.#", "#.#.#", ".#.#."],
+  x: [".....", ".....", "#...#", ".#.#.", "..#..", ".#.#.", "#...#"],
+  y: [".....", ".....", "#...#", "#...#", "#...#", "#...#", ".####", "....#", ".###."],
+  z: [".....", ".....", "#####", "...#.", "..#..", ".#...", "#####"],
+  0: [".###.", "#...#", "#..##", "#.#.#", "##..#", "#...#", ".###."],
+  1: ["..#..", ".##..", "..#..", "..#..", "..#..", "..#..", ".###."],
+  2: [".###.", "#...#", "....#", "...#.", "..#..", ".#...", "#####"],
+  3: ["####.", "....#", "....#", ".###.", "....#", "....#", "####."],
+  4: ["...#.", "..##.", ".#.#.", "#..#.", "#####", "...#.", "...#."],
+  5: ["#####", "#....", "####.", "....#", "....#", "#...#", ".###."],
+  6: ["..##.", ".#...", "#....", "####.", "#...#", "#...#", ".###."],
+  7: ["#####", "....#", "...#.", "..#..", ".#...", ".#...", ".#..."],
+  8: [".###.", "#...#", "#...#", ".###.", "#...#", "#...#", ".###."],
+  9: [".###.", "#...#", "#...#", ".####", "....#", "...#.", ".##.."],
+  ".": [".....", ".....", ".....", ".....", ".....", ".....", "..#.."],
+  ",": [".....", ".....", ".....", ".....", ".....", ".....", "..#..", ".#..."],
+  "'": ["..#..", "..#.."],
+  "?": [".###.", "#...#", "....#", "...#.", "..#..", ".....", "..#.."],
+  "!": ["..#..", "..#..", "..#..", "..#..", "..#..", ".....", "..#.."],
+  "-": [".....", ".....", ".....", ".....", ".###."],
+  "—": [".....", ".....", ".....", ".....", "#####"],
+  "/": ["....#", "....#", "...#.", "..#..", ".#...", "#....", "#...."],
+  ":": [".....", ".....", "..#..", ".....", ".....", ".....", "..#.."],
+  "+": [".....", ".....", "..#..", "..#..", "#####", "..#..", "..#.."],
+  "·": [".....", ".....", ".....", ".....", "..#.."],
+  "(": ["...#.", "..#..", ".#...", ".#...", ".#...", "..#..", "...#."],
+  ")": [".#...", "..#..", "...#.", "...#.", "...#.", "..#..", ".#..."],
+};
+const ADV = 6; // buffer pixels per character, including the gap
+
+// '#' is the main color, 'o' the second color, anything else is clear.
+const SPR = {
+  pick: ["..#..", ".###.", "#####", ".###.", "..#.."],
+  next: ["#####", ".###.", "..#.."],
+  emberA: ["..#..", ".###.", ".#o#.", "##o##", ".#o#.", ".###.", "..#.."],
+  emberB: ["..#..", "..#..", ".#o#.", "#ooo#", ".#o#.", ".###.", "..#.."],
+  mothA: ["#.......#", "##..#..##", "###.#.###", ".##.#.##.", "..#...#.."],
+  mothB: ["...#.#...", "..#.#.#..", "..#####..", "...###...", "...#.#..."],
+  fireflyA: ["#...#", ".#.#.", "..#..", ".###.", ".ooo.", "..o.."],
+  fireflyB: [".....", "##.##", "..#..", ".###.", ".ooo.", "..o.."],
+  owlA: ["#.....#", "#######", "#o###o#", "#######", ".#####.", ".#####.", "..#.#.."],
+  owlB: ["#.....#", "#######", "#######", "#######", ".#####.", ".#####.", "..#.#.."],
+  soundOn: ["...#.....", "..##..#..", "####...#.", "####.#.#.", "####...#.", "..##..#..", "...#....."],
+  soundOff: ["...#.....", "..##.....", "####.#.#.", "####..#..", "####.#.#.", "..##.....", "...#....."],
+};
+
+const bmpCache = new Map();
+function bitmap(rows, color, color2 = color) {
+  const key = `${rows.join("/")}|${color}|${color2}`;
+  let c = bmpCache.get(key);
+  if (c) return c;
+  c = document.createElement("canvas");
+  c.width = Math.max(1, ...rows.map((r) => r.length));
+  c.height = Math.max(1, rows.length);
+  const g = c.getContext("2d");
+  rows.forEach((row, y) => {
+    for (let x = 0; x < row.length; x++) {
+      if (row[x] !== "#" && row[x] !== "o") continue;
+      g.fillStyle = row[x] === "#" ? color : color2;
+      g.fillRect(x, y, 1, 1);
+    }
+  });
+  bmpCache.set(key, c);
+  return c;
+}
+
+function drawBitmap(rows, x, y, { color = C.ink, color2 = color, scale = 1, alpha = 1, center = false } = {}) {
+  const c = bitmap(rows, color, color2);
+  const w = c.width * PX * scale;
+  const h = c.height * PX * scale;
+  ctx.globalAlpha = alpha;
+  ctx.drawImage(c, snap(center ? x - w / 2 : x), snap(center ? y - h / 2 : y), w, h);
+  ctx.globalAlpha = 1;
+}
+
+const textWidth = (str, scale = 1, spacing = 0) =>
+  str.length ? (str.length * (ADV + spacing) - 1 - spacing) * scale * PX : 0;
+
+function text(str, x, y, { scale = 1, color = C.ink, align = "left", alpha = 1, base = "top", spacing = 0 } = {}) {
+  str = String(str).toLowerCase();
+  const w = textWidth(str, scale, spacing);
+  const tx = snap(align === "center" ? x - w / 2 : align === "right" ? x - w : x);
+  const ty = snap(base === "middle" ? y - 3.5 * scale * PX : y);
+  const step = (ADV + spacing) * scale * PX;
+  ctx.globalAlpha = alpha;
+  for (let i = 0; i < str.length; i++) {
+    const rows = FONT[str[i]];
+    if (!rows) continue;
+    const g = bitmap(rows, color);
+    ctx.drawImage(g, tx + i * step, ty, g.width * scale * PX, g.height * scale * PX);
+  }
+  ctx.globalAlpha = 1;
+}
+
+const wrapCache = new Map();
+function wrap(str, maxW, scale = 1) {
+  const max = Math.max(1, Math.floor((maxW / PX / scale + 1) / ADV));
+  const key = `${max}|${str}`;
+  let lines = wrapCache.get(key);
+  if (lines) return lines;
+  lines = [];
+  for (const para of str.split("\n")) {
+    let line = "";
+    for (const word of para.split(" ")) {
+      const test = line ? `${line} ${word}` : word;
+      if (line && test.length > max) {
+        lines.push(line);
+        line = word;
+      } else {
+        line = test;
+      }
+    }
+    lines.push(line);
+  }
+  if (wrapCache.size > 500) wrapCache.clear();
+  wrapCache.set(key, lines);
+  return lines;
+}
+
+// Draw `str` wrapped to `maxW`, revealing only the first `n` characters.
+// Returns the number of wrapped lines the full string takes up.
+function drawTyped(str, n, x, y, maxW, lh, { align = "left", color = C.ink, scale = 1, alpha = 1 } = {}) {
+  const lines = wrap(str, maxW, scale);
+  let left = n;
+  lines.forEach((ln, i) => {
+    if (left <= 0) return;
+    const lx = align === "center" ? x - textWidth(ln, scale) / 2 : x;
+    text(ln.slice(0, left), lx, y + i * lh, { color, scale, alpha });
+    left -= ln.length + 1; // +1 for the space or newline the wrap swallowed
+  });
+  return lines.length;
 }
 
 /* ----------------------------------------------------------------------- */
@@ -105,13 +343,13 @@ function tone(freq, dur = 0.06, { type = "square", vol = 0.03, slide = 0, delay 
 function noise(dur = 0.12, vol = 0.05) {
   if (!audio || muted) return;
   const len = Math.floor(audio.sampleRate * dur);
-  const buf = audio.createBuffer(1, len, audio.sampleRate);
-  const data = buf.getChannelData(0);
+  const b = audio.createBuffer(1, len, audio.sampleRate);
+  const data = b.getChannelData(0);
   for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
   const src = audio.createBufferSource();
   const gain = audio.createGain();
   gain.gain.value = vol;
-  src.buffer = buf;
+  src.buffer = b;
   src.connect(gain).connect(audio.destination);
   src.start();
 }
@@ -120,7 +358,7 @@ const chord = (notes, gap, opts) => notes.forEach((f, i) => tone(f, 0.12, { ...o
 
 const sfx = {
   narrator: () => tone(rand(300, 318), 0.035, { type: "triangle", vol: 0.06 }),
-  moth: () => tone(rand(820, 1000), 0.03, { type: "sine", vol: 0.05 }),
+  foe: () => tone(rand(820, 1000), 0.03, { type: "sine", vol: 0.05 }),
   move: () => tone(520, 0.03, { vol: 0.015 }),
   select: () => chord([660, 990], 0.04, { vol: 0.018 }),
   back: () => tone(392, 0.05, { vol: 0.015 }),
@@ -132,6 +370,7 @@ const sfx = {
   calm: () => chord([784, 988, 1175], 0.09, { type: "sine", vol: 0.035 }),
   out: () => tone(320, 0.7, { type: "triangle", vol: 0.06, slide: -250 }),
   warm: () => chord([392, 494, 587, 784], 0.14, { type: "triangle", vol: 0.04 }),
+  buy: () => chord([587, 880], 0.06, { type: "triangle", vol: 0.045 }),
 };
 
 function toggleMute() {
@@ -197,70 +436,13 @@ canvas.addEventListener("pointerup", endDrag);
 canvas.addEventListener("pointercancel", endDrag);
 
 const confirmed = () => pressed.has("confirm") || taps.length > 0;
+const inRect = (p, r) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h;
 
 /* ----------------------------------------------------------------------- */
-/* Text                                                                    */
+/* Typewriter                                                              */
 /* ----------------------------------------------------------------------- */
-function setFont(size, weight = 400) {
-  ctx.font = `${weight} ${size}px ${FONT}`;
-}
-
-function text(str, x, y, { size = 16, color = C.ink, align = "left", weight = 400, alpha = 1, base = "top", spacing = 0 } = {}) {
-  setFont(size, weight);
-  ctx.fillStyle = color;
-  ctx.globalAlpha = alpha;
-  ctx.textAlign = align;
-  ctx.textBaseline = base;
-  if (spacing && "letterSpacing" in ctx) ctx.letterSpacing = `${spacing}px`;
-  ctx.fillText(str, x, y);
-  if (spacing && "letterSpacing" in ctx) ctx.letterSpacing = "0px";
-  ctx.globalAlpha = 1;
-  ctx.textAlign = "left";
-  ctx.textBaseline = "top";
-}
-
-const wrapCache = new Map();
-function wrap(str, maxW) {
-  const key = `${ctx.font}|${maxW}|${str}`;
-  let lines = wrapCache.get(key);
-  if (lines) return lines;
-  lines = [];
-  for (const para of str.split("\n")) {
-    let line = "";
-    for (const word of para.split(" ")) {
-      const test = line ? `${line} ${word}` : word;
-      if (line && ctx.measureText(test).width > maxW) {
-        lines.push(line);
-        line = word;
-      } else {
-        line = test;
-      }
-    }
-    lines.push(line);
-  }
-  if (wrapCache.size > 500) wrapCache.clear();
-  wrapCache.set(key, lines);
-  return lines;
-}
-document.fonts?.addEventListener?.("loadingdone", () => wrapCache.clear());
-
-// Draw `str` wrapped to `maxW`, revealing only the first `n` characters.
-// Returns the number of wrapped lines the full string takes up.
-function drawTyped(str, n, x, y, maxW, lh, align = "left") {
-  const lines = wrap(str, maxW);
-  let left = n;
-  ctx.textAlign = "left";
-  lines.forEach((ln, i) => {
-    if (left <= 0) return;
-    const lx = align === "center" ? x - ctx.measureText(ln).width / 2 : x;
-    ctx.fillText(ln.slice(0, left), lx, y + i * lh);
-    left -= ln.length + 1; // +1 for the space or newline the wrap swallowed
-  });
-  return lines.length;
-}
-
-// A typewriter for one or more lines. Confirm finishes the current line,
-// then moves to the next; `onDone` fires after the last one.
+// One or more lines. Confirm finishes the current line, then moves to the
+// next; `onDone` fires after the last one.
 class Typer {
   constructor(lines, { voice = "narrator", onDone = null, auto = 0 } = {}) {
     this.lines = Array.isArray(lines) ? lines : [lines];
@@ -310,22 +492,240 @@ class Typer {
 }
 
 /* ----------------------------------------------------------------------- */
+/* Progress: warmth, distance, friends, upgrades                           */
+/* ----------------------------------------------------------------------- */
+const UPGRADES = [
+  { id: "hearth", label: "hearth", desc: "+0.5 warmth / s", base: 15, growth: 1.45, max: 30 },
+  { id: "hp", label: "kindling", desc: "+4 max hp", base: 25, growth: 1.6, max: 10 },
+  { id: "mend", label: "spare wick", desc: "+1 mend each fight", base: 40, growth: 1.9, max: 4 },
+  { id: "glow", label: "soft glow", desc: "talking calms more", base: 60, growth: 1.8, max: 5 },
+  { id: "hand", label: "steady hand", desc: "slower strike line", base: 50, growth: 1.7, max: 5 },
+  { id: "stride", label: "long stride", desc: "walk faster", base: 30, growth: 1.5, max: 8 },
+];
+const SAVE_KEY = "ember:save";
+
+function newSave() {
+  return {
+    v: 1,
+    started: false,
+    warmth: 0,
+    lifetime: 0,
+    dist: 0,
+    prevAt: 0,
+    nextAt: 40,
+    met: 0,
+    struck: 0,
+    up: Object.fromEntries(UPGRADES.map((u) => [u.id, 0])),
+    friends: [],
+    t: Date.now(),
+  };
+}
+
+function loadSave() {
+  try {
+    const raw = storage.get(SAVE_KEY);
+    if (!raw) return newSave();
+    const s = JSON.parse(raw);
+    const base = newSave();
+    return { ...base, ...s, up: { ...base.up, ...(s.up || {}) }, friends: Array.isArray(s.friends) ? s.friends : [] };
+  } catch {
+    return newSave();
+  }
+}
+
+let S = loadSave();
+function persist() {
+  S.t = Date.now();
+  storage.set(SAVE_KEY, JSON.stringify(S));
+}
+
+const lvl = (id) => S.up[id] || 0;
+const ownGlow = () => 1 + 0.5 * lvl("hearth");
+const warmthRate = () => ownGlow() + S.friends.reduce((sum, f) => sum + f.rate, 0);
+const walkSpeed = () => 2 * (1 + 0.2 * lvl("stride")); // meters per second
+const upgradeCost = (u) => Math.round(u.base * Math.pow(u.growth, lvl(u.id)));
+const arrived = () => S.dist >= S.nextAt;
+const night = () => Math.floor(S.met / 3) + 1;
+const rewardMult = (n) => 1 + 0.5 * (n - 1);
+const encounterGap = () => 80 + 10 * Math.min(S.met, 12);
+
+function gain(n) {
+  S.warmth += n;
+  S.lifetime += n;
+}
+
+// Time spent away (page closed or hidden) still counts.
+function catchUp(secs, walk) {
+  if (!S.started || secs <= 0) return 0;
+  secs = Math.min(secs, MAX_AWAY);
+  const g = warmthRate() * secs;
+  gain(g);
+  if (walk) S.dist = Math.min(S.nextAt, S.dist + walkSpeed() * secs);
+  return g;
+}
+
+/* ----------------------------------------------------------------------- */
+/* Who's out on the path                                                   */
+/* ----------------------------------------------------------------------- */
+// Acts: `check` has no gain. `max` caps how often an act works, `need` is the
+// calm it takes to land, `say` is what the creature answers.
+const SPECIES = {
+  moth: {
+    names: ["dusk", "umber", "sable", "wick"],
+    plural: "moths",
+    hp: 60, rate: 1.5, burst: 45, y: 90, bullet: "dust",
+    jitter: 1, bob: 1, flap: [0.3, 0.07],
+    intro: "a moth flutters out of the dark. it's drawn to your light.",
+    acts: [
+      { label: "check", lines: [["{name}. a moth, a long way from home.", "it's cold out here. you're the only warm thing for miles."]] },
+      {
+        label: "dim", dims: true, max: 2, gain: 25,
+        lines: [["you dim your glow.", "the moth stops darting around quite so much."], ["you dim yourself even further.", "{name}'s wingbeats slow down."]],
+        spent: "you can't get any dimmer without going out.",
+        say: ["...where did the light go?", "...softer now."],
+      },
+      {
+        label: "hum", max: 2, gain: 20,
+        lines: [["you hum something low and slow.", "the moth tilts its head."], ["you hum again.", "{name} hums back. sort of."]],
+        spent: "you've run out of songs.",
+        say: ["...hm?", "...hmmm..."],
+      },
+      {
+        label: "hold still", need: 50, gain: 35, failGain: 5,
+        lines: [["you hold very still.", "{name} lands beside you, just for a moment."]],
+        fail: ["you hold very still.", "{name} is too restless to come close."],
+        say: ["...you're warm."], failSay: "no. no. too close.",
+      },
+    ],
+    talk: [["light. light. light.", "so cold out here...", "closer. closer."], ["...are you a lamp?", "...you don't burn.", "i was lost..."], ["...sleepy...", "...it's nice here."]],
+    strikeSay: ["!!", "why...?", "it stings..."],
+    missSay: "...?", partSay: "wait. don't go.", restSay: "...i could sleep here.",
+    flavor: [
+      ["{name} circles you, frantic.", "dust shimmers where the moth has been.", "the moth can't look away from your glow."],
+      ["{name}'s wingbeats slow a little.", "the moth hovers, unsure of you."],
+      ["{name} drifts lower. it looks tired.", "the moth's wings barely move now."],
+    ],
+    hurt: "{name}'s wings are torn. it keeps flying anyway.",
+    calmed: "{name} doesn't want to fight anymore.",
+    resting: "{name} is resting. it's ready to part ways.",
+    spare: ["you dim your light and step away, slowly.", "{name} follows you anyway, a little way behind."],
+    fall: ["the moth falls.", "its dust glitters for a moment, then goes dark."],
+    patterns: ["dustfall", "gust", "moths", "spiral", "ring"],
+  },
+  firefly: {
+    names: ["pip", "glim", "spark", "flicker"],
+    plural: "fireflies",
+    hp: 50, rate: 2.5, burst: 70, y: 92, bullet: "spark",
+    jitter: 1.4, bob: 1.5, flap: [0.45, 0.12],
+    intro: "a firefly zips out of the grass. it thinks it's the brightest thing out here.",
+    acts: [
+      { label: "check", lines: [["{name}. a firefly, very proud of its light.", "it doesn't like sharing the dark with you."]] },
+      {
+        label: "dim", dims: true, max: 1, gain: 30,
+        lines: [["you dim your glow.", "{name} shines brighter by comparison. it looks pleased."]],
+        spent: "you're already as dim as you can be.",
+        say: ["ha! see? brightest."],
+      },
+      {
+        label: "blink", max: 2, gain: 20,
+        lines: [["you blink your light, slow and steady.", "{name} blinks back, a little out of time."], ["you blink again.", "this time {name} blinks right along with you."]],
+        spent: "{name} is tired of blinking.",
+        say: ["blink! blink!", "...in time. huh."],
+      },
+      {
+        label: "cheer", need: 40, gain: 45, failGain: 5,
+        lines: [["you tell {name} it's the brightest light on the path.", "it glows so hard it nearly falls over."]],
+        fail: ["you tell {name} it's very bright.", "it doesn't believe you yet."],
+        say: ["...really? really?"], failSay: "you're just saying that.",
+      },
+    ],
+    talk: [["out of my dark!", "too bright! too bright!", "i was here first."], ["...you're not so bright.", "...hmph.", "look. look at me."], ["...we could glow together.", "...twinkle."]],
+    strikeSay: ["ow! cheater!", "hey!!", "...that hurt."],
+    missSay: "ha! missed!", partSay: "running away? good.", restSay: "...you can stay. i guess.",
+    flavor: [
+      ["{name} zips around, blinking furiously.", "the firefly is trying very hard to outshine you."],
+      ["{name} flickers, unsure if it's winning.", "the firefly keeps glancing at you."],
+      ["{name} glows softly now.", "the firefly blinks slowly, in time with you."],
+    ],
+    hurt: "{name}'s light is sputtering.",
+    calmed: "{name} isn't competing anymore.",
+    resting: "{name} is glowing quietly. it's ready to part ways.",
+    spare: ["you step back into the dark.", "{name} decides the path is better with two lights. it follows you."],
+    fall: ["the firefly's light goes out.", "the grass is very dark without it."],
+    patterns: ["zigzag", "burst", "dustfall", "ring"],
+  },
+  owl: {
+    names: ["hush", "quill", "sorrel", "fen"],
+    plural: "owls",
+    hp: 80, rate: 4, burst: 110, y: 92, bullet: "dust",
+    jitter: 0.1, bob: 0.3, flap: [0.05, 0.02],
+    intro: "an owl sits on a low branch. it squints at your light and does not look happy.",
+    acts: [
+      { label: "check", lines: [["{name}. an owl, up far too late.", "your light is right in its eyes."]] },
+      {
+        label: "dim", dims: true, max: 2, gain: 20,
+        lines: [["you dim your glow.", "{name} stops squinting quite so hard."], ["you dim yourself even further.", "{name}'s eyes open a little wider."]],
+        spent: "any dimmer and you'd go out.",
+        say: ["...better.", "...much better."],
+      },
+      {
+        label: "look away", max: 2, gain: 20,
+        lines: [["you turn your light away from {name}.", "it ruffles its feathers."], ["you keep your light turned away.", "{name} settles on its branch."]],
+        spent: "you're already facing the other way.",
+        say: ["...hm.", "...hoo."],
+      },
+      {
+        label: "hoot", need: 45, gain: 40, failGain: 0,
+        lines: [["you try your best hoot.", "{name} stares at you for a long time. then it hoots back."]],
+        fail: ["you try your best hoot.", "{name} is not impressed."],
+        say: ["hoo. hoo."], failSay: "...",
+      },
+    ],
+    talk: [["put that out.", "too bright. too bright.", "it's the middle of the night."], ["...hoo.", "...you're very small.", "...the moon was nicer."], ["...sleepy.", "...hoo... hoo..."]],
+    strikeSay: ["!", "rude.", "..."],
+    missSay: "...", partSay: "that light won't get far.", restSay: "...the dark is nice with you in it.",
+    flavor: [
+      ["{name} glares at you, feathers puffed.", "the owl turns its head to keep you in view."],
+      ["{name} blinks slowly.", "the owl shifts on its branch."],
+      ["{name}'s eyes are half closed.", "the owl looks almost asleep."],
+    ],
+    hurt: "{name} has lost a lot of feathers.",
+    calmed: "{name} doesn't mind you anymore.",
+    resting: "{name} is dozing. it's ready to part ways.",
+    spare: ["you tip your light toward the path and go.", "a while later, soft wingbeats follow you."],
+    fall: ["the owl falls from its branch.", "a few feathers drift down after it."],
+    patterns: ["feathers", "swoop", "spiral", "ring"],
+  },
+};
+const ROSTER = ["moth", "firefly", "owl"];
+
+function newFoe(index) {
+  const key = ROSTER[index % ROSTER.length];
+  const sp = SPECIES[key];
+  const n = Math.floor(index / ROSTER.length) + 1;
+  const hp = Math.round(sp.hp * (1 + 0.6 * (n - 1)));
+  return {
+    key, sp, night: n, name: sp.names[(n - 1) % sp.names.length],
+    hp, max: hp, shown: hp, calm: 0, struck: 0, uses: [0, 0, 0, 0],
+    x: 240, y: sp.y, phase: 0, shake: 0, flash: 0, barT: 0,
+    dead: false, spared: false, alpha: 1,
+  };
+}
+
+/* ----------------------------------------------------------------------- */
 /* Game state                                                              */
 /* ----------------------------------------------------------------------- */
 const MENU = ["strike", "talk", "mend", "part"];
-const ACTS = ["check", "dim", "hum", "hold still"];
+const HUB_OPTS = ["approach", "campfire", "friends"];
 const MENU_BOX = { x: 20, y: 186, w: 440, h: 118 };
+const HUB_BOX = { x: 20, y: 252, w: 440, h: 100 };
+const PANEL_BOX = { x: 20, y: 92, w: 440, h: 262 };
 const ARENA_CY = 240;
 const HUD_Y = 338;
 const OPT_Y = 386;
-
-function loadEndings() {
-  try {
-    return { warm: false, cold: false, ...JSON.parse(storage.get("ember:endings") || "{}") };
-  } catch {
-    return { warm: false, cold: false };
-  }
-}
+const GROUND = 214;
+const WALK_X = 196;
+const PX_PER_M = 14;
 
 const G = {
   scene: "title",
@@ -333,20 +733,34 @@ const G = {
   sceneT: 0,
   fade: 0,
   shake: 0,
+  save: S,
+  // title
+  titleSel: 0,
+  confirmReset: false,
+  awayMsg: null,
+  // hub
+  hubPhase: "walk",
+  hubSel: 1,
+  campSel: 0,
+  campFlash: null,
+  walkT: 0,
+  arrivedShown: false,
+  // battle
   hp: 20,
   maxHp: 20,
   mends: 3,
   dimmed: 0,
-  moth: null,
+  foe: null,
   phase: "menu",
   menu: 0,
   act: 0,
   turn: 0,
   lastAct: null,
+  bulletKind: "dust",
   dialog: null,
   bubble: null,
-  box: { ...MENU_BOX },
-  boxTarget: { ...MENU_BOX },
+  box: { ...HUB_BOX },
+  boxTarget: { ...HUB_BOX },
   player: { x: 240, y: ARENA_CY, inv: 0 },
   bullets: [],
   pattern: null,
@@ -358,25 +772,12 @@ const G = {
   floaters: [],
   particles: [],
   motes: [],
-  ending: null,
-  endReady: false,
   overReady: false,
   overAt: null,
-  introT: 0,
-  endings: loadEndings(),
 };
 window.ember = G; // handy for poking at from the console (and for the smoke test)
 
-function newMoth() {
-  return {
-    hp: 60, max: 60, shown: 60,
-    calm: 0, struck: 0, dims: 0, hums: 0,
-    x: 240, y: 90, phase: 0,
-    shake: 0, flash: 0, barT: 0,
-    dead: false, alpha: 1,
-  };
-}
-G.moth = newMoth();
+const fill = (str) => str.replaceAll("{name}", G.foe?.name ?? "");
 
 function setScene(name) {
   G.scene = name;
@@ -384,73 +785,7 @@ function setScene(name) {
 }
 
 for (let i = 0; i < 26; i++) {
-  G.motes.push({ x: rand(0, W), y: rand(0, H), v: rand(0.04, 0.18), ph: rand(0, TAU), a: rand(0.1, 0.32), s: rand(0.8, 1.6) });
-}
-
-/* ----------------------------------------------------------------------- */
-/* Title & intro                                                           */
-/* ----------------------------------------------------------------------- */
-function startTitle() {
-  setScene("title");
-  G.dialog = null;
-  G.fade = 1;
-  say("ember. a very small game. press z or tap to begin.");
-}
-
-function updateTitle() {
-  if (G.sceneT > 10 && confirmed()) {
-    sfx.select();
-    startIntro();
-  }
-}
-
-function startIntro() {
-  setScene("intro");
-  G.introT = 0;
-  G.dialog = new Typer(
-    ["the path ahead is dark.", "you are a small light.", "something is fluttering toward you."],
-    { onDone: startBattle },
-  );
-}
-
-function updateIntro() {
-  G.dialog.update();
-  if (G.dialog.i === 2) G.introT++;
-  if (confirmed()) G.dialog.advance();
-}
-
-/* ----------------------------------------------------------------------- */
-/* Battle                                                                  */
-/* ----------------------------------------------------------------------- */
-function startBattle() {
-  setScene("battle");
-  Object.assign(G, {
-    hp: G.maxHp, mends: 3, dimmed: 0, turn: 0, menu: 0, act: 0, lastAct: null,
-    moth: newMoth(), bullets: [], floaters: [], particles: [],
-    bubble: null, strike: null, slash: null, pattern: null,
-    box: { ...MENU_BOX }, boxTarget: { ...MENU_BOX }, fade: 1,
-  });
-  toMenu("a moth flutters out of the dark. it's drawn to your light.");
-}
-
-function toMenu(flavor) {
-  G.phase = "menu";
-  G.boxTarget = { ...MENU_BOX };
-  G.dialog = new Typer(flavor);
-}
-
-function updateBattle() {
-  updateMoth(G.moth);
-  tweenBox();
-  if (G.slash && ++G.slash.t > 26) G.slash = null;
-  switch (G.phase) {
-    case "menu": G.dialog?.update(); return updateMenu();
-    case "talk": return updateTalk();
-    case "strike": return updateStrike();
-    case "result": G.dialog?.update(); return updateResult();
-    case "enemy": return updateEnemy();
-    case "dodge": return updateDodge();
-  }
+  G.motes.push({ x: rand(0, W), y: rand(0, H), v: rand(0.04, 0.18), ph: rand(0, TAU), bright: Math.random() < 0.2 });
 }
 
 function tweenBox() {
@@ -463,14 +798,263 @@ function tweenBox() {
 }
 const boxSettled = () => ["x", "y", "w", "h"].every((k) => G.box[k] === G.boxTarget[k]);
 
-const optionRect = (i) => ({ x: 20 + i * 110, y: OPT_Y - 20, w: 110, h: 40 });
-function optionAt(p) {
-  for (let i = 0; i < MENU.length; i++) {
-    const r = optionRect(i);
-    if (p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.y + r.h) return i;
-  }
+const optionRect = (i, n) => ({ x: 20 + (i * 440) / n, y: OPT_Y - 20, w: 440 / n, h: 40 });
+function optionAt(p, n) {
+  for (let i = 0; i < n; i++) if (inRect(p, optionRect(i, n))) return i;
   return -1;
 }
+
+/* ----------------------------------------------------------------------- */
+/* Title & intro                                                           */
+/* ----------------------------------------------------------------------- */
+const TITLE_OPTS = ["continue", "start over"];
+const titleRect = (i) => ({ x: 140, y: 262 + i * 30, w: 200, h: 28 });
+
+function startTitle() {
+  setScene("title");
+  G.dialog = null;
+  G.fade = 1;
+  G.titleSel = 0;
+  G.confirmReset = false;
+  say(S.started ? "ember. continue, or start over." : "ember. a very small game. press z or tap to begin.");
+}
+
+function updateTitle() {
+  if (G.sceneT < 10) return;
+  if (!S.started) {
+    if (confirmed()) {
+      sfx.select();
+      startIntro();
+    }
+    return;
+  }
+  if (G.confirmReset) {
+    const tappedYes = taps.some((p) => inRect(p, titleRect(1)));
+    if (pressed.has("confirm") || tappedYes) {
+      S = newSave();
+      G.save = S;
+      persist();
+      sfx.select();
+      startIntro();
+    } else if (pressed.has("cancel") || taps.length) {
+      G.confirmReset = false;
+      sfx.back();
+    }
+    return;
+  }
+  if (pressed.has("up") || pressed.has("down")) {
+    G.titleSel = 1 - G.titleSel;
+    sfx.move();
+    say(TITLE_OPTS[G.titleSel]);
+  }
+  let pick = pressed.has("confirm") ? G.titleSel : -1;
+  for (const p of taps) {
+    if (inRect(p, titleRect(0))) pick = 0;
+    else if (inRect(p, titleRect(1))) pick = 1;
+  }
+  if (pick === 0) {
+    sfx.select();
+    goHub(G.awayMsg || "you keep walking.");
+    G.awayMsg = null;
+  } else if (pick === 1) {
+    G.titleSel = 1;
+    G.confirmReset = true;
+    sfx.nope();
+    say("start over? your warmth and friends will be gone. press z to confirm or x to cancel.");
+  }
+}
+
+function startIntro() {
+  setScene("intro");
+  G.dialog = new Typer(["the path ahead is dark.", "you are a small light.", "keep walking. you won't be alone for long."], {
+    onDone: () => {
+      S.started = true;
+      persist();
+      goHub("you start walking.");
+    },
+  });
+}
+
+function updateIntro() {
+  G.dialog.update();
+  if (confirmed()) G.dialog.advance();
+}
+
+/* ----------------------------------------------------------------------- */
+/* The path (hub): walking, the campfire, friends                          */
+/* ----------------------------------------------------------------------- */
+function goHub(msg) {
+  setScene("hub");
+  G.fade = 1;
+  G.foe = null;
+  G.bubble = null;
+  G.bullets = [];
+  G.hubPhase = "walk";
+  G.box = { ...HUB_BOX };
+  G.boxTarget = { ...HUB_BOX };
+  G.hubSel = arrived() ? 0 : 1;
+  G.arrivedShown = arrived();
+  G.dialog = new Typer(arrived() ? `${msg} something is waiting on the path ahead.` : msg);
+}
+
+function updateHub() {
+  tweenBox();
+  G.dialog?.update();
+  if (!arrived()) {
+    S.dist = Math.min(S.nextAt, S.dist + walkSpeed() / 60);
+    G.walkT++;
+    if (G.t % 50 === 0 && G.hubPhase === "walk") {
+      G.particles.push({ x: WALK_X + rand(-3, 3), y: GROUND - 22, vx: rand(-0.1, 0.1), vy: -0.35, g: 0, life: 60, age: 0, size: 2, color: C.ember });
+    }
+  }
+  if (arrived() && !G.arrivedShown) {
+    G.arrivedShown = true;
+    sfx.calm();
+    if (G.hubPhase === "walk") {
+      G.hubSel = 0;
+      G.dialog = new Typer("something is waiting on the path ahead.");
+    }
+  }
+  if (G.campFlash && --G.campFlash.t <= 0) G.campFlash = null;
+  if (G.hubPhase === "camp") return updateCamp();
+  if (G.hubPhase === "friends") return updateFriends();
+  return updateWalk();
+}
+
+function updateWalk() {
+  if (pressed.has("left") || pressed.has("right")) {
+    G.hubSel = (G.hubSel + (pressed.has("left") ? 2 : 1)) % 3;
+    sfx.move();
+    say(HUB_OPTS[G.hubSel]);
+  }
+  if (pressed.has("confirm")) return hubChoose(G.hubSel);
+  for (const p of taps) {
+    const i = optionAt(p, 3);
+    if (i >= 0) {
+      G.hubSel = i;
+      return hubChoose(i);
+    }
+    if (G.dialog && !G.dialog.full) G.dialog.n = G.dialog.text.length;
+  }
+}
+
+function hubChoose(i) {
+  if (i === 0) {
+    if (!arrived()) {
+      sfx.nope();
+      G.dialog = new Typer(`nothing yet. ${Math.ceil(S.nextAt - S.dist)} m to go.`);
+      return;
+    }
+    sfx.select();
+    startBattle();
+  } else {
+    sfx.select();
+    G.hubPhase = i === 1 ? "camp" : "friends";
+    G.boxTarget = { ...PANEL_BOX };
+    say(i === 1 ? "campfire. spend warmth on upgrades." : "friends following you.");
+  }
+}
+
+function leavePanel() {
+  sfx.back();
+  G.hubPhase = "walk";
+  G.boxTarget = { ...HUB_BOX };
+}
+
+const campRow = (i) => ({ x: PANEL_BOX.x, y: PANEL_BOX.y + 8 + i * 40, w: PANEL_BOX.w, h: 40 });
+
+function updateCamp() {
+  if (pressed.has("cancel")) return leavePanel();
+  if (pressed.has("up") || pressed.has("down")) {
+    G.campSel = (G.campSel + (pressed.has("up") ? UPGRADES.length - 1 : 1)) % UPGRADES.length;
+    sfx.move();
+    const u = UPGRADES[G.campSel];
+    say(`${u.label}, ${u.desc}, costs ${fmt(upgradeCost(u))} warmth`);
+  }
+  if (pressed.has("confirm")) return buy(G.campSel);
+  for (const p of taps) {
+    for (let i = 0; i < UPGRADES.length; i++) {
+      if (inRect(p, campRow(i))) {
+        G.campSel = i;
+        return buy(i);
+      }
+    }
+    const o = optionAt(p, 3);
+    if (o === 1) return leavePanel();
+    if (o >= 0) {
+      G.hubSel = o;
+      return hubChoose(o);
+    }
+  }
+}
+
+function buy(i) {
+  const u = UPGRADES[i];
+  const cost = upgradeCost(u);
+  if (lvl(u.id) >= u.max || S.warmth < cost) {
+    sfx.nope();
+    G.campFlash = { i, t: 24, ok: false };
+    say(lvl(u.id) >= u.max ? `${u.label} is maxed out` : `not enough warmth for ${u.label}`);
+    return;
+  }
+  S.warmth -= cost;
+  S.up[u.id] = lvl(u.id) + 1;
+  sfx.buy();
+  G.campFlash = { i, t: 24, ok: true };
+  persist();
+  say(`${u.label} is now level ${lvl(u.id)}`);
+}
+
+function updateFriends() {
+  if (pressed.has("cancel") || pressed.has("confirm")) return leavePanel();
+  for (const p of taps) {
+    const o = optionAt(p, 3);
+    if (o === 2 || o < 0) return leavePanel();
+    G.hubSel = o;
+    return hubChoose(o);
+  }
+}
+
+/* ----------------------------------------------------------------------- */
+/* Battle                                                                  */
+/* ----------------------------------------------------------------------- */
+function startBattle() {
+  setScene("battle");
+  const f = newFoe(S.met);
+  Object.assign(G, {
+    foe: f,
+    maxHp: 20 + 4 * lvl("hp"),
+    mends: 3 + lvl("mend"),
+    dimmed: 0, turn: 0, menu: 0, act: 0, lastAct: null,
+    bulletKind: f.sp.bullet,
+    bullets: [], floaters: [],
+    bubble: null, strike: null, slash: null, pattern: null,
+    box: { ...MENU_BOX }, boxTarget: { ...MENU_BOX }, fade: 1,
+  });
+  G.hp = G.maxHp;
+  toMenu(fill(f.sp.intro));
+}
+
+function toMenu(flavorText) {
+  G.phase = "menu";
+  G.boxTarget = { ...MENU_BOX };
+  G.dialog = new Typer(flavorText);
+}
+
+function updateBattle() {
+  updateFoe(G.foe);
+  tweenBox();
+  if (G.slash && ++G.slash.t > 26) G.slash = null;
+  switch (G.phase) {
+    case "menu": G.dialog?.update(); return updateMenu();
+    case "talk": return updateTalk();
+    case "strike": return updateStrike();
+    case "result": G.dialog?.update(); return updateResult();
+    case "enemy": return updateEnemy();
+    case "dodge": return updateDodge();
+  }
+}
+
 const menuLabel = (i) => (i === 2 ? `mend, ${G.mends} left` : MENU[i]);
 
 function updateMenu() {
@@ -481,7 +1065,7 @@ function updateMenu() {
   }
   if (pressed.has("confirm")) return choose(G.menu);
   for (const p of taps) {
-    const i = optionAt(p);
+    const i = optionAt(p, 4);
     if (i >= 0) {
       G.menu = i;
       return choose(i);
@@ -500,7 +1084,7 @@ function choose(i) {
     sfx.select();
     G.phase = "talk";
     G.act = 0;
-    say(`talk. ${ACTS.join(", ")}.`);
+    say(`talk. ${G.foe.sp.acts.map((a) => a.label).join(", ")}.`);
   } else if (i === 2) {
     mend();
   } else {
@@ -521,18 +1105,18 @@ function updateResult() {
 function actRect(i) {
   const col = i % 2;
   const row = i >> 1;
-  return { x: MENU_BOX.x + 52 + col * 200, y: MENU_BOX.y + 28 + row * 40 };
+  return { x: MENU_BOX.x + 48 + col * 200, y: MENU_BOX.y + 30 + row * 40 };
 }
 function actAt(p) {
-  for (let i = 0; i < ACTS.length; i++) {
+  for (let i = 0; i < 4; i++) {
     const r = actRect(i);
     if (p.x >= r.x - 30 && p.x < r.x + 170 && p.y >= r.y - 10 && p.y < r.y + 30) return i;
   }
   return -1;
 }
 function actSpent(i) {
-  const m = G.moth;
-  return (i === 1 && m.dims >= 2) || (i === 2 && m.hums >= 2);
+  const a = G.foe.sp.acts[i];
+  return Boolean(a.max) && G.foe.uses[i] >= a.max;
 }
 
 function updateTalk() {
@@ -549,7 +1133,7 @@ function updateTalk() {
   if (next !== G.act) {
     G.act = next;
     sfx.move();
-    say(ACTS[G.act]);
+    say(G.foe.sp.acts[G.act].label);
   }
   if (pressed.has("confirm")) return doAct(G.act);
   for (const p of taps) {
@@ -558,7 +1142,12 @@ function updateTalk() {
       G.act = i;
       return doAct(i);
     }
-    const o = optionAt(p);
+    const o = optionAt(p, 4);
+    if (o === 1) {
+      sfx.back();
+      G.phase = "menu";
+      return;
+    }
     if (o >= 0) {
       G.menu = o;
       G.phase = "menu";
@@ -569,46 +1158,31 @@ function updateTalk() {
 
 function doAct(i) {
   sfx.select();
-  const m = G.moth;
-  const before = m.calm;
+  const f = G.foe;
+  const a = f.sp.acts[i];
+  const before = f.calm;
   let lines;
-  G.lastAct = ACTS[i];
-  if (i === 0) {
-    lines = ["dusk. a moth, a long way from home.", "it's cold out here. you're the only warm thing for miles."];
-  } else if (i === 1) {
-    if (m.dims < 2) {
-      m.dims++;
-      G.dimmed = m.dims;
-      m.calm += 25;
-      lines = m.dims === 1
-        ? ["you dim your glow.", "the moth stops darting around quite so much."]
-        : ["you dim yourself even further.", "dusk's wingbeats slow down."];
-    } else {
-      lines = ["you can't get any dimmer without going out."];
-      G.lastAct = null;
-    }
-  } else if (i === 2) {
-    if (m.hums < 2) {
-      m.hums++;
-      m.calm += 20;
-      lines = m.hums === 1
-        ? ["you hum something low and slow.", "the moth tilts its head."]
-        : ["you hum again.", "dusk hums back. sort of."];
-    } else {
-      lines = ["you've run out of songs."];
-      G.lastAct = null;
-    }
-  } else if (m.calm >= 50) {
-    m.calm += 35;
-    lines = ["you hold very still.", "dusk lands beside you, just for a moment."];
+  if (!a.gain && !a.need) {
+    lines = a.lines[0];
+    G.lastAct = { kind: "check" };
+  } else if (a.max && f.uses[i] >= a.max) {
+    lines = [a.spent];
+    G.lastAct = null;
+  } else if (a.need && f.calm < a.need) {
+    f.calm += a.failGain || 0;
+    lines = a.fail;
+    G.lastAct = { kind: "fail", i };
   } else {
-    m.calm += 5;
-    lines = ["you hold very still.", "dusk is too restless to come close."];
-    G.lastAct = "still-fail";
+    const use = f.uses[i]++;
+    f.calm += a.gain + 5 * lvl("glow");
+    lines = a.lines[Math.min(use, a.lines.length - 1)];
+    if (a.dims) G.dimmed = f.uses[i];
+    G.lastAct = { kind: "act", i, use };
   }
-  m.calm = Math.min(100, m.calm);
-  if (before < 100 && m.calm >= 100) {
-    lines.push("dusk doesn't want to fight anymore.");
+  f.calm = Math.min(100, f.calm);
+  lines = lines.map(fill);
+  if (before < 100 && f.calm >= 100) {
+    lines.push(fill(f.sp.calmed));
     sfx.calm();
   }
   result(lines);
@@ -626,12 +1200,12 @@ function mend() {
     G.dialog = new Typer("you're already burning bright.");
     return;
   }
-  const amount = Math.min(10, G.maxHp - G.hp);
+  const amount = Math.min(Math.round(G.maxHp / 2), G.maxHp - G.hp);
   G.hp += amount;
   G.mends--;
-  G.lastAct = "mend";
+  G.lastAct = { kind: "mend" };
   sfx.heal();
-  G.floaters.push({ x: 196, y: HUD_Y - 26, text: `+${amount}`, t: 0, color: C.ember });
+  G.floaters.push({ x: 196, y: HUD_Y - 28, text: `+${amount}`, t: 0, color: C.ember });
   const lines = [`you gather yourself and burn a little brighter. +${amount} hp.`];
   if (G.mends === 0) lines.push("that was the last of it.");
   result(lines);
@@ -639,13 +1213,32 @@ function mend() {
 
 function part() {
   sfx.select();
-  if (G.moth.calm >= 100) return startEnding("warm");
-  G.lastAct = "part";
-  result(["you try to slip away.", "the moth follows your light."]);
+  if (G.foe.calm >= 100) return spareFoe();
+  G.lastAct = { kind: "part" };
+  result(["you try to slip away.", fill("{name} won't let you go that easily.")]);
+}
+
+function spareFoe() {
+  const f = G.foe;
+  const rate = Math.round(f.sp.rate * rewardMult(f.night) * 10) / 10;
+  f.spared = true;
+  sfx.warm();
+  result([...f.sp.spare.map(fill), `+${fmtRate(rate)} warmth / s, for as long as it follows you.`], () => {
+    S.friends.push({ key: f.key, name: f.name, rate });
+    finishEncounter(`${f.name} follows your light.`);
+  });
+}
+
+function finishEncounter(msg) {
+  S.met++;
+  S.prevAt = S.nextAt;
+  S.nextAt = Math.round(S.dist + encounterGap());
+  persist();
+  goHub(msg);
 }
 
 /* --- strike -------------------------------------------------------------- */
-const STRIKE_TICKS = 66;
+const strikeTicks = () => 66 * (1 + 0.15 * lvl("hand"));
 
 function updateStrike() {
   const s = G.strike;
@@ -656,7 +1249,7 @@ function updateStrike() {
       G.strike = null;
       return;
     }
-    s.x += 1 / STRIKE_TICKS;
+    s.x += 1 / strikeTicks();
     if (confirmed()) {
       s.stopped = true;
       s.acc = 1 - Math.abs(s.x - 0.5) * 2;
@@ -680,91 +1273,89 @@ function updateStrike() {
 }
 
 function landStrike(s) {
-  const m = G.moth;
+  const f = G.foe;
   const crit = s.acc > 0.93;
   s.dmg = crit ? 24 : Math.max(4, Math.round(4 + 16 * Math.pow(s.acc, 1.4)));
-  m.hp = Math.max(0, m.hp - s.dmg);
-  m.shake = 14;
-  m.flash = 10;
-  m.barT = 110;
-  m.struck++;
-  m.calm = Math.max(0, m.calm - 30);
-  const { x, y } = mothPose(m);
-  G.floaters.push({ x, y: y - 64, text: crit ? `${s.dmg}!` : `${s.dmg}`, t: 0, color: C.ink, size: 22 });
+  f.hp = Math.max(0, f.hp - s.dmg);
+  f.shake = 14;
+  f.flash = 10;
+  f.barT = 110;
+  f.struck++;
+  f.calm = Math.max(0, f.calm - 30);
+  const { x, y } = foePose(f);
+  G.floaters.push({ x, y: y - 66, text: crit ? `${s.dmg}!` : `${s.dmg}`, t: 0, color: C.ink, scale: 2 });
   sfx.hit();
   if (!REDUCED) G.shake = 4;
 }
 
 function strikeResult(s) {
-  const m = G.moth;
+  const f = G.foe;
   G.strike = null;
   if (s.acc < 0) {
-    G.lastAct = "miss";
+    G.lastAct = { kind: "miss" };
     return result(["you swing at the dark and miss."]);
   }
-  G.lastAct = "strike";
-  if (m.hp <= 0) {
-    m.dead = true;
-    dissolveMoth();
-    return result(["the moth falls.", "its dust glitters for a moment, then goes dark."], () => startEnding("cold"));
+  G.lastAct = { kind: "strike" };
+  if (f.hp <= 0) {
+    f.dead = true;
+    dissolveFoe();
+    const burst = Math.round(f.sp.burst * rewardMult(f.night));
+    return result([...f.sp.fall, `its warmth is yours now. +${burst} warmth.`], () => {
+      gain(burst);
+      S.struck++;
+      finishEncounter("the path is quiet now.");
+    });
   }
-  if (m.struck === 1) return result(["you strike the moth.", "it panics."]);
-  if (m.hp < m.max * 0.4) return result(["you strike again.", "dusk's wings are torn."]);
-  return result(["you strike the moth."]);
+  if (f.struck === 1) return result([`you strike ${f.name}.`, "it panics."]);
+  if (f.hp < f.max * 0.4) return result(["you strike again.", fill(f.sp.hurt)]);
+  return result([`you strike ${f.name}.`]);
 }
 
-/* --- the moth's turn ----------------------------------------------------- */
-function mothLine() {
-  const m = G.moth;
-  if (m.calm >= 100) return "...i could sleep here.";
-  switch (G.lastAct) {
-    case "strike": return ["!!", "why...?", "it stings..."][Math.min(m.struck, 3) - 1];
-    case "miss": return "...?";
-    case "dim": return m.dims === 1 ? "...where did the light go?" : "...softer now.";
-    case "hum": return m.hums === 1 ? "...hm?" : "...hmmm...";
-    case "hold still": return "...you're warm.";
-    case "still-fail": return "no. no. too close.";
-    case "part": return "wait. don't go.";
+/* --- the creature's turn ------------------------------------------------- */
+function foeLine() {
+  const f = G.foe;
+  const sp = f.sp;
+  const a = G.lastAct;
+  if (f.calm >= 100) return sp.restSay;
+  if (a?.kind === "strike") return sp.strikeSay[Math.min(f.struck, sp.strikeSay.length) - 1];
+  if (a?.kind === "miss") return sp.missSay;
+  if (a?.kind === "part") return sp.partSay;
+  if (a?.kind === "fail") return sp.acts[a.i].failSay;
+  if (a?.kind === "act") {
+    const says = sp.acts[a.i].say;
+    if (says) return says[Math.min(a.use, says.length - 1)];
   }
-  const pool = m.calm < 30
-    ? ["light. light. light.", "so cold out here...", "closer. closer."]
-    : m.calm < 70
-      ? ["...are you a lamp?", "...you don't burn.", "i was lost..."]
-      : ["...sleepy...", "...it's nice here."];
+  const pool = sp.talk[f.calm < 30 ? 0 : f.calm < 70 ? 1 : 2];
   return pool[G.turn % pool.length];
 }
 
 function flavor() {
-  const m = G.moth;
-  if (G.hp <= 6) return "your glow flickers.";
-  if (m.hp < m.max * 0.4) return "dusk's wings are torn. it keeps flying anyway.";
-  const pool = m.calm < 30
-    ? ["dusk circles you, frantic.", "dust shimmers where the moth has been.", "the moth can't look away from your glow."]
-    : m.calm < 70
-      ? ["dusk's wingbeats slow a little.", "the moth hovers, unsure of you."]
-      : ["dusk drifts lower. it looks tired.", "the moth's wings barely move now."];
-  return pool[G.turn % pool.length];
+  const f = G.foe;
+  if (G.hp <= Math.max(6, G.maxHp * 0.3)) return "your glow flickers.";
+  if (f.hp < f.max * 0.4) return fill(f.sp.hurt);
+  const pool = f.sp.flavor[f.calm < 30 ? 0 : f.calm < 70 ? 1 : 2];
+  return fill(pool[G.turn % pool.length]);
 }
 
 function enemyTurn() {
-  const m = G.moth;
+  const f = G.foe;
   G.turn++;
   G.phase = "enemy";
   G.dialog = null;
-  const resting = m.calm >= 100;
+  const resting = f.calm >= 100;
   if (!resting) {
-    G.pattern = choosePattern();
+    G.pattern = f.calm >= 70 ? "drift" : f.sp.patterns[(G.turn - 1) % f.sp.patterns.length];
     const p = PATTERNS[G.pattern];
     const a = { x: 240 - p.w / 2, y: ARENA_CY - p.h / 2, w: p.w, h: p.h };
     G.boxTarget = a;
     G.player = { x: a.x + a.w / 2, y: p.start === "bottom" ? a.y + a.h - 22 : a.y + a.h / 2, inv: 0 };
   }
-  G.bubble = new Typer(mothLine(), {
-    voice: "moth",
+  G.bubble = new Typer(fill(foeLine()), {
+    voice: "foe",
     auto: 80,
     onDone: () => {
       G.bubble = null;
-      if (resting) toMenu("dusk is resting. it's ready to part ways.");
+      if (resting) toMenu(fill(f.sp.resting));
       else startDodge();
     },
   });
@@ -777,11 +1368,12 @@ function updateEnemy() {
 
 /* --- dodging ------------------------------------------------------------- */
 function intensity() {
-  const m = G.moth;
-  const calm = clamp(1 - m.calm / 140, 0.35, 1);
-  const anger = 1 + Math.min(m.struck, 3) * 0.1;
+  const f = G.foe;
+  const calm = clamp(1 - f.calm / 140, 0.35, 1);
+  const anger = 1 + Math.min(f.struck, 3) * 0.1;
   const ramp = lerp(0.78, 1, Math.min(G.turn - 1, 4) / 4);
-  return calm * anger * ramp;
+  const later = Math.min(1.5, 1 + 0.12 * (f.night - 1));
+  return calm * anger * ramp * later;
 }
 
 function startDodge() {
@@ -827,7 +1419,7 @@ function updateDodge() {
 
   if (pl.inv === 0) {
     for (const b of G.bullets) {
-      if (b.fade || b.age < 6) continue;
+      if (b.fade || b.harmless || b.age < 6) continue;
       const r = b.r * 0.8 + 3;
       if ((b.x - pl.x) ** 2 + (b.y - pl.y) ** 2 < r * r) {
         hurt();
@@ -846,15 +1438,17 @@ function updateDodge() {
 }
 
 function hurt() {
-  G.hp = Math.max(0, G.hp - (G.moth.struck >= 2 ? 4 : 3));
+  const f = G.foe;
+  G.hp = Math.max(0, G.hp - (3 + (f.struck >= 2 ? 1 : 0) + (f.night - 1)));
   G.player.inv = 50;
   sfx.hurt();
   if (!REDUCED) G.shake = 5;
   if (G.hp <= 0) gameOver();
 }
+G.debug = { hurt: () => hurt() };
 
 function spawn(x, y, vx, vy, r = 4, extra = {}) {
-  const b = { x, y, vx, vy, r, age: 0, fade: 0, kind: "dust", ...extra };
+  const b = { x, y, vx, vy, r, age: 0, fade: 0, kind: G.bulletKind, ...extra };
   G.bullets.push(b);
   return b;
 }
@@ -911,10 +1505,40 @@ function ringStep(b) {
   if (b.rad < 6) b.dead = true;
 }
 
+function zigStep(b) {
+  b.x += b.vx;
+  b.y = b.y0 + Math.sin(b.age * 0.08 + b.ph) * b.amp;
+}
+
+// A warning flash that bursts into sparks after 40 ticks.
+function flashStep(b) {
+  if (b.age < 40) return;
+  const n = 10;
+  const sp = 1.4 + 0.5 * b.k;
+  const off = rand(0, TAU);
+  for (let i = 0; i < n; i++) {
+    const ang = off + (i * TAU) / n;
+    spawn(b.x, b.y, Math.cos(ang) * sp, Math.sin(ang) * sp, 3.5, { kind: "spark" });
+  }
+  b.dead = true;
+}
+
+// Walls of dust crossing the arena from alternating sides, each with one gap.
+function wall(t, a, k, every, gapH, speed) {
+  if (t % every) return;
+  const fromLeft = Math.round(t / every) % 2 === 0;
+  const gapY = rand(a.y + 10, a.y + a.h - 10 - gapH);
+  const vx = (fromLeft ? 1 : -1) * speed;
+  const x = fromLeft ? a.x - 8 : a.x + a.w + 8;
+  for (let y = a.y + 6; y < a.y + a.h; y += 12) {
+    if (y > gapY && y < gapY + gapH) continue;
+    spawn(x, y, vx, 0, 4);
+  }
+}
+
 // Each attack: arena size, length in ticks, and a spawner run once per tick.
 // `a` is the arena rect, `k` the intensity (≈0.35 when calm … ≈1.3 when hurt).
 const PATTERNS = {
-  // Dust shaken loose from the moth's wings drifts down.
   dustfall: {
     w: 200, h: 140, dur: 330,
     update(t, a, k) {
@@ -924,24 +1548,14 @@ const PATTERNS = {
       });
     },
   },
-  // Wingbeats push walls of dust sideways. Find the gap.
   gust: {
     w: 280, h: 120, dur: 360,
-    update(t, a, k) {
-      const every = Math.round(64 / Math.sqrt(k));
-      if (t % every) return;
-      const fromLeft = Math.round(t / every) % 2 === 0;
-      const gapH = 46;
-      const gapY = rand(a.y + 10, a.y + a.h - 10 - gapH);
-      const vx = (fromLeft ? 1 : -1) * (1.9 + 0.9 * k);
-      const x = fromLeft ? a.x - 8 : a.x + a.w + 8;
-      for (let y = a.y + 6; y < a.y + a.h; y += 12) {
-        if (y > gapY && y < gapY + gapH) continue;
-        spawn(x, y, vx, 0, 4);
-      }
-    },
+    update(t, a, k) { wall(t, a, k, Math.round(64 / Math.sqrt(k)), 46, 1.9 + 0.9 * k); },
   },
-  // Little moths, drawn to your light, curve after you.
+  swoop: {
+    w: 280, h: 130, dur: 360,
+    update(t, a, k) { wall(t, a, k, Math.round(78 / Math.sqrt(k)), 54, 2.4 + 1.0 * k); },
+  },
   moths: {
     w: 220, h: 150, dur: 360,
     update(t, a, k) {
@@ -953,7 +1567,6 @@ const PATTERNS = {
       spawn(pt.x, pt.y, Math.cos(ang) * sp, Math.sin(ang) * sp, 5, { kind: "moth", life: 230, sp, step: homing });
     },
   },
-  // The eye on its wing spins dust outward in three arms.
   spiral: {
     w: 160, h: 160, dur: 340, start: "bottom",
     update(t, a, k) {
@@ -969,7 +1582,6 @@ const PATTERNS = {
       }
     },
   },
-  // Rings of dust close in. Slip out through the gap.
   ring: {
     w: 160, h: 160, dur: 330,
     update(t, a, k) {
@@ -988,25 +1600,54 @@ const PATTERNS = {
       }
     },
   },
-  // A tired moth barely tries.
+  zigzag: {
+    w: 240, h: 140, dur: 340,
+    update(t, a, k) {
+      if (t % Math.max(8, Math.round(24 / k))) return;
+      const fromLeft = Math.random() < 0.5;
+      const y0 = rand(a.y + 24, a.y + a.h - 24);
+      const vx = (1.3 + 0.6 * k) * (fromLeft ? 1 : -1);
+      spawn(fromLeft ? a.x - 8 : a.x + a.w + 8, y0, vx, 0, 4, { kind: "fly", y0, ph: rand(0, TAU), amp: rand(14, 24), step: zigStep });
+    },
+  },
+  burst: {
+    w: 200, h: 160, dur: 320,
+    update(t, a, k) {
+      if (t % Math.round(56 / k)) return;
+      let x = 0;
+      let y = 0;
+      for (let i = 0; i < 8; i++) {
+        x = rand(a.x + 24, a.x + a.w - 24);
+        y = rand(a.y + 24, a.y + a.h - 24);
+        if (Math.hypot(x - G.player.x, y - G.player.y) > 56) break;
+      }
+      spawn(x, y, 0, 0, 10, { kind: "flash", harmless: true, k, step: flashStep });
+    },
+  },
+  feathers: {
+    w: 220, h: 140, dur: 330,
+    update(t, a, k) {
+      if (t % Math.max(6, Math.round(11 / k))) return;
+      spawn(rand(a.x + 6, a.x + a.w - 6), a.y - 8, 0, rand(0.8, 1.3) * (0.7 + 0.3 * k), 4, {
+        kind: "feather", sway: rand(0.1, TAU), swayAmp: rand(0.6, 1.2),
+      });
+    },
+  },
+  // A tired creature barely tries.
   drift: {
     w: 200, h: 130, dur: 270,
     update(t, a) {
       if (t % 16) return;
       const pt = edgePoint(a, 60);
-      const tx = rand(a.x + 20, a.x + a.w - 20);
-      const ty = rand(a.y + 20, a.y + a.h - 20);
-      const ang = Math.atan2(ty - pt.y, tx - pt.x);
+      const ang = Math.atan2(rand(a.y + 20, a.y + a.h - 20) - pt.y, rand(a.x + 20, a.x + a.w - 20) - pt.x);
       const sp = rand(0.55, 0.9);
       spawn(pt.x, pt.y, Math.cos(ang) * sp, Math.sin(ang) * sp, rand(3, 4));
     },
   },
 };
-const ORDER = ["dustfall", "gust", "moths", "spiral", "ring"];
-const choosePattern = () => (G.moth.calm >= 70 ? "drift" : ORDER[(G.turn - 1) % ORDER.length]);
 
 /* ----------------------------------------------------------------------- */
-/* Losing & endings                                                        */
+/* Losing                                                                  */
 /* ----------------------------------------------------------------------- */
 function gameOver() {
   const { x, y } = G.player;
@@ -1020,16 +1661,16 @@ function gameOver() {
   for (let i = 0; i < 46; i++) {
     const a = rand(0, TAU);
     const s = rand(0.4, 2.6);
-    G.particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 0.6, g: 0.03, life: rand(50, 100), age: 0, size: rand(1.5, 3), color: C.ember });
+    G.particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 0.6, g: 0.03, life: rand(50, 100), age: 0, size: 2, color: C.ember });
   }
 }
 
 function updateOver() {
   if (G.sceneT === 80) {
-    G.dialog = new Typer(["your light goes out.", "but embers remember how to burn."], {
+    G.dialog = new Typer(["your light goes out.", "a while later, you wake up beside the campfire."], {
       onDone: () => {
         G.overReady = true;
-        say("press z or tap to rekindle.");
+        say("press z or tap to keep going.");
       },
     });
   }
@@ -1037,43 +1678,7 @@ function updateOver() {
   G.dialog.update();
   if (G.overReady && confirmed()) {
     sfx.select();
-    startBattle();
-  } else if (confirmed()) {
-    G.dialog.advance();
-  }
-}
-
-function startEnding(kind) {
-  setScene("end");
-  G.ending = kind;
-  G.endReady = false;
-  G.fade = 1;
-  G.bubble = null;
-  G.endings[kind] = true;
-  storage.set("ember:endings", JSON.stringify(G.endings));
-  if (kind === "warm") sfx.warm();
-  const lines = kind === "warm"
-    ? ["you dim your light and step away, slowly.", "dusk folds its wings on a warm stone.", "it will sleep well tonight."]
-    : ["the path is quiet now.", "it feels colder than before."];
-  G.dialog = new Typer(lines, {
-    onDone: () => {
-      G.endReady = true;
-      say(`ending: ${kind}. press z or tap to play again.`);
-    },
-  });
-}
-
-function updateEnd() {
-  G.dialog.update();
-  if (G.ending === "warm" && G.sceneT % 110 === 60) {
-    G.particles.push({ x: 236, y: 98, vx: 0.25, vy: -0.35, g: 0, life: 90, age: 0, text: "z", color: C.dim });
-  }
-  if (G.ending === "cold" && G.sceneT % 14 === 0) {
-    G.particles.push({ x: rand(60, 420), y: -4, vx: rand(-0.1, 0.1), vy: rand(0.3, 0.6), g: 0, life: 420, age: 0, size: rand(1, 2), color: C.dim });
-  }
-  if (G.endReady && confirmed()) {
-    sfx.select();
-    startTitle();
+    goHub("the path ahead is still waiting.");
   } else if (confirmed()) {
     G.dialog.advance();
   }
@@ -1082,34 +1687,42 @@ function updateEnd() {
 /* ----------------------------------------------------------------------- */
 /* Effects                                                                 */
 /* ----------------------------------------------------------------------- */
-function updateMoth(m) {
-  m.phase += lerp(0.3, 0.07, m.calm / 100) * (REDUCED ? 0.6 : 1);
-  if (m.shake > 0) m.shake -= 0.5;
-  if (m.flash > 0) m.flash--;
-  if (m.barT > 0) m.barT--;
-  m.shown = lerp(m.shown, m.hp, 0.08);
-  if (m.dead) m.alpha = Math.max(0, m.alpha - 0.03);
+function updateFoe(f) {
+  const [fast, slow] = f.sp.flap;
+  f.phase += lerp(fast, slow, f.calm / 100) * (REDUCED ? 0.6 : 1);
+  if (f.shake > 0) f.shake -= 0.5;
+  if (f.flash > 0) f.flash--;
+  if (f.barT > 0) f.barT--;
+  f.shown = lerp(f.shown, f.hp, 0.08);
+  if (f.dead) f.alpha = Math.max(0, f.alpha - 0.03);
+  if (f.spared) f.alpha = Math.max(0.45, f.alpha - 0.01);
 }
 
-// Where the moth is right now: frantic moths jitter, calm ones sink and drift.
-function mothPose(m) {
-  const calm = m.calm / 100;
-  const frantic = (1 - calm) * (REDUCED ? 0.3 : 1);
-  let x = m.x + Math.sin(G.t * 0.017) * 8 * frantic + Math.sin(G.t * 0.13) * 2.5 * frantic * frantic;
-  const y = m.y + Math.sin(G.t * 0.045) * 4 + calm * 8;
-  if (m.shake > 0) x += Math.sin(m.shake * 2.2) * m.shake * 0.5;
-  return { x, y, flap: 0.3 + 0.7 * Math.abs(Math.cos(m.phase)) };
+// Where the creature is right now: frantic ones jitter, calm ones sink and drift.
+function foePose(f) {
+  const calm = f.calm / 100;
+  const frantic = (1 - calm) * (REDUCED ? 0.3 : 1) * f.sp.jitter;
+  let x = f.x + Math.sin(G.t * 0.017) * 8 * frantic + Math.sin(G.t * 0.13) * 2.5 * frantic * frantic;
+  const y = f.y + Math.sin(G.t * 0.045) * 4 * f.sp.bob + calm * 8 * Math.min(1, f.sp.bob);
+  if (f.shake > 0) x += Math.sin(f.shake * 2.2) * f.shake * 0.5;
+  const blinkSpeed = lerp(0.35, 0.07, calm);
+  return {
+    x, y,
+    flap: 0.3 + 0.7 * Math.abs(Math.cos(f.phase)),
+    lit: f.calm >= 100 || Math.sin(G.t * blinkSpeed) > -0.3 ? 1 : 0,
+    blink: G.t % 190 < 7,
+  };
 }
 
-function dissolveMoth() {
-  const { x, y } = mothPose(G.moth);
+function dissolveFoe() {
+  const { x, y } = foePose(G.foe);
   for (let i = 0; i < 120; i++) {
     const a = rand(0, TAU);
     const r = Math.sqrt(Math.random());
     G.particles.push({
-      x: x + Math.cos(a) * r * 64, y: y + Math.sin(a) * r * 36,
+      x: x + Math.cos(a) * r * 60, y: y + Math.sin(a) * r * 38,
       vx: rand(-0.25, 0.25), vy: rand(-0.7, -0.1), g: -0.002,
-      life: rand(70, 160), age: 0, size: rand(1, 2.4), color: C.ink,
+      life: rand(70, 160), age: 0, size: 2, color: C.ink,
     });
   }
 }
@@ -1140,51 +1753,36 @@ function updateAmbient() {
 }
 
 /* ----------------------------------------------------------------------- */
-/* Drawing                                                                 */
+/* Drawing: characters                                                     */
 /* ----------------------------------------------------------------------- */
-function diamond(x, y, size, color) {
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.moveTo(x, y - size);
-  ctx.lineTo(x + size * 0.72, y);
-  ctx.lineTo(x, y + size);
-  ctx.lineTo(x - size * 0.72, y);
-  ctx.closePath();
-  ctx.fill();
-}
-
-// You: a small, flickering ember.
-function drawEmber(x, y, size = 6, glow = 1, alpha = 1) {
+// You: a small, flickering ember with a dithered glow.
+function drawEmber(x, y, glow = 1, alpha = 1, scale = 1) {
   const flicker = REDUCED ? 1 : 0.86 + 0.14 * Math.sin(G.t * 0.23) * Math.sin(G.t * 0.071 + 1.3);
-  const R = size * 7 * glow * flicker;
+  const R = 36 * scale * glow * flicker;
   if (R > 1) {
     const g = ctx.createRadialGradient(x, y, 0, x, y, R);
-    g.addColorStop(0, `rgba(${EMBER_RGB}, ${0.3 * alpha})`);
+    g.addColorStop(0, `rgba(${EMBER_RGB}, ${0.34 * alpha})`);
     g.addColorStop(1, `rgba(${EMBER_RGB}, 0)`);
     ctx.fillStyle = g;
     ctx.fillRect(x - R, y - R, R * 2, R * 2);
   }
-  ctx.globalAlpha = alpha;
-  diamond(x, y, size, C.ember);
-  diamond(x, y, size * 0.4, C.core);
-  ctx.globalAlpha = 1;
+  const frame = !REDUCED && Math.sin(G.t * 0.31) * Math.sin(G.t * 0.13) > 0.55 ? SPR.emberB : SPR.emberA;
+  drawBitmap(frame, x, y, { color: C.ember, color2: C.core, scale, alpha, center: true });
 }
 
-// Dusk, drawn in line. `flap` squeezes the wings: 1 = open, ~0.2 = folded.
 function drawMoth(x, y, { s = 1, flap = 1, alpha = 1, color = C.ink } = {}) {
   if (alpha <= 0) return;
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.translate(x, y);
   ctx.scale(s, s);
-  ctx.lineWidth = 2 / Math.max(s, 0.7);
+  ctx.lineWidth = 2 / s;
   ctx.strokeStyle = color;
 
   for (const side of [-1, 1]) {
     ctx.save();
     ctx.scale(side * flap, 1);
     ctx.fillStyle = C.bg;
-    // hindwing
     ctx.beginPath();
     ctx.moveTo(3, 0);
     ctx.bezierCurveTo(24, 0, 46, 8, 44, 26);
@@ -1193,7 +1791,6 @@ function drawMoth(x, y, { s = 1, flap = 1, alpha = 1, color = C.ink } = {}) {
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
-    // forewing
     ctx.beginPath();
     ctx.moveTo(3, -9);
     ctx.bezierCurveTo(18, -40, 52, -48, 66, -32);
@@ -1202,58 +1799,201 @@ function drawMoth(x, y, { s = 1, flap = 1, alpha = 1, color = C.ink } = {}) {
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
-    // eye spot
     ctx.beginPath();
     ctx.arc(42, -22, 6, 0, TAU);
     ctx.stroke();
     ctx.fillStyle = color;
     ctx.beginPath();
-    ctx.arc(42, -22, 2, 0, TAU);
+    ctx.arc(42, -22, 2.5, 0, TAU);
     ctx.fill();
     ctx.restore();
   }
 
-  // body
   ctx.fillStyle = C.bg;
   ctx.beginPath();
   ctx.ellipse(0, 4, 5, 20, 0, 0, TAU);
   ctx.fill();
   ctx.stroke();
   ctx.beginPath();
-  for (const yy of [7, 13, 19]) {
-    ctx.moveTo(-3.2, yy);
-    ctx.lineTo(3.2, yy);
+  for (const yy of [8, 16]) {
+    ctx.moveTo(-3, yy);
+    ctx.lineTo(3, yy);
   }
   ctx.stroke();
-  // head
   ctx.beginPath();
   ctx.arc(0, -21, 6, 0, TAU);
   ctx.fill();
   ctx.stroke();
-  ctx.fillStyle = color;
-  for (const ex of [-2.4, 2.4]) {
-    ctx.beginPath();
-    ctx.arc(ex, -21.5, 1.3, 0, TAU);
-    ctx.fill();
-  }
-  // feathery antennae
   ctx.beginPath();
   for (const side of [-1, 1]) {
-    const p0 = { x: side * 2, y: -26 };
-    const p1 = { x: side * 4, y: -42 };
-    const p2 = { x: side * 16, y: -48 };
-    ctx.moveTo(p0.x, p0.y);
-    ctx.quadraticCurveTo(p1.x, p1.y, p2.x, p2.y);
-    for (const t of [0.45, 0.65, 0.85]) {
-      const u = 1 - t;
-      const px = u * u * p0.x + 2 * u * t * p1.x + t * t * p2.x;
-      const py = u * u * p0.y + 2 * u * t * p1.y + t * t * p2.y;
-      ctx.moveTo(px, py);
-      ctx.lineTo(px + side * 4, py + 1.5);
-    }
+    ctx.moveTo(side * 2, -26);
+    ctx.quadraticCurveTo(side * 4, -42, side * 16, -48);
   }
   ctx.stroke();
   ctx.restore();
+}
+
+function drawFirefly(x, y, { s = 1, flap = 1, alpha = 1, color = C.ink, lit = 1 } = {}) {
+  if (alpha <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(x, y);
+  ctx.scale(s, s);
+  ctx.lineWidth = 2 / s;
+  ctx.strokeStyle = color;
+  if (lit) {
+    const g = ctx.createRadialGradient(0, 14, 0, 0, 14, 42);
+    g.addColorStop(0, `rgba(${CORE_RGB}, 0.3)`);
+    g.addColorStop(1, `rgba(${CORE_RGB}, 0)`);
+    ctx.fillStyle = g;
+    ctx.fillRect(-42, -28, 84, 84);
+  }
+  for (const side of [-1, 1]) {
+    ctx.save();
+    ctx.translate(side * 3, -5);
+    ctx.rotate(side * (-0.2 - 0.8 * flap));
+    ctx.fillStyle = C.bg;
+    ctx.beginPath();
+    ctx.ellipse(side * 13, 0, 13, 5, 0, 0, TAU);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+  ctx.fillStyle = lit ? C.core : C.bg;
+  ctx.beginPath();
+  ctx.ellipse(0, 14, 9, 13, 0, 0, TAU);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = C.bg;
+  ctx.beginPath();
+  ctx.ellipse(0, -3, 6.5, 6, 0, 0, TAU);
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(0, -13, 5, 0, TAU);
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();
+  for (const side of [-1, 1]) {
+    ctx.moveTo(side * 2, -17);
+    ctx.quadraticCurveTo(side * 3, -26, side * 10, -30);
+    ctx.moveTo(side * 5, 0);
+    ctx.lineTo(side * 11, 6);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawOwl(x, y, { s = 1, alpha = 1, color = C.ink, calm = 0, blink = false } = {}) {
+  if (alpha <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(x, y);
+  ctx.scale(s, s);
+  ctx.lineWidth = 2 / s;
+  ctx.strokeStyle = color;
+  ctx.fillStyle = C.bg;
+  // branch
+  ctx.beginPath();
+  ctx.moveTo(-62, 46);
+  ctx.lineTo(58, 44);
+  ctx.moveTo(36, 45);
+  ctx.lineTo(48, 35);
+  ctx.stroke();
+  // ear tufts, behind the body
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(side * 12, -26);
+    ctx.lineTo(side * 26, -46);
+    ctx.lineTo(side * 28, -20);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+  ctx.beginPath();
+  ctx.ellipse(0, 4, 32, 38, 0, 0, TAU);
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();
+  for (const side of [-1, 1]) {
+    ctx.moveTo(side * 30, -6);
+    ctx.quadraticCurveTo(side * 38, 20, side * 20, 38);
+  }
+  for (const [mx, my] of [[-8, 14], [8, 14], [0, 22], [-8, 30], [8, 30]]) {
+    ctx.moveTo(mx - 3, my);
+    ctx.lineTo(mx, my + 3);
+    ctx.lineTo(mx + 3, my);
+  }
+  for (const fx of [-10, -6, 6, 10]) {
+    ctx.moveTo(fx, 40);
+    ctx.lineTo(fx, 45);
+  }
+  ctx.stroke();
+  // eyes: squinting at your light, wide, drowsy, then asleep
+  const mood = blink ? "shut" : calm >= 100 ? "shut" : calm >= 70 ? "drowsy" : calm >= 30 ? "open" : "squint";
+  for (const side of [-1, 1]) {
+    const ex = side * 13;
+    const ey = -12;
+    ctx.fillStyle = C.bg;
+    ctx.beginPath();
+    ctx.arc(ex, ey, 10, 0, TAU);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    if (mood === "open") {
+      ctx.arc(ex, ey, 4, 0, TAU);
+      ctx.fill();
+    } else if (mood === "drowsy") {
+      ctx.moveTo(ex - 8, ey - 1);
+      ctx.lineTo(ex + 8, ey - 1);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(ex, ey, 3.5, 0, Math.PI);
+      ctx.fill();
+    } else if (mood === "squint") {
+      ctx.moveTo(ex - 6, ey + side * 1);
+      ctx.lineTo(ex + 6, ey - side * 1);
+      ctx.stroke();
+    } else {
+      ctx.arc(ex, ey - 2, 5, 0.25, Math.PI - 0.25);
+      ctx.stroke();
+    }
+  }
+  ctx.beginPath();
+  ctx.moveTo(-3, -5);
+  ctx.lineTo(0, 2);
+  ctx.lineTo(3, -5);
+  ctx.closePath();
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawFoe(f) {
+  const pose = foePose(f);
+  const flashing = f.flash > 0 && (f.flash >> 1) % 2 === 0;
+  const color = flashing ? C.ember : C.ink;
+  const o = { alpha: f.alpha, color };
+  if (f.key === "moth") drawMoth(pose.x, pose.y, { ...o, flap: pose.flap });
+  else if (f.key === "firefly") drawFirefly(pose.x, pose.y, { ...o, s: 1.5, flap: pose.flap, lit: pose.lit });
+  else drawOwl(pose.x, pose.y, { ...o, calm: f.calm, blink: pose.blink });
+  return pose;
+}
+
+// The next creature, small, standing on the path ahead.
+function drawAhead(key, x, color) {
+  const flap = 0.3 + 0.7 * Math.abs(Math.cos(G.t * 0.25));
+  if (key === "moth") drawMoth(x, GROUND - 52 + Math.sin(G.t * 0.05) * 3, { s: 0.5, flap, color });
+  else if (key === "firefly") drawFirefly(x, GROUND - 50 + Math.sin(G.t * 0.08) * 4, { s: 0.8, flap, color, lit: Math.sin(G.t * 0.2) > 0 ? 1 : 0 });
+  else drawOwl(x, GROUND - 23, { s: 0.5, color, blink: G.t % 190 < 7 });
+}
+
+function drawMini(key, x, y, frame) {
+  const A = SPR[`${key}A`];
+  const B = SPR[`${key}B`];
+  const rows = frame ? B : A;
+  const color2 = key === "firefly" ? (frame ? C.faint : C.core) : C.core;
+  drawBitmap(rows, x, y, { color: C.ink, color2, center: true });
 }
 
 function drawMiniMoth(b) {
@@ -1265,8 +2005,8 @@ function drawMiniMoth(b) {
   for (const side of [-1, 1]) {
     ctx.beginPath();
     ctx.moveTo(0, -2);
-    ctx.lineTo(side * 7 * f, -5);
-    ctx.lineTo(side * 5 * f, 3);
+    ctx.lineTo(side * 8 * f, -6);
+    ctx.lineTo(side * 6 * f, 4);
     ctx.lineTo(0, 1);
     ctx.closePath();
     ctx.fill();
@@ -1277,9 +2017,45 @@ function drawMiniMoth(b) {
 function drawBullets() {
   for (const b of G.bullets) {
     ctx.globalAlpha = b.fade ? 1 - b.fade / 20 : Math.min(1, b.age / 8);
-    if (b.kind === "moth") drawMiniMoth(b);
-    else {
-      ctx.fillStyle = C.ink;
+    ctx.fillStyle = C.ink;
+    ctx.strokeStyle = C.ink;
+    if (b.kind === "moth") {
+      drawMiniMoth(b);
+    } else if (b.kind === "spark") {
+      const x = snap(b.x);
+      const y = snap(b.y);
+      ctx.fillRect(x - 4, y - 1, 8, 2);
+      ctx.fillRect(x - 1, y - 4, 2, 8);
+    } else if (b.kind === "fly") {
+      const lit = Math.sin(b.age * 0.3) > -0.4;
+      ctx.fillStyle = lit ? C.core : C.dim;
+      ctx.fillRect(snap(b.x) - 3, snap(b.y) - 3, 6, 6);
+      ctx.fillStyle = C.dim;
+      ctx.fillRect(snap(b.x - b.vx * 4) - 1, snap(b.y) - 1, 2, 2);
+    } else if (b.kind === "feather") {
+      const tilt = Math.sin(b.age * 0.06 + b.sway) * 0.9;
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      ctx.rotate(tilt);
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-6, 0);
+      ctx.lineTo(6, 0);
+      ctx.moveTo(-2, 0);
+      ctx.lineTo(-4, -3);
+      ctx.moveTo(2, 0);
+      ctx.lineTo(0, -3);
+      ctx.stroke();
+      ctx.restore();
+    } else if (b.kind === "flash") {
+      if ((b.age >> 2) % 2 === 0) {
+        ctx.strokeStyle = C.dim;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, 12 - b.age * 0.2, 0, TAU);
+        ctx.stroke();
+      }
+    } else {
       ctx.beginPath();
       ctx.arc(b.x, b.y, b.r, 0, TAU);
       ctx.fill();
@@ -1288,83 +2064,226 @@ function drawBullets() {
   ctx.globalAlpha = 1;
 }
 
-function drawNext(x, y) {
-  const bob = REDUCED ? 0 : Math.sin(G.t * 0.12) * 2;
-  ctx.fillStyle = C.dim;
-  ctx.beginPath();
-  ctx.moveTo(x - 5, y - 3 + bob);
-  ctx.lineTo(x + 5, y - 3 + bob);
-  ctx.lineTo(x, y + 3 + bob);
-  ctx.closePath();
-  ctx.fill();
-}
-
+/* ----------------------------------------------------------------------- */
+/* Drawing: interface                                                      */
+/* ----------------------------------------------------------------------- */
 const pulse = (speed = 0.06) => (REDUCED ? 1 : 0.55 + 0.45 * Math.sin(G.t * speed));
 
+function drawFrame(b) {
+  const x = snap(b.x);
+  const y = snap(b.y);
+  const w = snap(b.w);
+  const h = snap(b.h);
+  ctx.fillStyle = C.bg;
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = C.ink;
+  ctx.fillRect(x, y, w, PX);
+  ctx.fillRect(x, y + h - PX, w, PX);
+  ctx.fillRect(x, y, PX, h);
+  ctx.fillRect(x + w - PX, y, PX, h);
+  return { x, y, w, h };
+}
+
+function withClip(b, fn) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(b.x + PX, b.y + PX, b.w - PX * 2, b.h - PX * 2);
+  ctx.clip();
+  fn();
+  ctx.restore();
+}
+
+function drawNext(x, y) {
+  const bob = REDUCED ? 0 : Math.round(Math.sin(G.t * 0.12)) * PX;
+  drawBitmap(SPR.next, x, y + bob, { color: C.dim, center: true });
+}
+
+function drawOptionRow(labels, sel, active, { ready = [], off = [], counts = {} } = {}) {
+  labels.forEach((label, i) => {
+    const r = optionRect(i, labels.length);
+    const cx = r.x + r.w / 2;
+    const isSel = active && sel === i;
+    const color = ready[i] ? C.ember : isSel ? C.ink : C.dim;
+    const alpha = active ? (off[i] && !isSel ? 0.5 : 1) : 0.4;
+    const tw = textWidth(label);
+    text(label, cx, OPT_Y, { color, align: "center", base: "middle", alpha });
+    if (counts[i] != null) text(String(counts[i]), cx + tw / 2 + 6, OPT_Y - 8, { color: C.dim, base: "middle", alpha });
+    if (isSel) drawBitmap(SPR.pick, cx - tw / 2 - 12, OPT_Y, { color: C.ember, center: true, alpha });
+  });
+}
+
 // Centered lines that pile up as they're read: earlier ones fade to grey.
-function drawStack(d, y0, { size = 15, lh = 24, maxW = 420 } = {}) {
+function drawStack(d, y0, { lh = 22, maxW = 420 } = {}) {
   if (!d) return y0;
-  setFont(size);
   let y = y0;
   for (let j = 0; j <= d.i; j++) {
     const str = d.lines[j];
-    ctx.fillStyle = j < d.i ? C.dim : C.ink;
-    const rows = drawTyped(str, j < d.i ? str.length : d.n, W / 2, y, maxW, lh, "center");
-    y += rows * lh + 6;
+    const rows = drawTyped(str, j < d.i ? str.length : d.n, W / 2, y, maxW, lh, { align: "center", color: j < d.i ? C.dim : C.ink });
+    y += rows * lh + 8;
   }
   return y;
 }
 
-function drawTitle() {
-  text("ember", W / 2, 116, { size: 46, weight: 500, align: "center", spacing: 6 });
-  drawEmber(W / 2, 196, 7, 1.5);
-  text("a very small game", W / 2, 242, { size: 13, color: C.dim, align: "center" });
-  text("press z or tap to begin", W / 2, 304, { size: 14, align: "center", alpha: pulse() });
+function drawSoundIcon() {
+  drawBitmap(muted ? SPR.soundOff : SPR.soundOn, W - 26, 20, { color: C.dim, center: true, alpha: 0.8 });
+}
 
-  const e = G.endings;
-  if (e.warm || e.cold) {
-    setFont(11);
-    const items = [["warm", e.warm, C.ember], ["cold", e.cold, C.ink]];
-    let x = W / 2 - 62;
-    for (const [label, found, color] of items) {
-      ctx.strokeStyle = found ? color : C.dim;
-      ctx.fillStyle = color;
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.arc(x, 352, 3.5, 0, TAU);
-      if (found) ctx.fill();
-      else ctx.stroke();
-      text(label, x + 10, 352, { size: 11, color: C.dim, base: "middle" });
-      x += 74;
-    }
+/* --- title & intro ------------------------------------------------------- */
+function drawTitle() {
+  text("ember", W / 2, 92, { scale: 3, align: "center", spacing: 1 });
+  drawEmber(W / 2, 176, 1.4, 1, 2);
+  text("a very small game", W / 2, 220, { color: C.dim, align: "center" });
+
+  if (!S.started) {
+    text("press z or tap to begin", W / 2, 290, { align: "center", alpha: pulse() });
+  } else if (G.confirmReset) {
+    text("start over? your warmth and", W / 2, 262, { align: "center" });
+    text("friends will be gone.", W / 2, 282, { align: "center" });
+    text("z or tap here to confirm · x to cancel", W / 2, 312, { color: C.ember, align: "center", alpha: pulse() });
+  } else {
+    TITLE_OPTS.forEach((label, i) => {
+      const r = titleRect(i);
+      const sel = G.titleSel === i;
+      text(label, W / 2, r.y + 10, { color: sel ? C.ink : C.dim, align: "center", base: "middle" });
+      if (sel) drawBitmap(SPR.pick, W / 2 - textWidth(label) / 2 - 14, r.y + 10, { color: C.ember, center: true });
+    });
+    text(`${fmt(S.warmth)} warmth · ${S.friends.length} friends · ${fmt(S.dist)} m`, W / 2, 334, { color: C.dim, align: "center" });
   }
-  text("arrows move · z confirm · x back · m sound", W / 2, 392, { size: 11, color: C.dim, align: "center" });
+  text("arrows move · z ok · x back · m sound", W / 2, 392, { color: C.dim, align: "center" });
 }
 
 function drawIntro() {
-  drawEmber(W / 2, 214, 6, 1.3);
-  if (G.introT > 0) {
-    const t = ease(G.introT / 140);
-    drawMoth(W / 2 + Math.sin(G.t * 0.05) * 30 * (1 - t), lerp(-40, 90, t), {
-      s: lerp(0.35, 0.6, t), flap: 0.3 + 0.7 * Math.abs(Math.cos(G.t * 0.3)), alpha: t,
-    });
-  }
-  drawStack(G.dialog, 260);
+  drawEmber(W / 2, 200, 1.2);
+  drawStack(G.dialog, 250);
   if (G.dialog?.full) drawNext(W - 28, H - 28);
 }
 
+/* --- the path ------------------------------------------------------------ */
+function drawHub() {
+  // header: warmth on the left, distance on the right
+  text("warmth", 20, 18, { color: C.dim });
+  text(fmt(S.warmth), 20, 34, { scale: 2, color: C.ember });
+  text(`+${fmtRate(warmthRate())} / s`, 20, 68, { color: C.dim });
+  text(`${fmt(S.dist)} m`, 430, 18, { align: "right" });
+  text(`night ${night()}`, 430, 36, { color: C.dim, align: "right" });
+  text(arrived() ? "something ahead" : `next in ${Math.ceil(S.nextAt - S.dist)} m`, 430, 54, { color: arrived() ? C.ember : C.dim, align: "right" });
+
+  if (G.box.y > 200) drawPath(); // the campfire and friends panels cover the path
+
+  const b = drawFrame(G.box);
+  withClip(b, () => {
+    if (G.hubPhase === "camp") drawCamp(b);
+    else if (G.hubPhase === "friends") drawFriends(b);
+    else if (G.dialog) drawTyped(G.dialog.text, G.dialog.n, b.x + 22, b.y + 20, HUB_BOX.w - 44, 24);
+  });
+
+  drawOptionRow(HUB_OPTS, G.hubPhase === "camp" ? 1 : G.hubPhase === "friends" ? 2 : G.hubSel, true, {
+    ready: [arrived()],
+    off: [!arrived()],
+  });
+}
+
+function drawPath() {
+  const off = S.dist * PX_PER_M;
+  // a far ridge that scrolls slower than the ground
+  ctx.fillStyle = C.faint;
+  for (let x = 0; x < W; x += PX) {
+    const wx = x + off * 0.3;
+    ctx.fillRect(x, snap(170 + Math.sin(wx * 0.013) * 7 + Math.sin(wx * 0.041) * 3), PX, PX);
+  }
+  ctx.fillStyle = C.dim;
+  ctx.fillRect(0, GROUND, W, PX);
+  // pebbles and grass, placed by distance so they scroll past
+  const cell = 34;
+  for (let c = Math.floor(off / cell) - 1; c <= Math.floor((off + W) / cell) + 1; c++) {
+    const h = hash(c);
+    const x = snap(c * cell - off + hash(c + 0.5) * 20);
+    if (h < 0.3) {
+      ctx.fillStyle = C.dim;
+      ctx.fillRect(x, GROUND + 6, 4, 2);
+    } else if (h < 0.55) {
+      ctx.fillStyle = C.dim;
+      ctx.fillRect(x, GROUND - 4, 2, 4);
+      ctx.fillRect(x + 4, GROUND - 6, 2, 6);
+      ctx.fillRect(x + 8, GROUND - 4, 2, 4);
+    } else if (h < 0.65) {
+      ctx.fillStyle = C.faint;
+      ctx.fillRect(x, GROUND + 12, 6, 2);
+    }
+  }
+
+  // what's waiting up ahead
+  const remaining = S.nextAt - S.dist;
+  if (remaining < 26) {
+    drawAhead(ROSTER[S.met % ROSTER.length], WALK_X + 72 + remaining * PX_PER_M, remaining <= 0 ? C.ink : C.dim);
+  }
+
+  // friends trail behind you
+  const shown = S.friends.slice(-8).reverse();
+  shown.forEach((f, i) => {
+    const x = WALK_X - 30 - i * 24;
+    const y = GROUND - 24 + Math.sin(G.t * 0.06 + i * 1.7) * 4;
+    drawMini(f.key, x, y, Math.floor(G.t / 9 + i) % 2);
+  });
+  if (S.friends.length > 8) text(`+${S.friends.length - 8}`, WALK_X - 30 - 8 * 24, GROUND - 30, { color: C.dim, align: "center" });
+
+  const walking = !arrived() && !REDUCED;
+  const bob = walking ? -Math.abs(Math.sin(G.walkT * 0.18)) * 4 : 0;
+  drawEmber(WALK_X, GROUND - 14 + bob);
+}
+
+function drawCamp(b) {
+  UPGRADES.forEach((u, i) => {
+    const r = campRow(i);
+    const y = r.y + 6;
+    const level = lvl(u.id);
+    const maxed = level >= u.max;
+    const cost = upgradeCost(u);
+    const sel = G.campSel === i;
+    const flash = G.campFlash?.i === i && (G.campFlash.t >> 2) % 2 === 0;
+    if (sel) drawBitmap(SPR.pick, b.x + 18, y + 7, { color: C.ember, center: true });
+    text(u.label, b.x + 34, y, { color: sel ? C.ink : C.dim });
+    text(u.desc, b.x + 34, y + 18, { color: C.dim });
+    let costColor = maxed ? C.dim : S.warmth >= cost ? C.ember : C.dim;
+    if (flash) costColor = G.campFlash.ok ? C.core : C.faint;
+    text(maxed ? "max" : fmt(cost), b.x + b.w - 18, y, { color: costColor, align: "right" });
+    text(`lv ${level}`, b.x + b.w - 18, y + 18, { color: C.dim, align: "right" });
+  });
+}
+
+function drawFriends(b) {
+  let y = b.y + 16;
+  text("following you", b.x + 18, y, { color: C.dim });
+  y += 26;
+  if (!S.friends.length) {
+    drawTyped("no one yet. spare someone on the path and they'll follow your light.", 999, b.x + 18, y, b.w - 36, 22);
+    return;
+  }
+  for (const key of ROSTER) {
+    const list = S.friends.filter((f) => f.key === key);
+    if (!list.length) continue;
+    drawMini(key, b.x + 26, y + 6, Math.floor(G.t / 9) % 2);
+    text(`${SPECIES[key].plural} ${list.length}`, b.x + 46, y);
+    text(`+${fmtRate(list.reduce((s, f) => s + f.rate, 0))} / s`, b.x + b.w - 18, y, { color: C.ember, align: "right" });
+    y += 18;
+    const names = list.length > 6 ? `${list.slice(-6).map((f) => f.name).join(", ")} and ${list.length - 6} more` : list.map((f) => f.name).join(", ");
+    y += drawTyped(names, 999, b.x + 46, y, b.w - 64, 18, { color: C.dim }) * 18 + 12;
+  }
+  text("your own glow", b.x + 46, y);
+  text(`+${fmtRate(ownGlow())} / s`, b.x + b.w - 18, y, { color: C.ember, align: "right" });
+}
+
+/* --- battle -------------------------------------------------------------- */
 function drawBattle() {
-  const m = G.moth;
-  const pose = mothPose(m);
-  const flashing = m.flash > 0 && (m.flash >> 1) % 2 === 0;
-  drawMoth(pose.x, pose.y, { flap: pose.flap, alpha: m.alpha, color: flashing ? C.ember : C.ink });
+  const f = G.foe;
+  const pose = drawFoe(f);
 
   if (G.slash) {
     const t = G.slash.t;
     const grow = clamp(t / 8, 0, 1);
     ctx.globalAlpha = t < 10 ? 1 : 1 - (t - 10) / 16;
     ctx.strokeStyle = C.ember;
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 4;
     ctx.beginPath();
     ctx.moveTo(pose.x + 56, pose.y - 50);
     ctx.lineTo(pose.x + 56 - 112 * grow, pose.y - 50 + 100 * grow);
@@ -1373,61 +2292,50 @@ function drawBattle() {
   }
 
   const inArena = G.phase === "enemy" || G.phase === "dodge";
-  if (m.barT > 0) {
-    const a = Math.min(1, m.barT / 20);
-    ctx.globalAlpha = a;
+  if (f.barT > 0) {
+    ctx.globalAlpha = Math.min(1, f.barT / 20);
     ctx.fillStyle = C.faint;
     ctx.fillRect(190, 166, 100, 4);
     ctx.fillStyle = C.ink;
-    ctx.fillRect(190, 166, 100 * (m.shown / m.max), 4);
+    ctx.fillRect(190, 166, snap(100 * (f.shown / f.max)), 4);
     ctx.globalAlpha = 1;
-  } else if (!inArena && !m.dead) {
-    text("dusk", 240, 160, { size: 12, color: m.calm >= 100 ? C.ember : C.dim, align: "center", spacing: 3 });
+  } else if (!inArena && !f.dead) {
+    text(f.name, 240, 158, { color: f.calm >= 100 ? C.ember : C.dim, align: "center", spacing: 1 });
   }
 
-  drawBox();
+  const b = drawFrame(G.box);
+  withClip(b, () => {
+    if (G.phase === "menu" || G.phase === "result") {
+      const d = G.dialog;
+      if (d) {
+        drawTyped(d.text, d.n, b.x + 22, b.y + 20, MENU_BOX.w - 44, 24);
+        if (G.phase === "result" && d.full) drawNext(b.x + b.w - 22, b.y + b.h - 16);
+      }
+    } else if (G.phase === "talk") {
+      drawActs(b);
+    } else if (G.phase === "strike") {
+      drawStrike(b);
+    } else {
+      drawArena();
+    }
+  });
+
   drawHud();
-  drawOptions();
+  drawOptionRow(MENU, G.menu, G.phase === "menu" || G.phase === "talk", {
+    ready: [false, false, false, f.calm >= 100],
+    counts: { 2: G.mends },
+  });
   drawBubble();
 }
 
-function drawBox() {
-  const b = G.box;
-  ctx.fillStyle = C.bg;
-  ctx.fillRect(b.x, b.y, b.w, b.h);
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(b.x + 1, b.y + 1, b.w - 2, b.h - 2);
-  ctx.clip();
-  if (G.phase === "menu" || G.phase === "result") {
-    const d = G.dialog;
-    if (d) {
-      setFont(16);
-      ctx.fillStyle = C.ink;
-      drawTyped(d.text, d.n, b.x + 22, b.y + 20, MENU_BOX.w - 44, 25);
-      if (G.phase === "result" && d.full) drawNext(b.x + b.w - 22, b.y + b.h - 18);
-    }
-  } else if (G.phase === "talk") {
-    drawActs(b);
-  } else if (G.phase === "strike") {
-    drawStrike(b);
-  } else {
-    drawArena();
-  }
-  ctx.restore();
-  ctx.strokeStyle = C.ink;
-  ctx.lineWidth = 2;
-  ctx.strokeRect(b.x, b.y, b.w, b.h);
-}
-
 function drawActs(b) {
-  ACTS.forEach((label, i) => {
+  G.foe.sp.acts.forEach((a, i) => {
     const r = actRect(i);
     const sel = G.act === i;
-    if (sel) diamond(r.x - 18, r.y + 9, 5, C.ember);
-    text(label, r.x, r.y, { size: 16, color: sel ? C.ink : C.dim, alpha: actSpent(i) ? 0.45 : 1 });
+    if (sel) drawBitmap(SPR.pick, r.x - 16, r.y + 7, { color: C.ember, center: true });
+    text(a.label, r.x, r.y, { color: sel ? C.ink : C.dim, alpha: actSpent(i) ? 0.45 : 1 });
   });
-  text("x back", b.x + b.w - 16, b.y + b.h - 22, { size: 11, color: C.dim, align: "right" });
+  text("x back", b.x + b.w - 16, b.y + b.h - 22, { color: C.dim, align: "right" });
 }
 
 function drawStrike(b) {
@@ -1435,154 +2343,76 @@ function drawStrike(b) {
   if (!s) return;
   const x0 = b.x + 40;
   const x1 = b.x + b.w - 40;
-  const cy = b.y + b.h / 2 + 10;
-  text("strike as the line crosses the center", b.x + b.w / 2, b.y + 16, { size: 12, color: C.dim, align: "center" });
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = C.faint;
-  ctx.beginPath();
-  ctx.moveTo(x0, cy);
-  ctx.lineTo(x1, cy);
-  ctx.stroke();
+  const cy = snap(b.y + b.h / 2 + 10);
+  text("stop the line at the center", b.x + b.w / 2, b.y + 16, { color: C.dim, align: "center" });
+  ctx.fillStyle = C.faint;
+  ctx.fillRect(x0, cy, x1 - x0, PX);
   for (let i = 0; i <= 10; i++) {
-    const x = lerp(x0, x1, i / 10);
-    const h = i === 5 ? 26 : 8;
-    ctx.strokeStyle = i === 5 ? C.ember : C.dim;
-    ctx.beginPath();
-    ctx.moveTo(x, cy - h / 2);
-    ctx.lineTo(x, cy + h / 2);
-    ctx.stroke();
+    const x = snap(lerp(x0, x1, i / 10));
+    const h = i === 5 ? 24 : 8;
+    ctx.fillStyle = i === 5 ? C.ember : C.dim;
+    ctx.fillRect(x, cy - h / 2 + 1, PX, h);
   }
-  const cx = lerp(x0, x1, s.x);
-  const flash = s.stopped && (s.hold >> 2) % 2 === 0;
-  ctx.strokeStyle = flash ? C.ember : C.ink;
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(cx, cy - 22);
-  ctx.lineTo(cx, cy + 22);
-  ctx.stroke();
+  const cx = snap(lerp(x0, x1, s.x));
+  ctx.fillStyle = s.stopped && (s.hold >> 2) % 2 === 0 ? C.ember : C.ink;
+  ctx.fillRect(cx - 2, cy - 20, 4, 42);
 }
 
 function drawArena() {
   if (G.phase === "dodge" && G.pattern === "spiral" && G.patT >= 0) {
     const a = G.boxTarget;
-    const cx = a.x + a.w / 2;
-    const cy = a.y + a.h / 2;
     ctx.strokeStyle = C.dim;
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.arc(cx, cy, 7 + Math.sin(G.t * 0.2), 0, TAU);
+    ctx.arc(a.x + a.w / 2, a.y + a.h / 2, 8, 0, TAU);
     ctx.stroke();
-    ctx.fillStyle = C.dim;
-    ctx.beginPath();
-    ctx.arc(cx, cy, 2, 0, TAU);
-    ctx.fill();
   }
   drawBullets();
   const p = G.player;
   const blink = p.inv > 0 && (p.inv >> 2) % 2 === 0;
-  if (!blink) drawEmber(p.x, p.y, 6, 1 - G.dimmed * 0.22);
+  if (!blink) drawEmber(p.x, p.y, 0.9 - G.dimmed * 0.22);
 }
 
 function drawHud() {
-  text("ember", 20, HUD_Y, { size: 14, base: "middle" });
-  text("hp", 92, HUD_Y, { size: 11, color: C.dim, base: "middle" });
-  const bx = 116;
+  text("ember", 20, HUD_Y, { base: "middle" });
+  text("hp", 94, HUD_Y, { color: C.dim, base: "middle" });
+  const bx = 128;
   const bw = 96;
   ctx.fillStyle = C.faint;
   ctx.fillRect(bx, HUD_Y - 4, bw, 8);
-  ctx.fillStyle = G.hp <= 6 ? C.ember : C.ink;
-  ctx.fillRect(bx, HUD_Y - 4, (bw * G.hp) / G.maxHp, 8);
-  text(`${G.hp} / ${G.maxHp}`, bx + bw + 12, HUD_Y, { size: 13, base: "middle" });
-}
-
-function drawOptions() {
-  const active = G.phase === "menu" || G.phase === "talk";
-  MENU.forEach((label, i) => {
-    const r = optionRect(i);
-    const cx = r.x + r.w / 2;
-    const sel = active && G.menu === i;
-    const ready = i === 3 && G.moth.calm >= 100;
-    const color = ready ? C.ember : sel ? C.ink : C.dim;
-    const alpha = active ? 1 : 0.4;
-    setFont(16, sel ? 500 : 400);
-    const tw = ctx.measureText(label).width;
-    text(label, cx, OPT_Y, { size: 16, weight: sel ? 500 : 400, color, align: "center", base: "middle", alpha });
-    if (i === 2) text(String(G.mends), cx + tw / 2 + 4, OPT_Y - 6, { size: 10, color: C.dim, base: "middle", alpha });
-    if (sel) {
-      ctx.globalAlpha = alpha;
-      diamond(cx - tw / 2 - 14, OPT_Y, 5, C.ember);
-      ctx.globalAlpha = 1;
-    }
-  });
+  ctx.fillStyle = G.hp <= G.maxHp * 0.3 ? C.ember : C.ink;
+  ctx.fillRect(bx, HUD_Y - 4, snap((bw * G.hp) / G.maxHp), 8);
+  text(`${G.hp} / ${G.maxHp}`, bx + bw + 12, HUD_Y, { base: "middle" });
 }
 
 function drawBubble() {
   const d = G.bubble;
   if (!d) return;
-  setFont(14);
-  const lines = wrap(d.text, 116);
-  const bx = 332;
+  const lines = wrap(d.text, 120);
+  const bx = 330;
   const by = 40;
-  const bw = 136;
+  const bw = 140;
   const bh = 20 + lines.length * 20;
-  ctx.fillStyle = C.bg;
-  ctx.strokeStyle = C.ink;
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(bx, by);
-  ctx.lineTo(bx + bw, by);
-  ctx.lineTo(bx + bw, by + bh);
-  ctx.lineTo(bx, by + bh);
-  ctx.lineTo(bx, by + 30);
-  ctx.lineTo(bx - 12, by + 23);
-  ctx.lineTo(bx, by + 16);
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
+  drawFrame({ x: bx, y: by, w: bw, h: bh });
+  // a little tail pointing at the creature
   ctx.fillStyle = C.ink;
-  drawTyped(d.text, d.n, bx + 11, by + 11, 116, 20);
+  for (let i = 0; i < 5; i++) ctx.fillRect(bx - 2 - i * 2, by + 14 + i * 2, 2, 2);
+  for (let i = 0; i < 5; i++) ctx.fillRect(bx - 2 - i * 2, by + 30 - i * 2, 2, 2);
+  drawTyped(d.text, d.n, bx + 12, by + 12, 120, 20);
 }
 
+/* --- losing -------------------------------------------------------------- */
 function drawOver() {
-  if (G.sceneT < 30 && G.overAt) drawEmber(G.overAt.x, G.overAt.y, 6, 1, 1 - G.sceneT / 30);
+  if (G.sceneT < 30 && G.overAt) drawEmber(G.overAt.x, G.overAt.y, 1, 1 - G.sceneT / 30);
   const y = drawStack(G.dialog, 180);
-  if (G.overReady) text("z to rekindle", W / 2, y + 40, { size: 13, color: C.ember, align: "center", alpha: pulse() });
-}
-
-function drawEnd() {
-  const t = G.sceneT;
-  if (G.ending === "warm") {
-    // a stone, a sleeping moth, and you, wandering off
-    ctx.strokeStyle = C.ink;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(150, 152);
-    ctx.lineTo(196, 152);
-    ctx.ellipse(220, 152, 24, 12, 0, Math.PI, 0);
-    ctx.lineTo(290, 152);
-    ctx.stroke();
-    drawMoth(220, 118, { s: 0.62, flap: 0.22 + 0.04 * Math.sin(t * 0.03) });
-    const ex = 270 + Math.min(t, 600) * 0.22;
-    drawEmber(ex, 132 + Math.sin(t * 0.05) * 3, 5, 0.9, clamp(1 - (ex - 330) / 70, 0, 1));
-  } else {
-    drawEmber(W / 2, 130, 5, 0.6, 0.75);
-  }
-  const y = drawStack(G.dialog, 200);
-  if (G.endReady) {
-    text(`— ${G.ending} —`, W / 2, y + 26, { size: 14, color: G.ending === "warm" ? C.ember : C.dim, align: "center", spacing: 2 });
-    text("z to play again", W / 2, y + 62, { size: 12, color: C.dim, align: "center", alpha: pulse() });
-  }
+  if (G.overReady) text("z to keep going", W / 2, y + 34, { color: C.ember, align: "center", alpha: pulse() });
 }
 
 function drawParticles() {
   for (const p of G.particles) {
     ctx.globalAlpha = 1 - p.age / p.life;
-    if (p.text) {
-      text(p.text, p.x, p.y, { size: 11, color: p.color, alpha: 1 - p.age / p.life });
-    } else {
-      ctx.fillStyle = p.color;
-      ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
-    }
+    ctx.fillStyle = p.color;
+    ctx.fillRect(snap(p.x), snap(p.y), p.size, p.size);
   }
   ctx.globalAlpha = 1;
 }
@@ -1590,65 +2420,32 @@ function drawParticles() {
 function drawFloaters() {
   for (const f of G.floaters) {
     const a = f.t < 50 ? 1 : 1 - (f.t - 50) / 30;
-    text(f.text, f.x, f.y, { size: f.size ?? 14, weight: 500, color: f.color, align: "center", alpha: a });
+    text(f.text, f.x, f.y, { scale: f.scale ?? 1, color: f.color, align: "center", alpha: a });
   }
-}
-
-function drawMuteIcon() {
-  const x = W - 30;
-  const y = 18;
-  ctx.globalAlpha = 0.7;
-  ctx.fillStyle = C.dim;
-  ctx.strokeStyle = C.dim;
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(x, y - 2.5);
-  ctx.lineTo(x + 3, y - 2.5);
-  ctx.lineTo(x + 7, y - 6);
-  ctx.lineTo(x + 7, y + 6);
-  ctx.lineTo(x + 3, y + 2.5);
-  ctx.lineTo(x, y + 2.5);
-  ctx.closePath();
-  ctx.fill();
-  ctx.beginPath();
-  if (muted) {
-    ctx.moveTo(x + 10, y - 3);
-    ctx.lineTo(x + 16, y + 3);
-    ctx.moveTo(x + 16, y - 3);
-    ctx.lineTo(x + 10, y + 3);
-  } else {
-    ctx.arc(x + 8, y, 4.5, -0.8, 0.8);
-    ctx.moveTo(x + 8 + 8 * Math.cos(-0.8), y + 8 * Math.sin(-0.8));
-    ctx.arc(x + 8, y, 8, -0.8, 0.8);
-  }
-  ctx.stroke();
-  ctx.globalAlpha = 1;
 }
 
 function draw() {
-  ctx.setTransform(canvas.width / W, 0, 0, canvas.height / H, 0, 0);
+  ctx.setTransform(1 / PX, 0, 0, 1 / PX, 0, 0);
+  ctx.imageSmoothingEnabled = false;
   ctx.fillStyle = C.bg;
   ctx.fillRect(0, 0, W, H);
-  ctx.textBaseline = "top";
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
 
   ctx.save();
-  if (G.shake > 0) ctx.translate(rand(-1, 1) * G.shake, rand(-1, 1) * G.shake);
+  if (G.shake > 0) ctx.translate(snap(rand(-1, 1) * G.shake), snap(rand(-1, 1) * G.shake));
 
   for (const m of G.motes) {
-    ctx.globalAlpha = m.a;
-    ctx.fillStyle = C.dim;
-    ctx.fillRect(m.x, m.y, m.s, m.s);
+    ctx.fillStyle = m.bright ? C.dim : C.faint;
+    ctx.fillRect(snap(m.x), snap(m.y), PX, PX);
   }
-  ctx.globalAlpha = 1;
 
   switch (G.scene) {
     case "title": drawTitle(); break;
     case "intro": drawIntro(); break;
+    case "hub": drawHub(); break;
     case "battle": drawBattle(); break;
     case "over": drawOver(); break;
-    case "end": drawEnd(); break;
   }
   drawParticles();
   drawFloaters();
@@ -1660,7 +2457,8 @@ function draw() {
     ctx.fillRect(0, 0, W, H);
     ctx.globalAlpha = 1;
   }
-  drawMuteIcon();
+  drawSoundIcon();
+  present();
 }
 
 /* ----------------------------------------------------------------------- */
@@ -1676,13 +2474,15 @@ function update() {
       taps.splice(i, 1);
     }
   }
+  if (S.started && !document.hidden) gain(warmthRate() / 60);
+  if (S.started && G.t % 300 === 0) persist();
   updateAmbient();
   switch (G.scene) {
     case "title": updateTitle(); break;
     case "intro": updateIntro(); break;
+    case "hub": updateHub(); break;
     case "battle": updateBattle(); break;
     case "over": updateOver(); break;
-    case "end": updateEnd(); break;
   }
 }
 
@@ -1701,13 +2501,33 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
+// Warmth keeps building while the page is hidden or closed.
+let hiddenAt = 0;
 document.addEventListener("visibilitychange", () => {
   held.clear();
+  if (document.hidden) {
+    hiddenAt = Date.now();
+    if (S.started) persist();
+    return;
+  }
   last = performance.now();
+  if (!hiddenAt) return;
+  const secs = (Date.now() - hiddenAt) / 1000;
+  hiddenAt = 0;
+  const walking = G.scene === "hub";
+  const g = catchUp(secs, walking);
+  if (g >= 1 && secs > 20 && walking && G.hubPhase === "walk") {
+    G.dialog = new Typer(`while you were away, you gathered ${fmt(g)} warmth.`);
+  }
+});
+window.addEventListener("pagehide", () => {
+  if (S.started) persist();
 });
 
-// Give the web font a moment so the first frames don't measure the fallback.
-await Promise.race([document.fonts?.load(`16px ${FONT}`), new Promise((r) => setTimeout(r, 1200))]).catch(() => {});
-wrapCache.clear();
+const away = (Date.now() - S.t) / 1000;
+const gathered = catchUp(away, true);
+if (gathered >= 1 && away > 30) G.awayMsg = `while you were away, you gathered ${fmt(gathered)} warmth.`;
+if (S.started) persist();
+
 startTitle();
 requestAnimationFrame(frame);
