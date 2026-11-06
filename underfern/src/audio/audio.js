@@ -1006,6 +1006,78 @@ export class AudioEngine {
     on("newDay", this._onNewDay);
     on("sniff", this._onSniff);
     on("legBreak", this._onLegBreak);
+    on("charge", this._onCharge);
+    on("dodge", this._onDodge);
+    on("stagger", this._onStagger);
+    on("parry", this._onParry);
+  }
+
+  /** A heavy being wound up: a low growl from the animal — the telegraph. */
+  _onCharge(e) {
+    const c = e.creature;
+    if (!c?.position) return;
+    const own = this._isPlayer(c);
+    const w = massWeight(num(c.mass, 300));
+    const v = own ? this._voice(0.6) : this._spatialVoice(c.position.x, c.position.y + 1, c.position.z, 12 + 30 * w, c, 0.8);
+    if (!v) return;
+    if (own) {
+      this._routeDirect(v, this.sfxBus, 0.06);
+      v.out.gain.value = 0.55;
+    }
+    this._grunt(v, this.ctx.currentTime + LOOKAHEAD, c, w);
+    this._count("charge");
+  }
+
+  /** A dodge: a quick rush of air. */
+  _onDodge(e) {
+    const c = e.creature;
+    if (!c?.position) return;
+    const own = this._isPlayer(c);
+    const w = massWeight(num(c.mass, 300));
+    const v = own ? this._voice(0.5) : this._spatialVoice(c.position.x, c.position.y + 1, c.position.z, 8 + 15 * w, c, 0.6);
+    if (!v) return;
+    if (own) {
+      this._routeDirect(v, this.sfxBus, 0.05);
+      v.out.gain.value = 0.6;
+    }
+    this._whoosh(v, this.ctx.currentTime + LOOKAHEAD, "kick", w * 0.7);
+    this._count("dodge");
+  }
+
+  /** Poise broken: the reeling animal's grunt. */
+  _onStagger(e) {
+    const c = e.creature;
+    if (!c?.position) return;
+    const own = this._isPlayer(c);
+    const w = massWeight(num(c.mass, 300));
+    const v = own ? this._voice(0.8) : this._spatialVoice(c.position.x, c.position.y + 1, c.position.z, 12 + 25 * w, c, 0.9);
+    if (!v) return;
+    if (own) {
+      this._routeDirect(v, this.sfxBus, 0.06);
+      v.out.gain.value = 0.8;
+    }
+    const t = this.ctx.currentTime + LOOKAHEAD;
+    this._thud(v, t, Math.max(0.4, w), 1.2);
+    this._grunt(v, t + 0.04, c, w);
+    this._count("stagger");
+  }
+
+  /** A parry: a hard, ringing knock as the blow is turned. */
+  _onParry(e) {
+    const c = e.creature;
+    if (!c?.position) return;
+    const own = this._isPlayer(c) || this._isPlayer(e.by);
+    const w = massWeight(num(c.mass, 300));
+    const v = own ? this._voice(0.9) : this._spatialVoice(c.position.x, c.position.y + 1, c.position.z, 15 + 30 * w, c, 1);
+    if (!v) return;
+    if (own) {
+      this._routeDirect(v, this.sfxBus, 0.06);
+      v.out.gain.value = 0.9;
+    }
+    const t = this.ctx.currentTime + LOOKAHEAD;
+    this._thud(v, t, Math.min(1, w * 1.2), 1.6);
+    this._snap(v, t + 0.005, w);
+    this._count("parry");
   }
 
   _count(name) {
@@ -1051,14 +1123,19 @@ export class AudioEngine {
       if (!v) return;
     }
     const t = this.ctx.currentTime + LOOKAHEAD;
-    this._whoosh(v, t, kind, w);
-    if (e.target) {
+    const heavy = num(e.heavy, 0);
+    this._whoosh(v, t, kind, Math.min(1, w * (1 + 0.4 * heavy)));
+    // A dodged blow is only air; a parried one is the parry's knock.
+    if (e.target && !e.dodged && !e.parried) {
       const tc = t + (kind === "bite" ? 0.1 : 0.14);
+      const k = 1 + 0.9 * heavy + (e.critical ? 0.8 : 0);
       if (kind === "bite") {
         this._snap(v, tc, w);
-        this._crunch(v, tc + 0.02, w, 0.7);
-        this._thud(v, tc, w, 0.55);
-      } else this._thud(v, tc, Math.min(1, w * 1.1), 1);
+        this._crunch(v, tc + 0.02, w, 0.7 * Math.min(1.6, k));
+        this._thud(v, tc, w, 0.55 * k);
+        if (e.critical) this._crunch(v, tc + 0.08, Math.min(1, w * 1.2), 1);
+      } else this._thud(v, tc, Math.min(1, w * 1.1), k);
+      if ((heavy > 0 || e.critical) && (own || this._isPlayer(e.target))) this._duck(0.2 + 0.3 * heavy + (e.critical ? 0.3 : 0));
     }
     this._count("attack");
   }

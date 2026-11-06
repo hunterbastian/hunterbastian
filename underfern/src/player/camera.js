@@ -98,6 +98,11 @@ export class ThirdPersonCamera {
      * [{ x, z, r }] (e.g. world.vegetation): the camera slides around them.
      */
     this.colliders = null;
+    /**
+     * Lock-on target (a Creature): while set and alive, the orbit swings to
+     * look past the player at it, and sideways look input is ignored.
+     */
+    this.lockTarget = null;
 
     this._zoom = 1;
     this._lift = 0;
@@ -113,6 +118,7 @@ export class ThirdPersonCamera {
     this._blend = { t: 0, dur: 0, travel: 0, from: new THREE.Vector3(), fromQ: new THREE.Quaternion() };
     this._cine = null;
     this._colliderOut = [];
+    this._lockLook = new THREE.Vector3();
   }
 
   /* --- Input ----------------------------------------------------------------- */
@@ -127,8 +133,8 @@ export class ThirdPersonCamera {
     if (held) this._sinceLook = 0;
     if (!dx && !dy) return;
     const k = LOOK_SENSITIVITY * this.sensitivity;
-    // Right is −X when facing +Z, so turning right lowers the yaw.
-    this.yaw -= dx * k;
+    // Right is −X when facing +Z, so turning right lowers the yaw. Locked on, the target steers it.
+    if (!this._locked()) this.yaw -= dx * k;
     this.pitch = clamp(this.pitch + dy * k * (this.invertY ? -1 : 1), PITCH_MIN, PITCH_MAX);
     if (this.yaw > Math.PI || this.yaw < -Math.PI) this.yaw = Math.atan2(Math.sin(this.yaw), Math.cos(this.yaw));
     this._sinceLook = 0;
@@ -164,6 +170,11 @@ export class ThirdPersonCamera {
     return target.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
   }
 
+  _locked() {
+    const t = this.lockTarget;
+    return !!(t && t.alive !== false && t.position);
+  }
+
   /* --- Follow ------------------------------------------------------------------ */
 
   /**
@@ -197,7 +208,19 @@ export class ThirdPersonCamera {
       this.pitch = damp(this.pitch, DEAD_PITCH, 0.7, dt);
     } else {
       this._deadT = 0;
-      this._autoFollow(dt, creature);
+      if (this._locked()) {
+        // Locked on: swing round to look past the player at the target, and
+        // tip down a little more the closer and taller it is.
+        const t = this.lockTarget.position;
+        const dx = t.x - p.x;
+        const dz = t.z - p.z;
+        if (dx * dx + dz * dz > 0.25) {
+          const want = Math.atan2(dx, dz);
+          this.yaw += angleDiff(this.yaw, want) * (snap ? 1 : 1 - Math.exp(-6 * dt));
+          if (this.yaw > Math.PI || this.yaw < -Math.PI) this.yaw = Math.atan2(Math.sin(this.yaw), Math.cos(this.yaw));
+        }
+        this._sinceLook = 0;
+      } else this._autoFollow(dt, creature);
     }
 
     /* Zoom & distance. */
@@ -269,6 +292,16 @@ export class ThirdPersonCamera {
 
     cam.position.copy(_pos);
     _look.set(f.x, f.y + dist * 0.07, f.z); // creature sits a touch below centre
+    if (!dead && this._locked()) {
+      // Frame the target too: aim a quarter of the way toward its chest.
+      const t = this.lockTarget;
+      const th = (t.species?.height ?? 1) * (t.scale ?? 1) * 0.8;
+      _goal.set(t.position.x, t.position.y + th, t.position.z);
+      this._lockLook.lerp(_goal.sub(_look).multiplyScalar(0.25).add(_look), snap ? 1 : 1 - Math.exp(-8 * dt));
+      _look.copy(this._lockLook);
+    } else {
+      this._lockLook.copy(_look);
+    }
     cam.up.set(0, 1, 0);
     cam.lookAt(_look);
 

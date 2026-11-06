@@ -462,6 +462,87 @@ const SUITES = [
         },
       },
       {
+        name: "survival (allosaurus): T locks on, the reticle follows; held F winds up a heavy that lands on release",
+        async run({ page, errors }) {
+          // A brainless Dryosaurus stands still just inside bite range, ahead of the camera.
+          const setup = await page.evaluate(() => {
+            const u = __underfern;
+            const p = u.player;
+            const f = u.controller.camera.forward();
+            const d = p.radius + p._t.biteRange * p.scale * 0.6 + 0.6;
+            const x = p.position.x + f.x * d;
+            const z = p.position.z + f.z * d;
+            const t = u.world.ecosystem.spawn("dryosaurus", x, z, { growth: 1 });
+            t.brain = null;
+            t.invulnerable = false;
+            window.__dummy = t;
+            window.__hits = [];
+            u.world.events.on("attack", (e) => {
+              if (e.attacker !== u.player) return;
+              // Impacts listens first (it was built with the world): the spray is already out.
+              const spray = u.world.impacts ? u.world.impacts.life.filter((l) => l > 0).length : 0;
+              window.__hits.push({ dummy: e.target === t, heavy: e.heavy || 0, damage: e.damage ?? null, dodged: !!e.dodged, who: e.target?.species?.id, spray });
+            });
+            u.advance(0.1);
+            return { hp: t.health, max: t.maxHealth };
+          });
+          await page.keyboard.press("KeyT");
+          await page.evaluate(() => __underfern.advance(0.6));
+          const locked = await page.evaluate(async () => {
+            const c = __underfern.controller;
+            __underfern.redraw();
+            await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+            const el = document.querySelector(".lock");
+            const r = el?.getBoundingClientRect();
+            return {
+              isDummy: c.lockTarget === window.__dummy,
+              aim: __underfern.player.aimTarget === window.__dummy,
+              cam: c.camera.lockTarget === window.__dummy,
+              shown: !!el?.classList.contains("is-on"),
+              x: r?.left,
+              y: r?.top,
+              vw: innerWidth,
+              vh: innerHeight,
+            };
+          });
+          expect(locked.isDummy, "T should lock on to the animal in front");
+          expect(locked.aim && locked.cam, "the lock should steer the bites and the camera");
+          expect(locked.shown, "the lock-on reticle should show");
+          expect(locked.x > 0 && locked.x < locked.vw && locked.y > 0 && locked.y < locked.vh, `reticle off screen at ${locked.x},${locked.y}`);
+
+          // Hold F: past the tap window it becomes a heavy that charges.
+          await page.keyboard.down("KeyF");
+          const charging = await page.evaluate(() => {
+            __underfern.advance(0.6);
+            return __underfern.player.charge;
+          });
+          await page.keyboard.up("KeyF");
+          const landed = await page.evaluate(() => {
+            const p = __underfern.player;
+            const t = window.__dummy;
+            const before = { attacking: p.attacking, heavy: p.heavy, charge: p.charge, stamina: p.stamina, dist: Math.hypot(t.position.x - p.position.x, t.position.z - p.position.z), dy: t.position.y - p.position.y, swim: p.swimming, alive: t.alive };
+            __underfern.advance(1.4);
+            return { hits: window.__hits.slice(), hp: window.__dummy.health, before };
+          });
+          expect(charging > 0.2, `holding F should charge a heavy (charge ${charging})`);
+          const heavy = landed.hits.find((h) => h.dummy && h.heavy > 0 && !h.dodged);
+          expect(heavy, `the heavy should land on release (hits ${JSON.stringify(landed.hits)}; at release ${JSON.stringify(landed.before)})`);
+          expect(landed.hp < setup.hp, "the heavy should hurt");
+          expect(heavy.spray >= 10, `a heavy should throw off a spray of blood (${heavy.spray} particles)`);
+
+          // T again lets go.
+          await page.keyboard.press("KeyT");
+          const after = await page.evaluate(() => {
+            __underfern.advance(0.1);
+            return __underfern.controller.lockTarget;
+          });
+          expect(after == null, "T again should let go of the lock");
+          await frames(page, 2);
+          await expectClean(page, errors);
+          return `charge ${charging.toFixed(2)}; heavy ×${heavy.heavy.toFixed(2)}, hp ${setup.hp.toFixed(0)} → ${landed.hp.toFixed(0)}, ${heavy.spray} drops`;
+        },
+      },
+      {
         name: "survival: pause and resume",
         async run({ page, errors }) {
           await page.keyboard.press("Escape");

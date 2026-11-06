@@ -102,7 +102,20 @@ usually near a freshwater lake. Then:
   above 30%). Big falls can break a leg.
 - **Fight or flee.** Each species attacks its own way: a bite, a kick or a tail
   swipe, softened by the target's armour. A Tyrannosaurus bite crushes through
-  half of it.
+  half of it. Fights have weight:
+  - **Tap** to attack; **hold** to wind up a **heavy** that lands when you let go.
+    It hits harder and breaks poise, but the wind-up is slow and it costs twice
+    the stamina.
+  - Animals up to 2.5 t **dodge**: a quick hop that can't be hit mid-way.
+    Heavier ones **brace** instead. A brace takes less damage but costs stamina.
+    Brace just as a blow lands and you **parry** it, and the attacker reels.
+  - Every hit wears down **poise**. When it breaks, the animal **staggers**, open
+    to a **critical** bite. The lock-on reticle shows "Open".
+  - Bites fill a **bleed** meter and heavy blows a **crush** meter. When one
+    fills it bursts: a haemorrhage, or a broken leg.
+  - **Lock on** to keep the camera and your attacks on one animal.
+  - Wild animals telegraph: a crouch and a growl before a heavy. They dodge and
+    brace too.
 - **Run with your own kind.** Herd and pack species (Dryosaurus, Stegosaurus,
   Brontosaurus, Utahraptor) hatch among adults of their kind. The herd keeps
   watch, waits for you and wades in when you're attacked, and a raptor pack
@@ -222,7 +235,10 @@ The in-game **Field notes** (H, or from the pause menu) show the same list.
 | Move | WASD / arrows |
 | Look | Mouse (click the island to capture it) |
 | Sprint · crouch | Shift · C (toggle) or hold Ctrl |
-| Attack | Left click or F (bite / kick / tail) |
+| Attack | Left click or tap F (bite / kick / tail) |
+| Heavy attack | Right click or hold F; let go to strike |
+| Dodge · brace | Space (heavy animals hold it to brace) |
+| Lock on | T or middle click |
 | Eat · drink | Hold E |
 | Call | Q |
 | Sniff | R |
@@ -235,10 +251,11 @@ The in-game **Field notes** (H, or from the pause menu) show the same list.
 - **Move:** put your thumb anywhere on the left half. The stick appears where you
   touch.
 - **Look:** drag across the right half.
-- **Buttons:** a big **Bite** button bottom right, ringed by **Eat/Drink**
-  (hold near food or fresh water), **Sprint** (tap, then lift the stick to stop),
-  **Crouch**, **Sniff**, **Call** and **Rest**. **Map** and **Pause** sit top
-  right.
+- **Buttons:** a big **Bite** button bottom right (tap to bite, hold for a
+  heavy). It's ringed by **Dodge** (heavy animals hold it to brace), **Sprint**
+  (tap, then lift the stick to stop), **Eat/Drink** (hold near food or fresh
+  water) and **Lock on**. **Crouch**, **Sniff** and **Call** sit further out.
+  **Rest**, **Map** and **Pause** are top right.
 
 ## Graphics & settings
 
@@ -333,11 +350,15 @@ there is one and otherwise falls back to the global install.
   - wind/scent
   - creature metabolism, damage, armour and death, the ecosystem's carcass flow
     and its caps on rare species, on a real low-resolution world
+  - combat: heavies, poise, stagger and criticals; dodge i-frames, brace, parry
+    and guard break; bleed and crush buildup
 - **Smoke tests** play the real game:
   - the title screen: Survival → choose a species → Hatch, and a saved life
     (Continue) whose species has left the island
   - survival in the Pixel and Detailed styles, keyboard movement, pause, and death →
     death screen → hatch again
+  - lock-on (T), with the reticle on the target, and a held-F heavy that lands
+    when let go
   - an iPhone-sized touch run in the default Retro HD style:
     - the joystick and the pause button
     - the post pass blooming a daytime frame
@@ -375,6 +396,7 @@ Plain ES modules under `src/`, loaded by `index.html` through an import map:
   - `landmarks.js`: the fossils and stone wonders
   - `underfern.js`: the Underfern, the island's one giant tree fern
   - `atmosphere.js`: fireflies, light shafts, peak wisps and cave fungi
+  - `impacts.js`: the blood, grit and dust that blows throw off
 - `creatures/`:
   - species data and the procedural skinned dinosaur models
   - the shared survival simulation (`creature.js`)

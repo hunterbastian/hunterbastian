@@ -1,8 +1,8 @@
 // Input — keyboard, mouse (pointer lock) and touch, normalised into a small
 // vocabulary of actions that the controllers poll once per frame:
-//   held   → isDown(action)    "sprint" | "crouch" | "interact" | "bite"
+//   held   → isDown(action)    "sprint" | "crouch" | "interact" | "bite" | "heavy" | "dodge"
 //   edges  → pressed(action)   "bite" | "call" | "sniff" | "rest" | "map" | "pause" | "help" |
-//                              "interact" | "crouch"
+//                              "interact" | "crouch" | "dodge" | "lock"
 //   axes   → moveAxis(), consumeLook(), consumeZoom()
 // On touch devices Input builds its own on-screen controls inside `uiRoot`
 // (floating joystick, drag-to-look, action buttons; Bite also slides to look,
@@ -30,6 +30,8 @@ const HELD_KEYS = {
   crouch: ["ControlLeft", "ControlRight"],
   interact: ["KeyE"],
   bite: ["KeyF"],
+  // Held for a brace (heavy animals); its press is the dodge edge.
+  dodge: ["Space"],
 };
 
 /** Keys that fire one-frame edges. */
@@ -44,6 +46,8 @@ const EDGE_KEYS = {
   Escape: ["pause"],
   KeyP: ["pause"],
   KeyH: ["help"],
+  Space: ["dodge"],
+  KeyT: ["lock"],
 };
 
 // Edges that still register while `enabled` is false, so main can close the
@@ -59,6 +63,7 @@ const GAME_CODES = new Set([
 ]);
 
 const MOUSE_LEFT = 1;
+const MOUSE_RIGHT = 2; // held: charge a heavy
 
 // Touch drags cover far fewer pixels than a mouse sweep for the same intent;
 // scale them so a thumb flick across half the screen turns ~150°.
@@ -96,6 +101,9 @@ const ICONS = {
     '<path d="M3.5 20.5c0-7.2 4.3-11.6 11-12.2 0 7.2-4.3 11.6-11 12.2z"/><path d="M3.5 20.5l6.4-6.4"/>' +
     '<path d="M17.5 2.8c1.9 2.5 3 4.3 3 5.7a3 3 0 0 1-6 0c0-1.4 1.1-3.2 3-5.7z"/>',
   sprint: '<path d="M5 5.5l6.5 6.5L5 18.5"/><path d="M12.5 5.5L19 12l-6.5 6.5"/>',
+  dodge: '<path d="M4 17.5c3.2-8.4 10.4-11.8 16-9.6"/><path d="M16.2 4.6l3.8 3.3-3.6 3.7"/><path d="M4.5 21h6"/>',
+  lock:
+    '<circle cx="12" cy="12" r="6.5"/><circle cx="12" cy="12" r="1.6"/><path d="M12 2.5v3.2"/><path d="M12 18.3v3.2"/><path d="M2.5 12h3.2"/><path d="M18.3 12h3.2"/>',
   crouch: '<path d="M12 3.5v10.5"/><path d="M7.5 9.5L12 14l4.5-4.5"/><path d="M4.5 19h15"/>',
   call:
     '<path d="M3.5 9.5v5h3.2l4.8 4V5.5l-4.8 4H3.5z"/><path d="M15 9a4.2 4.2 0 0 1 0 6"/><path d="M17.6 6.3a8 8 0 0 1 0 11.4"/>',
@@ -111,19 +119,23 @@ const ICONS = {
 /**
  * The touch button layout. `slot` names a position in the thumb-reach layout
  * (see BASE_CSS): "primary" big button bottom-right, "arc0..3" an inner ring
- * around it, "outer0..2" an outer ring, "top0..1" small utility buttons.
+ * around it, "outer0..2" an outer ring, "top0..2" small utility buttons.
  * `kind`: "hold" (isDown while touched), "tap" (edge only), "latch" (tap to
  * toggle a held state — sprint, so two thumbs stay free for move + look).
  * `look`: the button doubles as a look pad (slide past BTN_LOOK_SLOP to turn).
  */
 const BUTTONS = [
+  // Bite: tap for a light attack, hold to charge a heavy (slide to look instead).
   { action: "bite", slot: "primary", icon: "bite", label: "Bite", kind: "hold", look: true },
-  { action: "sprint", slot: "arc0", icon: "sprint", label: "Sprint", kind: "latch" },
-  { action: "interact", slot: "arc1", icon: "interact", label: "Eat or drink", short: "Eat/Drink", kind: "hold" },
-  { action: "sniff", slot: "arc2", icon: "sniff", label: "Sniff", kind: "tap" },
-  { action: "crouch", slot: "arc3", icon: "crouch", label: "Crouch", kind: "tap" },
-  { action: "rest", slot: "outer0", icon: "rest", label: "Rest", kind: "tap" },
-  { action: "call", slot: "outer1", icon: "call", label: "Call", kind: "tap" },
+  // Dodge: tap to dodge; heavy animals hold it to brace.
+  { action: "dodge", slot: "arc0", icon: "dodge", label: "Dodge", kind: "hold" },
+  { action: "sprint", slot: "arc1", icon: "sprint", label: "Sprint", kind: "latch" },
+  { action: "interact", slot: "arc2", icon: "interact", label: "Eat or drink", short: "Eat/Drink", kind: "hold" },
+  { action: "lock", slot: "arc3", icon: "lock", label: "Lock on", short: "Lock", kind: "tap" },
+  { action: "crouch", slot: "outer0", icon: "crouch", label: "Crouch", kind: "tap" },
+  { action: "sniff", slot: "outer1", icon: "sniff", label: "Sniff", kind: "tap" },
+  { action: "call", slot: "outer2", icon: "call", label: "Call", kind: "tap" },
+  { action: "rest", slot: "top2", icon: "rest", label: "Rest", kind: "tap" },
   { action: "map", slot: "top1", icon: "map", label: "Map", kind: "tap" },
   { action: "pause", slot: "top0", icon: "pause", label: "Pause", kind: "tap" },
 ];
@@ -167,6 +179,7 @@ const BASE_CSS = `
 :where(.touch-btn[data-slot^="top"] .touch-btn__label){display:none}
 :where(.touch-btn[data-slot="top0"]){right:calc(14px + var(--sa-r,0px))}
 :where(.touch-btn[data-slot="top1"]){right:calc(66px + var(--sa-r,0px))}
+:where(.touch-btn[data-slot="top2"]){right:calc(118px + var(--sa-r,0px))}
 @container app (max-width:520px){
 :where(.touch-stick){width:116px;height:116px;margin:-58px 0 0 -58px}
 :where(.touch-stick__knob){width:50px;height:50px;margin:-25px 0 0 -25px}
@@ -331,6 +344,12 @@ export class Input {
     return out;
   }
 
+  /** A thumb held on Bite has slid into a look (so it isn't winding up a heavy). */
+  get biteLooking() {
+    for (const r of this._btnPointers.values()) if (r.action === "bite" && r.drag?.live) return true;
+    return false;
+  }
+
   /**
    * Is a held action currently down? "sprint" | "crouch" (Ctrl hold) |
    * "interact" | "bite". The touch Sprint latch counts as held.
@@ -342,6 +361,7 @@ export class Input {
     if (keys && this._anyKey(keys)) return true;
     // Mouse bits are only set while the mouse drives gameplay (see _onMouseDown).
     if (action === "bite" && this._mouse & MOUSE_LEFT) return true;
+    if (action === "heavy" && this._mouse & MOUSE_RIGHT) return true;
     if (this._touchCount[action] > 0) return true;
     return this._latch[action] === true;
   }
@@ -584,6 +604,11 @@ export class Input {
     }
     if (this.pointerLocked) {
       if (e.button === 0) this._pressMouse(MOUSE_LEFT, "bite");
+      else if (e.button === 2) this._pressMouse(MOUSE_RIGHT, "heavy");
+      else if (e.button === 1) {
+        e.preventDefault(); // no autoscroll
+        this._edges.add("lock");
+      }
       return;
     }
     // Not locked: this click (re)captures the mouse. Chrome refuses a lock
@@ -620,6 +645,7 @@ export class Input {
       d.active = false;
     }
     if (e.button === 0) this._mouse &= ~MOUSE_LEFT;
+    if (e.button === 2) this._mouse &= ~MOUSE_RIGHT;
   }
 
   _onMouseMove(e) {

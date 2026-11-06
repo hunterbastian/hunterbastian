@@ -262,6 +262,8 @@ export class Hud {
 
     const cam = camera?.isCamera ? camera : camera?.camera?.isCamera ? camera.camera : null;
     if (p) this._updateVitals(p, world, dt);
+    if (p) this._updateBuildup(p);
+    this._updateLock(controller?.lockTarget || null, cam);
     this._updateCompass(cam, p);
     this._updateClock(world?.sky);
     this._updatePrompt(controller?.prompt || null);
@@ -431,11 +433,23 @@ export class Hud {
         <span class="clock__day">Day 1</span>
       </div>
       <div class="hud__toasts" role="status" aria-live="polite"></div>
+      <div class="lock" aria-hidden="true">
+        <span class="lock__ring"></span>
+        <span class="lock__open">Open</span>
+        <span class="lock__bars">
+          <span class="lock__bar lock__bar--hp"><i class="lock__hp"></i></span>
+          <span class="lock__bar lock__bar--poise"><i class="lock__poise"></i></span>
+        </span>
+      </div>
       <div class="hud__prompt" aria-live="polite"><span class="prompt"></span></div>
       <div class="hud__status">
         <div class="chips">
           ${chip("creative", "Creative", "compass")}${chip("group", "Herd", "track")}${chip("bleeding", "Bleeding", "bleed")}${chip("leg", "Broken leg", "fracture")}${chip("resting", "Resting", "rest")}
           ${chip("swimming", "Swimming", "waves")}${chip("crouched", "Crouched", "crouch")}${chip("night", "Night", "moon")}
+        </div>
+        <div class="buildups" aria-hidden="true">
+          <div class="buildup buildup--bleed"><span class="buildup__ico">${icon("bleed")}</span><span class="buildup__track"><i class="buildup__fill"></i></span></div>
+          <div class="buildup buildup--crush"><span class="buildup__ico">${icon("fracture")}</span><span class="buildup__track"><i class="buildup__fill"></i></span></div>
         </div>
         <div class="vitals">
           ${vital("health", "Health", "heart")}${vital("stamina", "Stamina", "bolt")}
@@ -484,6 +498,13 @@ export class Hud {
     });
     this._chips = {};
     for (const c of el.querySelectorAll("[data-chip]")) this._chips[c.dataset.chip] = { el: c, on: false };
+    // Bleed / crush buildup meters (shown while they hold anything).
+    this._buildups = ["bleed", "crush"].map((k) => {
+      const b = $(`.buildup--${k}`);
+      return { key: k, el: b, fill: b.querySelector(".buildup__fill"), v: -1, on: false };
+    });
+    // The lock-on reticle: where the target is, its health and poise.
+    this._lock = { el: $(".lock"), hp: $(".lock__hp"), poise: $(".lock__poise"), on: false, open: false, x: -1e4, y: -1e4, hpV: -1, poiseV: -1 };
 
     // Water pin and a few threat pins on the compass.
     this._waterPin = document.createElement("span");
@@ -799,6 +820,67 @@ export class Hud {
     } else if (val < 0.25 && st < 1) {
       this._low[key] = 1;
       this.toast(warn, "warn", ico);
+    }
+  }
+
+  _updateBuildup(p) {
+    const b = p.buildup;
+    if (!b) return;
+    for (const m of this._buildups) {
+      const v = clamp((b[m.key] || 0) / 100, 0, 1);
+      const on = v > 0.01;
+      if (on !== m.on) {
+        m.on = on;
+        m.el.classList.toggle("is-on", on);
+      }
+      if (on && Math.abs(v - m.v) > 0.004) {
+        m.v = v;
+        m.fill.style.transform = `scaleX(${v.toFixed(3)})`;
+      }
+    }
+  }
+
+  /** The lock-on reticle on the target's chest: its health, its poise, "Open" when it reels. */
+  _updateLock(t, cam) {
+    const L = this._lock;
+    let on = !!(t && t.alive !== false && t.position && cam);
+    let sx = 0;
+    let sy = 0;
+    if (on) {
+      const h = (t.species?.height ?? 1) * (t.scale ?? 1);
+      _v.set(t.position.x, t.position.y + h * 0.85, t.position.z);
+      _cam.copy(_v).applyMatrix4(cam.matrixWorldInverse);
+      if (_cam.z > -0.2) on = false;
+      else {
+        _v.project(cam);
+        sx = (_v.x * 0.5 + 0.5) * this._vw;
+        sy = (-_v.y * 0.5 + 0.5) * this._vh;
+      }
+    }
+    if (on !== L.on) {
+      L.on = on;
+      L.el.classList.toggle("is-on", on);
+    }
+    if (!on) return;
+    if (Math.abs(sx - L.x) > 0.5 || Math.abs(sy - L.y) > 0.5) {
+      L.x = sx;
+      L.y = sy;
+      L.el.style.transform = `translate(${sx.toFixed(1)}px, ${sy.toFixed(1)}px)`;
+    }
+    const hp = clamp((t.health ?? 0) / Math.max(1, t.maxHealth ?? 1), 0, 1);
+    const poise = clamp((t.poise ?? 0) / Math.max(1, t.poiseMax ?? 1), 0, 1);
+    if (Math.abs(hp - L.hpV) > 0.004) {
+      L.hpV = hp;
+      L.hp.style.transform = `scaleX(${hp.toFixed(3)})`;
+    }
+    if (Math.abs(poise - L.poiseV) > 0.004) {
+      L.poiseV = poise;
+      L.poise.style.transform = `scaleX(${poise.toFixed(3)})`;
+    }
+    const open = !!t.staggered;
+    if (open !== L.open) {
+      L.open = open;
+      L.el.classList.toggle("is-open", open);
     }
   }
 

@@ -67,6 +67,8 @@ const ICON_PATHS = {
   interact:
     '<path d="M3.5 20.5c0-7.2 4.3-11.6 11-12.2 0 7.2-4.3 11.6-11 12.2z"/><path d="M3.5 20.5l6.4-6.4"/>' +
     '<path d="M17.5 2.8c1.9 2.5 3 4.3 3 5.7a3 3 0 0 1-6 0c0-1.4 1.1-3.2 3-5.7z"/>',
+  dodge: '<path d="M4 17.5c3.2-8.4 10.4-11.8 16-9.6"/><path d="M16.2 4.6l3.8 3.3-3.6 3.7"/><path d="M4.5 21h6"/>',
+  lock: '<circle cx="12" cy="12" r="6.5"/><circle cx="12" cy="12" r="1.6"/><path d="M12 2.5v3.2"/><path d="M12 18.3v3.2"/><path d="M2.5 12h3.2"/><path d="M18.3 12h3.2"/>',
   sprint: '<path d="M5 5.5l6.5 6.5L5 18.5"/><path d="M12.5 5.5 19 12l-6.5 6.5"/>',
   map: '<path d="M3.5 6.6 9 4.3l6 2.4 5.5-2.3v13.4L15 20.1l-6-2.4-5.5 2.3z"/><path d="M9 4.3v13.4M15 6.7v13.4"/>',
   pause: '<path d="M8.5 5v14M15.5 5v14"/>',
@@ -133,7 +135,10 @@ const KEYS_SURVIVAL = [
   ["Look", ["Mouse"], "click the island to capture it"],
   ["Sprint", ["Shift"]],
   ["Crouch", ["C"], "or hold Ctrl"],
-  ["Bite · attack", ["LMB"], "or F"],
+  ["Bite", ["LMB"], "or F · a tap is a quick bite"],
+  ["Heavy attack", ["RMB"], "or hold F · let go to strike"],
+  ["Dodge · brace", ["Space"], "heavy animals hold it to brace"],
+  ["Lock on", ["T"], "or middle-click"],
   ["Eat · drink", ["E"], "hold, head at the food"],
   ["Call", ["Q"]],
   ["Sniff", ["R"]],
@@ -147,13 +152,15 @@ const KEYS_SURVIVAL = [
 const TOUCH_SURVIVAL = [
   ["Move", "stick", "Thumb anywhere on the left half"],
   ["Look", "hand", "Drag across the right half"],
-  ["Bite", "bite", "Large button, bottom right · slide to turn"],
+  ["Bite", "bite", "Tap · hold for a heavy · slide to turn"],
+  ["Dodge · brace", "dodge", "Tap to dodge · heavy animals hold to brace"],
+  ["Lock on", "lock", "Keeps the camera on one animal"],
   ["Eat · drink", "interact", "Hold near food or fresh water"],
   ["Sprint", "sprint", "Tap — lift the stick to stop"],
   ["Crouch", "crouch", "Tap to toggle"],
   ["Sniff", "sniff", "Reveals food, water, others"],
-  ["Call · rest", "call", "Outer ring"],
-  ["Map · pause", "map", "Top right"],
+  ["Call", "call", "Outer ring"],
+  ["Rest · map · pause", "map", "Top right"],
 ];
 
 const kbd = (k) => `<kbd class="kbd">${escapeHtml(k)}</kbd>`;

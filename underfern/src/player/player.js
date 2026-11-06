@@ -26,6 +26,13 @@ const HINT_INTERVAL = 0.5; // s between hint checks
 const HINT_SPACING = 9; // s minimum between two hint toasts
 const HINT_KEY = "underfern.hints.v1";
 const FLASH_TIME = 1.6; // s a transient prompt ("Sniff ready in 4 s") stays
+// Combat input.
+const HOLD_TO_CHARGE = 0.2; // s Bite is held before it winds up a heavy instead of a quick bite
+const BITE_BUFFER = 0.35; // s a tap during a swing is remembered, so the next bite still comes out
+const DODGE_BUFFER = 0.25; // s a dodge pressed mid-swing is remembered
+const LOCK_RANGE = 45; // m to pick a lock-on target
+const LOCK_BREAK = 70; // m at which a lock lets go
+const LOCK_CONE = 1.2; // rad either side of the camera's view
 
 // Damage types that are impacts (worth a camera shake), not slow attrition.
 const IMPACT_TYPES = new Set(["bite", "tail", "kick", "fall"]);
@@ -159,6 +166,13 @@ export class PlayerController {
     this._flashText = null;
     this._flashT = 0;
     this._sprintHeld = false;
+    /** Lock-on target (a Creature) or null; the camera and the bites follow it. */
+    this.lockTarget = null;
+    this._biteT = -1; // s Bite has been held, < 0 = not held
+    this._biteHeavy = false;
+    this._biteBuffer = 0;
+    this._dodgeBuffer = 0;
+    this._fightT = 99; // s since we last struck or were struck (first-fight hint)
     this._unsubs = [];
     this._subscribe();
   }
@@ -170,6 +184,11 @@ export class PlayerController {
   possess(creature) {
     this.creature = creature || null;
     this.prompt = null;
+    this.unlock();
+    this._biteT = -1;
+    this._biteHeavy = false;
+    this._biteBuffer = 0;
+    this._dodgeBuffer = 0;
     this.crouchToggled = false;
     this.restWanted = false;
     this._food = null;
@@ -209,6 +228,7 @@ export class PlayerController {
 
     if (c.alive === false) {
       this._clearIntent(c);
+      this.unlock();
       this.prompt = null;
       this._updateSniff(dt);
       cam.update(dt, c);
@@ -217,7 +237,8 @@ export class PlayerController {
 
     this._aliveT += dt;
     this._drive(c, input, cam);
-    this._actions(c, input);
+    this._actions(c, input, dt);
+    this._combat(c, input, dt);
     this._updateContext(dt, c);
     this._updateSniff(dt);
     this.prompt = this._promptFor(c, input);
@@ -273,17 +294,10 @@ export class PlayerController {
     intent.crouch = crouch;
   }
 
-  _actions(c, input) {
+  _actions(c, input, dt) {
     const intent = c.intent;
 
     if (input.pressed("rest")) this.restWanted = !this.restWanted;
-
-    // Bite: tap, or hold to keep attacking as the cooldown allows.
-    const biteHeld = input.isDown("bite") && (c.biteCooldown ?? 0) <= 0;
-    if (input.pressed("bite") || biteHeld) {
-      intent.bite = true;
-      this.restWanted = false;
-    }
 
     if (input.pressed("call")) intent.call = true;
 
@@ -301,9 +315,112 @@ export class PlayerController {
     }
   }
 
+  /**
+   * Fighting: Bite taps for a quick bite or, held past HOLD_TO_CHARGE, winds
+   * up a heavy that strikes when let go (right-click winds one up at once);
+   * a thumb that slides off Bite into a look lets the charge go unstruck.
+   * Taps and dodges pressed mid-swing are buffered for a moment. Dodge hops
+   * clear (heavy animals hold it to brace); Lock keeps camera and bites on one
+   * animal.
+   */
+  _combat(c, input, dt) {
+    const intent = c.intent;
+    if (input.pressed("bite")) {
+      this._biteT = 0;
+      this._biteHeavy = false;
+      this.restWanted = false;
+    }
+    if (this._biteT >= 0) {
+      if (input.biteLooking) {
+        if (this._biteHeavy) intent.cancelHeavy = true;
+        this._biteT = -1;
+        this._biteHeavy = false;
+      } else if (input.isDown("bite")) {
+        this._biteT += dt;
+        if (this._biteT >= HOLD_TO_CHARGE) this._biteHeavy = true;
+      } else {
+        if (!this._biteHeavy) this._biteBuffer = BITE_BUFFER;
+        this._biteT = -1;
+        this._biteHeavy = false;
+      }
+    }
+    intent.heavy = this._biteHeavy || input.isDown("heavy");
+    if (intent.heavy) this.restWanted = false;
+    if (this._biteBuffer > 0) {
+      this._biteBuffer -= dt;
+      if (!c.attacking && c.charge < 0 && (c.biteCooldown ?? 0) <= 0) {
+        intent.bite = true;
+        this._biteBuffer = 0;
+      }
+    }
+
+    // Dodge, or (heavy animals) brace while held.
+    if (input.pressed("dodge")) {
+      this._dodgeBuffer = c.canDodge ? DODGE_BUFFER : 0;
+      this.restWanted = false;
+    }
+    if (this._dodgeBuffer > 0) {
+      this._dodgeBuffer -= dt;
+      if (c._dodgeT >= 0) this._dodgeBuffer = 0;
+      else intent.dodge = true;
+    }
+    intent.brace = !c.canDodge && input.isDown("dodge");
+
+    // Lock on / off; a lock lets go when its target dies or gets away.
+    if (input.pressed("lock")) {
+      if (this.lockTarget) this.unlock();
+      else if (!this._acquireLock(c)) this._flash("Nothing close enough to lock on to");
+    }
+    const t = this.lockTarget;
+    if (t && (t.alive === false || Math.hypot(t.position.x - c.position.x, t.position.z - c.position.z) > LOCK_BREAK)) this.unlock();
+    c.aimTarget = this.lockTarget;
+    if (this.camera) this.camera.lockTarget = this.lockTarget;
+    this._fightT += dt;
+  }
+
+  /** Lock on to the best animal in view: near, and near the middle of the screen. */
+  _acquireLock(c) {
+    const eco = this.world?.ecosystem;
+    if (!eco || typeof eco.query !== "function" || !this.camera) return false;
+    this.camera.forward(_fwd);
+    const list = adopt(eco.query(c.position.x, c.position.z, LOCK_RANGE, null, this._scratch), this._scratch);
+    let best = null;
+    let bestScore = Infinity;
+    for (const o of list) {
+      if (!o || o === c || o.alive === false || typeof o.takeDamage !== "function" || !o.position) continue;
+      const dx = o.position.x - c.position.x;
+      const dz = o.position.z - c.position.z;
+      const d = Math.hypot(dx, dz);
+      if (d > LOCK_RANGE || d < 1e-3) continue;
+      const ang = Math.acos(clamp((dx * _fwd.x + dz * _fwd.z) / d, -1, 1));
+      if (ang > LOCK_CONE && d > 10) continue;
+      // Herd- and pack-mates only when nothing else is about.
+      const mate = c.group && o.group === c.group ? 3 : 1;
+      const score = d * (1 + 1.5 * ang) * mate;
+      if (score < bestScore) {
+        bestScore = score;
+        best = o;
+      }
+    }
+    this._scratch.length = 0;
+    if (!best) return false;
+    this.lockTarget = best;
+    return true;
+  }
+
+  /** Let go of the lock-on. */
+  unlock() {
+    this.lockTarget = null;
+    if (this.creature) this.creature.aimTarget = null;
+    if (this.camera) this.camera.lockTarget = null;
+  }
+
   _clearIntent(c) {
     const intent = c.intent;
     if (!intent) return;
+    intent.heavy = false;
+    intent.dodge = false;
+    intent.brace = false;
     intent.moveX = 0;
     intent.moveZ = 0;
     intent.sprint = false;
@@ -532,8 +649,22 @@ export class PlayerController {
     );
     this._unsubs.push(
       events.on("attack", (e) => {
-        // A landed hit of our own gets a small kick too — weight, not chaos.
-        if (e && e.attacker === this.creature && e.target) this.camera.shake(0.16);
+        if (!e || !this.creature) return;
+        if (e.attacker === this.creature || e.target === this.creature) this._fightT = 0;
+        // A landed hit of our own gets a kick too — more for a heavy or a critical.
+        if (e.attacker === this.creature && e.target && !e.dodged && !e.parried) {
+          this.camera.shake(e.critical ? 0.55 : e.heavy > 0 ? 0.3 + 0.15 * e.heavy : 0.16);
+        }
+      })
+    );
+    this._unsubs.push(
+      events.on("parry", (e) => {
+        if (e && (e.creature === this.creature || e.by === this.creature)) this.camera.shake(0.4);
+      })
+    );
+    this._unsubs.push(
+      events.on("stagger", (e) => {
+        if (e && e.creature === this.creature) this.camera.shake(0.45);
       })
     );
     this._unsubs.push(
@@ -560,6 +691,20 @@ export class PlayerController {
         touch
           ? "Left thumb moves, drag the right side to look around."
           : "Click to look around · WASD to move · Shift to sprint · H for help"
+      );
+    } else if (!seen.combat && this._fightT < 2 && this._aliveT > 3) {
+      const dodge = c.canDodge
+        ? touch
+          ? "Dodge hops clear of a blow"
+          : "Space dodges a blow"
+        : touch
+          ? "hold Dodge to brace (just before a blow, it parries)"
+          : "hold Space to brace (just before a blow, it parries)";
+      this._hint(
+        "combat",
+        touch
+          ? `Tap Bite for a quick bite, hold it for a heavy. ${dodge[0].toUpperCase()}${dodge.slice(1)}; Lock keeps the camera on a target.`
+          : `Tap F (or click) for a quick bite, hold it (or right-click) for a heavy; ${dodge}; T locks on.`,
       );
     } else if (!seen.hungry && (c.food ?? 100) < 30) {
       this._hint(

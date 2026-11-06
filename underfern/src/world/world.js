@@ -13,6 +13,7 @@ import { Wind } from "./wind.js";
 import { Landmarks } from "./landmarks.js";
 import { planUnderfern, UnderfernTree } from "./underfern.js";
 import { Atmosphere } from "./atmosphere.js";
+import { Impacts } from "./impacts.js";
 import { Ecosystem } from "../creatures/ecosystem.js";
 import { SPECIES } from "../creatures/species.js";
 import { prewarmDinoGeometry } from "../creatures/dinoModel.js";
@@ -52,6 +53,8 @@ export class World {
     this.landmarks = null;
     /** Atmosphere (world/atmosphere.js): fireflies, light shafts, peak wisps, cave fungi. */
     this.atmosphere = null;
+    /** Impacts (world/impacts.js): blood, grit and dust thrown off by blows. */
+    this.impacts = null;
     this.ecosystem = null;
 
     if (!deferred) for (const step of this._steps()) step.run();
@@ -103,6 +106,7 @@ export class World {
     if (this.vegetation) this.vegetation.update(dt, focus);
     if (this.atmosphere) this.atmosphere.update(dt, focus, this.sky, this.camera, this.renderer ? this.renderer.domElement.height : 720);
     this.ecosystem.update(dt, focus);
+    if (this.impacts) this.impacts.update(dt, this.camera, this.renderer ? this.renderer.domElement.height : 720);
     this.water.update(dt, this.sky);
   }
 
@@ -119,6 +123,10 @@ export class World {
     }
     this.landmarks?.dispose();
     this.atmosphere?.dispose();
+    if (this.impacts) {
+      this.scene.remove(this.impacts.points);
+      this.impacts.dispose();
+    }
     this.sky?.dispose?.();
     if (this.terrain) {
       this.scene.remove(this.terrain.mesh);
@@ -204,6 +212,8 @@ export class World {
             low: (q.vegetationDensity ?? 1) < 0.7,
           });
           this.scene.add(this.atmosphere.group);
+          this.impacts = new Impacts(this.events, { low: (q.vegetationDensity ?? 1) < 0.7 });
+          this.scene.add(this.impacts.points);
         },
       },
       {

@@ -426,6 +426,19 @@ export class Brain {
     this._allowWater = false;
     this._goalD = Infinity;
 
+    // Fight reflexes (the combat layer in creature.js): heavies wound up and
+    // held until a moment, dodges and braces against blows seen coming.
+    this._heavyUntil = -1; // world time to let a held heavy go
+    this._heavyOn = null; // … and whom it's for
+    this._heavyChance = clamp(num(sp.heavyChance, this._carn ? 0.3 : 0.35), 0, 1);
+    this._agility = clamp(num(sp.agility, this._carn ? 0.45 : 0.3), 0, 1);
+    this._reactedTo = null; // the swing already reacted to (or let be)
+    this._reactedUntil = -1e9;
+    this._dodgeAt = -1; // world time to dodge…
+    this._dodgeFrom = null; // … away from whom
+    this._braceFrom = -1; // world time a brace starts…
+    this._braceUntil = -1; // … and gives up
+
     // Steering memory.
     this._avoidAngle = 0;
     this._avoidSide = this.rng() < 0.5 ? -1 : 1;
@@ -510,6 +523,131 @@ export class Brain {
     this._act(dt);
     this._vocalise();
     this._steer(dt);
+    this._reflexes();
+  }
+
+  /**
+   * Swing at `t`: a reeling target gets the quickest bite (the critical);
+   * otherwise now and then a heavy, wound up for a readable moment first.
+   */
+  _swing(t) {
+    const c = this.creature;
+    if (c.charge >= 0 || c.attacking || this._now < this._heavyUntil) return;
+    if (t && t.staggered) {
+      this._gbite = true;
+      return;
+    }
+    if (num(c.stamina, 100) > 40 && this.rng() < this._heavyChance) {
+      this._heavyUntil = this._now + rand(this.rng, 0.45, 1.0) * clamp(num(c.mass, 500) / 2000, 0.8, 1.3);
+      this._heavyOn = t || null;
+      return;
+    }
+    this._gbite = true;
+  }
+
+  /**
+   * Hold or let go of a heavy, and dodge or brace against blows seen coming:
+   * a wind-up or a swing already under way from the animal we're fighting (or
+   * that just hurt us), aimed our way. Each swing gets one roll: lighter
+   * animals sometimes hop clear (agility), heavy ones brace against heavies.
+   */
+  _reflexes() {
+    const c = this.creature;
+    const it = c.intent;
+    if (!it || !c.alive) return;
+    const now = this._now;
+
+    // A heavy being held: let go at its moment, or drop it if the target got away.
+    if (this._heavyUntil > 0) {
+      const t = this._heavyOn;
+      const gone = t && (!t.alive || !t.position || this._distToXZ(t.position.x, t.position.z) > this._biteReach(t) * 2.2);
+      const fighting = this.state === "attack" || this.state === "hunt";
+      if (gone || !fighting) {
+        it.heavy = false;
+        it.cancelHeavy = c.charge >= 0;
+        this._heavyUntil = -1;
+        this._heavyOn = null;
+      } else if (now < this._heavyUntil) it.heavy = true;
+      else {
+        it.heavy = false;
+        this._heavyUntil = -1;
+        this._heavyOn = null;
+      }
+    }
+
+    // Blows seen coming.
+    const foe = this._incomingFrom();
+    if (foe && foe !== this._reactedTo && now >= this._reactedUntil) {
+      this._reactedTo = foe;
+      this._reactedUntil = now + 1.2;
+      const heavy = foe.charge >= 0 || num(foe.heavy, 0) > 0;
+      if (c.canDodge) {
+        if (this.rng() < this._agility * (heavy ? 1.3 : 1)) {
+          // A heavy is dodged when it's let go; a quick bite needs a quick hop.
+          this._dodgeAt = heavy && foe.charge >= 0 ? -2 : now + rand(this.rng, 0.06, 0.2);
+          this._dodgeFrom = foe;
+        }
+      } else if (heavy && this.rng() < 0.55) {
+        this._braceFrom = now + rand(this.rng, 0.1, 0.35);
+        this._braceUntil = this._braceFrom + 2.2;
+      }
+    }
+    if (foe !== this._reactedTo && now >= this._reactedUntil) this._reactedTo = null;
+    // A dodge waiting on a heavy's release.
+    if (this._dodgeAt === -2 && this._dodgeFrom) {
+      const f = this._dodgeFrom;
+      if (!f.alive) this._dodgeAt = -1;
+      else if (f.charge < 0 && f.attacking) this._dodgeAt = now + rand(this.rng, 0.03, 0.12);
+    }
+    if (this._dodgeAt >= 0 && now >= this._dodgeAt) {
+      const f = this._dodgeFrom;
+      this._dodgeAt = -1;
+      this._dodgeFrom = null;
+      if (f && f.position && c.canDodge) {
+        // Away from it and to one side.
+        let ax = c.position.x - f.position.x;
+        let az = c.position.z - f.position.z;
+        const d = Math.hypot(ax, az) || 1;
+        ax /= d;
+        az /= d;
+        const side = this._avoidSide;
+        it.moveX = ax * 0.6 - az * side * 0.8;
+        it.moveZ = az * 0.6 + ax * side * 0.8;
+        it.dodge = true;
+        it.heavy = false;
+        this._heavyUntil = -1;
+      }
+    }
+    // A brace held through the blow, let go after it.
+    if (this._braceFrom > 0) {
+      const f = this._reactedTo;
+      if (now >= this._braceUntil || (now > this._braceFrom + 0.3 && (!f || (!f.attacking && f.charge < 0)))) {
+        this._braceFrom = -1;
+        it.brace = false;
+      } else it.brace = now >= this._braceFrom;
+    } else it.brace = false;
+  }
+
+  /** The animal winding up or swinging at us right now, if any. */
+  _incomingFrom() {
+    const c = this.creature;
+    const cands = [this.target, this._attacker];
+    for (const o of cands) {
+      if (!o || o === c || !o.alive || !o.position || typeof o.charge !== "number") continue;
+      const winding = o.charge >= 0;
+      const swinging = o.attacking && !o._attackStruck;
+      if (!winding && !swinging) continue;
+      const dx = c.position.x - o.position.x;
+      const dz = c.position.z - o.position.z;
+      const d = Math.hypot(dx, dz);
+      const reach = num(o.species?.length, 4) * num(o.scale, 1) * 0.6 + num(o.species?.biteRange, 1) * num(o.scale, 1) + num(c.radius, 1) + 2;
+      if (d > reach) continue;
+      // Aimed our way (tail swingers aim their rear).
+      let face = (dx * Math.sin(o.heading) + dz * Math.cos(o.heading)) / (d || 1);
+      if (o._attackKind === "tail") face = -face;
+      if (face > Math.cos(1.0) || d < num(o.radius, 1) * 1.5) return o;
+    }
+    return null;
   }
 
   /* --- Perception ----------------------------------------------------- */
@@ -2165,7 +2303,7 @@ export class Brain {
     if (d > reach * 0.85) mag = this.mode === "guard" ? JOG : TROT;
     else if (err > 0.25) mag = 0.14; // shuffle round to face it
     if (mag > 0) this._goDir(dx, dz, mag, d > reach * 1.3 && this.mode !== "guard", false);
-    if (err < 0.5 && d <= reach && c.biteCooldown <= 0) this._gbite = true;
+    if (err < 0.5 && d <= reach && c.biteCooldown <= 0) this._swing(t);
   }
 
   // Herbivore fighting back: tail swingers present their tail, kickers face it.
@@ -2198,7 +2336,7 @@ export class Brain {
         const err = Math.abs(angleDiff(c.heading, want));
         if (err > 0.3) this._goDir(Math.sin(want), Math.cos(want), 0.14);
       }
-      if (toT > 1.3 && d <= reach && c.biteCooldown <= 0) this._gbite = true;
+      if (toT > 1.3 && d <= reach && c.biteCooldown <= 0) this._swing(t);
       return;
     }
     const reach = sp.length * 0.42 * s + num(sp.biteRange, 1) * s + radiusOf(t);
@@ -2206,7 +2344,7 @@ export class Brain {
     if (d > reach * 0.8) mag = d > reach * 2 ? JOG : WALK;
     else if (toT > 0.3) mag = 0.14;
     if (mag > 0) this._goDir(dx, dz, mag);
-    if (toT < 0.5 && d <= reach && c.biteCooldown <= 0) this._gbite = true;
+    if (toT < 0.5 && d <= reach && c.biteCooldown <= 0) this._swing(t);
   }
 
   _actEat(dt) {
@@ -2706,6 +2844,8 @@ export class Brain {
     it.eat = false;
     it.drink = false;
     it.rest = false;
+    it.heavy = false;
+    it.brace = false;
   }
 
   /* --- Small utilities ------------------------------------------------- */

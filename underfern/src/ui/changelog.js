@@ -4,6 +4,20 @@
 /** @type {{ v: string, date: string, title: string, notes: string[] }[]} */
 export const CHANGELOG = [
   {
+    v: "0.16",
+    date: "2026-11-06",
+    title: "Fights with weight",
+    notes: [
+      "Hold Bite (or right-click) to wind up a heavy attack. It lands when you let go: harder and slower, and it costs more stamina.",
+      "Dodge with Space or the new Dodge button: a quick hop that can't be hit mid-way. Animals over 2.5 t brace instead, and a brace at the last moment parries.",
+      "Every hit wears down poise. Break it and the animal staggers, open to a critical bite.",
+      "Bites fill a bleed meter and heavy blows a crush meter. Full, they burst into a haemorrhage or a broken leg.",
+      "Lock on with T, middle-click or the Lock button: the camera and your attacks stay on one animal, with its health and poise on the reticle.",
+      "Wild animals crouch and growl before a heavy, and they dodge and brace too.",
+      "Blows land with a beat of hit-stop, a shake, a spray of blood and a heavier crunch.",
+    ],
+  },
+  {
     v: "0.15",
     date: "2026-11-06",
     title: "The golden Underfern",

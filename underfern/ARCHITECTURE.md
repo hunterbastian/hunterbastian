@@ -121,6 +121,7 @@ underfern/
   src/world/landmarks.js TERRAIN    colossal fossils and stone wonders: placement, meshes, colliders
   src/world/underfern.js TERRAIN    the Underfern: the island's one giant tree fern (placement, geometry, glow, motes)
   src/world/atmosphere.js ATMOSPHERE fireflies and motes, light shafts, peak wisps and spindrift, cave fungi
+  src/world/impacts.js    ATMOSPHERE blood, grit and dust thrown off by blows
   src/world/world.js    INTEGRATION
   src/creatures/species.js  DINO-ART
   src/creatures/dinoModel.js DINO-ART
@@ -648,6 +649,28 @@ shelter from the Sky:
 - **fungi** — instanced glowing mushroom clusters on cave floors where no daylight
   reaches.
 
+### `world/impacts.js` (ATMOSPHERE) — what a blow throws off
+
+```js
+export class Impacts {
+  constructor(events, { low = false } = {})  // listens to attack, haemorrhage, dodge, stagger, crush
+  points;                                    // THREE.Points, added to the scene by World
+  update(dt /* sim dt: a hit-stop freezes the spray */, camera, bufferHeight)
+  get live()                                 // particles in flight
+  dispose()
+}
+```
+A pool of 192 particles (96 on low quality), simulated on the CPU and drawn as
+one `Points` call. It spawns:
+- blood droplets and a red mist puff at the wound, sprayed away from the
+  attacker (8 for a light bite, 12–22 for a heavy, 26 for a critical, 20 for a
+  haemorrhage);
+- pale grit where a parry turns a blow;
+- dust under a dodge, a stagger or a crush.
+
+Droplets fall and stay as a splash on the ground for about 1.4 s. Nothing spawns
+more than 90 m from the camera.
+
 ### `creatures/species.js` (DINO-ART)
 
 ```js
@@ -754,9 +777,10 @@ export class Creature {
   heading; speed /* planar m/s */; gait /* "idle"|"walk"|"trot"|"sprint"|"swim" */;
   age /* s */; kills; lastAttacker /* Creature|null */; lastDamageTime; causeOfDeath;
   biteCooldown /* s left */; hurt /* 0..1 flash */;
-  intent;  // { moveX, moveZ, sprint, crouch, bite, eat, drink, call, rest }
+  intent;  // { moveX, moveZ, sprint, crouch, bite, heavy, cancelHeavy, dodge, brace, eat, drink, call, rest }
            //   moveX/moveZ: desired WORLD direction, length 0..1 (≤0.5 walk, >0.5 trot; sprint flag → sprint)
-           //   bite, call: one-shot (consumed by update) ; eat, drink, crouch, sprint: held ; rest: desired state
+           //   bite, call, dodge, cancelHeavy: one-shot (consumed by update) ;
+           //   heavy (charge; letting go strikes), brace, eat, drink, crouch, sprint: held ; rest: desired state
   model;   // DinoModel ; model.object is added to world.scene by the ecosystem
   get scale(); get mass(); get maxHealth(); get radius(); get stage(); get diet();
   forward(target)            // unit facing vector
@@ -766,6 +790,13 @@ export class Creature {
   update(dt)                 // full sim step (movement, terrain follow, swimming, collisions, metabolism,
                              //  growth, regen, bleeding, actions, model animation)
   takeDamage(amount, source /* Creature|null */, type, pierce = 0) // → damage dealt after armor (× (1 − pierce)); emits "damage"
+  receiveHit(by, raw, kind, pierce, heavy, poiseDmg, bleedAdd, crushAdd, out)
+                      // an attack's blow: dodge → parry → brace → critical → damage → poise → buildup;
+                      //   fills out { dealt, dodged, parried, braced, staggered, critical }
+  // Combat state (see "Combat" below):
+  heavy /* 0, or 0.5..1 during a heavy */; poise; get poiseMax(); get staggered(); get charge() /* -1 | 0..1 */;
+  get dodging() /* in i-frames */; get canDodge() /* mass ≤ 2500 kg */; get attacking(); bracing;
+  buildup /* { bleed, crush } 0..100 */; aimTarget /* Creature|null: attacks turn toward it (lock-on) */
   invulnerable        // Creative mode: takeDamage/die/damage-over-time do nothing; vitals stay full
   scent; noise; visibility;  // 0..1 stealth signals the AI senses read for ANY target (scent 1,
                              //   noise from gait (idle 0.05 … sprint 1, crouch ×0.4), visibility 1 (×0.6 crouched))
@@ -774,6 +805,26 @@ export class Creature {
   dispose()
 }
 ```
+**Combat.** On top of each species' bite / kick / tail:
+- **Heavy.** Holding `intent.heavy` winds the attack up to its cocked pose and
+  holds it (`CHARGE_TIME` 0.9 s × heft to full, held up to `CHARGE_HOLD` 0.6 s
+  more); letting go strikes with damage × lerp(1.2, 2.1), poise damage ×
+  lerp(1, 1.5), a longer lunge and recovery, and ×2.1 stamina. Charging or
+  bracing slows movement (×0.3) and turning (×0.6).
+- **Dodge** (mass ≤ 2500 kg). A hop of `DODGE_DUR` 0.42 s with i-frames over
+  most of it, for 16 stamina; toward the move direction, or back.
+- **Brace** (heavier animals). Damage ×0.45, poise damage ×0.35, and stamina for
+  what it blocks. A brace under `PARRY_WINDOW` 0.22 s old parries: no damage,
+  and the attacker staggers. Out of stamina, the guard breaks.
+- **Poise.** It is `species.poise` or 25 + 20·log₂(mass/100), × lerp(0.5, 1,
+  growth). Light hits do 0.45× raw damage to it. At 0 the animal staggers for
+  `STAGGER_TIME` 1.25 s × heft: it can't act and takes ×1.25 damage. The first
+  bite on a staggered animal is a **critical** (×2.5, or ×3.2 from a heavy). Poise
+  refills after 2.5 s without a hit.
+- **Buildup.** Bites fill `buildup.bleed` (with `species.bleed`), and poise
+  damage fills `buildup.crush`. Both drain after 3 s. At 100, bleed bursts as a
+  haemorrhage (10% max health and a bleed), and crush breaks a leg.
+
 Movement: creatures turn toward the desired direction at `turnRate` (juveniles
 turn faster) and move along their heading (no strafing); acceleration is smoothed;
 snapped to `terrain.groundAt(x, z, y)` (a cave floor or the hillside above it); uphill
@@ -839,6 +890,21 @@ Perception shrinks for a crouching player and at night. Listen to `"call"` event
 (answer same-species calls, herbivores get alert near carnivore calls) and react
 to being damaged (`lastAttacker`).
 
+**Fighting.** Each blow goes through `_swing(t)`:
+- A staggered target gets a quick light bite (the critical).
+- Otherwise, with stamina over 40, the brain throws a heavy at `heavyChance`
+  (carnivores 0.3, herbivores 0.35, or `species.heavyChance`). It holds the
+  wind-up `rand(0.45, 1)` s × size: a visible crouch, quiver and growl, so you
+  can read it.
+- Otherwise it bites.
+
+`_reflexes()` answers an incoming swing (a wind-up or a strike still to land,
+from its target or its last attacker, in reach and facing it) once per swing:
+- Lighter animals dodge at `agility` (×1.3 against heavies, or
+  `species.agility`). Against a held charge they wait for the release, then dodge
+  away and to one side after a short reaction delay.
+- Heavier ones brace against heavies 55% of the time, a beat before the blow.
+
 **Senses.** Detection of any target combines three senses: **sight**
 (`perception × target.visibility`, needs rough line of sight — forest/night cut it),
 **hearing** (`target.noise × ~60 m`), and **smell** (`perception × 1.4 × target.scent ×
@@ -861,8 +927,9 @@ export class Input {
   constructor(canvas, uiRoot)
   isTouch; enabled /* false while menus are open */; pointerLocked;
   moveAxis()          // → { x, y } — x right, y forward, length ≤ 1
-  isDown(action)      // held:   "sprint" | "crouch" | "interact" | "bite"
-  pressed(action)     // edge:   "bite" | "call" | "sniff" | "rest" | "map" | "pause" | "help" | "interact" | "crouch"
+  isDown(action)      // held:   "sprint" | "crouch" | "interact" | "bite" | "heavy" | "dodge"
+  pressed(action)     // edge:   "bite" | "dodge" | "lock" | "call" | "sniff" | "rest" | "map" | "pause" | "help" | "interact" | "crouch"
+  biteLooking         // the thumb on Bite has slid into a look (lets a charge go unstruck)
   consumeLook()       // → { dx, dy } pixels since last call (pointer-locked mouse or touch drag)
   consumeZoom()       // → wheel delta since last call
   lookHeld            // a touch look is under way (thumb on the look pad, or sliding from Bite)
@@ -871,12 +938,14 @@ export class Input {
 }
 ```
 Bindings: WASD/arrows move · Shift sprint · C toggle crouch (Ctrl hold) · LMB/F
-bite · E (hold) eat/drink · Q call · R sniff · Z rest · M map · Esc/P pause ·
+bite (hold F for a heavy) · RMB heavy · Space dodge/brace · T/MMB lock on ·
+E (hold) eat/drink · Q call · R sniff · Z rest · M map · Esc/P pause ·
 H help · wheel zoom · click canvas to lock the pointer.
 Touch (`isTouch`): Input builds its own controls in `uiRoot` —
 `<div class="touch">` containing a left-side joystick
 (`.touch-stick` › `.touch-stick__knob`), right-side drag-to-look area, and buttons
-`<button class="touch-btn" data-action="bite|interact|sprint|call|sniff|rest|map|pause|crouch">`.
+`<button class="touch-btn" data-action="bite|dodge|sprint|interact|lock|crouch|sniff|call|rest|map|pause">`
+(`data-slot`: primary, arc0–3, outer0–2, top0–2).
 Bite doubles as a look pad: a thumb that slides more than 10 px from the press turns
 the view like the look area (the press still bites).
 CSS for these classes lives in `style.css` (UI).
@@ -895,6 +964,7 @@ export class ThirdPersonCamera {
   forward(target)              // horizontal unit vector the camera looks along (for movement)
   cinematic(dt, terrain)       // attract-mode flight over the island for the title screen
   shake(amount)
+  lockTarget                   // Creature|null: yaw follows it (mouse x ignored) and the view leans toward it
 }
 ```
 In a cave the follow camera never rises above the focus, pulls in at once when rock
@@ -909,10 +979,20 @@ export class PlayerController {
   creature;                    // possessed Creature
   prompt;                      // string | null — context hint for the HUD ("Hold E to drink", "Salt water", ...)
   sniff;                       // { active, cooldown, timeLeft, markers: [{ x, y, z, kind: "water"|"plant"|"carcass"|"creature", threat, label }] }
+  lockTarget;                  // Creature|null — the lock-on (T); lets go past 70 m or when it dies
   possess(creature)
   update(dt)                   // input → camera look/zoom + creature.intent (camera-relative), actions, sniff, prompt
+  unlock()
 }
 ```
+Bite is tap-or-hold: a press shorter than 0.2 s is a light attack (buffered
+0.35 s if pressed mid-swing), and a longer one holds `intent.heavy` until it
+is let go. Dodge presses are buffered 0.25 s. Animals too heavy to dodge brace
+while Space / Dodge is held. Lock-on picks the nearest animal near the middle
+of the view, within 45 m; herd- and pack-mates come last. The controller shakes
+the camera on heavies, criticals, parries and its own stagger. `main.js` adds
+the hit-stop: on any blow involving the player, the sim slows to 4% for
+0.045 s (light) to 0.17 s (critical).
 
 ### `ui/hud.js`, `ui/menu.js`, `ui/map.js` (UI)
 
@@ -951,7 +1031,11 @@ The map's terrain readout names the biomes *Coast*, *Plains* (*Upland meadow* ab
 (hairline colour), `--radius`, `--shadow`, `--blur`, `--ease`, `--safe-b` (bottom safe area).
 
 The HUD subscribes to `events` for toasts (growth stages, new day, kills, low
-stats, leg break) and the damage vignette.
+stats, leg break) and the damage vignette. In combat it shows:
+- a lock-on reticle (`.lock`) projected onto the target's chest, with its health
+  and poise bars and "Open" while it staggers;
+- the player's bleed and crush buildup meters (`.buildups`) above the vitals,
+  shown only while they hold anything.
 
 ### `audio/audio.js` (AUDIO)
 
@@ -967,7 +1051,10 @@ Everything synthesised with Web Audio (no files): ambient beds crossfaded by
 `sky.daylight` (wind, birds by day, insects/frogs by night, surf near the coast,
 water near lakes), player footsteps scaled by mass and gait, spatialised species
 calls (distance attenuation + stereo pan vs. listener yaw; smaller = higher
-pitch), bites/hits, eating/drinking, growth chime, low-health heartbeat.
+pitch), bites/hits (heavier for heavies and criticals, none for a dodged or
+parried blow), the wind-up growl of a heavy, the whoosh of a dodge, the thud of
+a stagger and the snap of a parry, eating/drinking, growth chime, low-health
+heartbeat.
 Under a cave roof (listener below `terrain.ceilingAt`) the outdoor beds fade (× 1 − 0.82·cave),
 effects are sent into a short multi-tap cave echo and water drips fall now and then.
 
@@ -981,6 +1068,7 @@ export class World {
   wind;                   // Wind (world/wind.js) — scent drift for the AI's smell; AI guards for null
   landmarks;              // Landmarks (world/landmarks.js), built before the vegetation
   atmosphere;             // Atmosphere (world/atmosphere.js), built after it
+  impacts;                // Impacts (world/impacts.js), built with the atmosphere
   get player()            // ecosystem.player
   update(dt, focus)       // sky → landmarks → vegetation → atmosphere → ecosystem → water
 }
@@ -1008,7 +1096,14 @@ URL params: `?species=<id>` autostart · `?growth=0..1` · `?t=0..1` time of day
 | --- | --- |
 | `damage` | `{ target, source, amount, type }` — type: `"bite" \| "tail" \| "kick" \| "starve" \| "dehydrate" \| "drown" \| "bleed" \| "fall"` |
 | `death` | `{ creature, cause, killer }` |
-| `attack` | `{ attacker, target /* Creature or null on whiff */, damage, kind /* "bite"\|"tail"\|"kick" */ }` |
+| `attack` | `{ attacker, target /* Creature or null on whiff */, damage, kind /* "bite"\|"tail"\|"kick" */, heavy /* 0 or 0.5..1 */, dodged, parried, braced, staggered, critical }` |
+| `charge` | `{ creature }` — a heavy's wind-up begins (the telegraph growl) |
+| `dodge` | `{ creature }` — a dodge hop starts |
+| `dodged` | `{ creature, by }` — a blow passed through a dodge's i-frames |
+| `parry` | `{ creature, by }` — a fresh brace turned a blow; `by` staggers |
+| `stagger` | `{ creature, by }` — poise broke, or a parry or guard break |
+| `haemorrhage` | `{ creature, by, damage }` — the bleed meter burst |
+| `crush` | `{ creature, by }` — the crush meter burst: a broken leg |
 | `call` | `{ creature, x, z }` |
 | `eat` | `{ creature, kind: "meat" \| "plant", amount }` — throttled (≤ 2/s per creature) |
 | `drink` | `{ creature, amount }` — throttled |

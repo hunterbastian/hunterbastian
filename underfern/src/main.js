@@ -514,6 +514,7 @@ menu.onContinue = () => {
 /* ----------------------------------------------------------------------- */
 
 let last = performance.now();
+let hitStop = 0; // s of hit-stop left (see the "attack" listener)
 let fpsAcc = 0;
 let fpsFrames = 0;
 let stillFrames = 0;
@@ -539,7 +540,13 @@ function frame(now) {
     return;
   }
 
-  step(dt);
+  // Hit-stop: the world all but holds still for a beat (input still reads).
+  let simDt = dt;
+  if (hitStop > 0) {
+    hitStop = Math.max(0, hitStop - raw);
+    simDt = dt * 0.04;
+  }
+  step(simDt);
 
   // Paused, nothing moves: after a couple of frames the pause screen stops
   // redrawing the island (a phone stays cool), until something asks for a frame.
@@ -656,6 +663,19 @@ async function boot() {
     if (e.creature && e.creature === world.ecosystem.player && game.state === "playing") {
       onPlayerDeath();
     }
+  });
+  // Hit-stop: a blow the player lands or takes holds the moment for a few
+  // frames — longer for a heavy, longest for a critical or a parry.
+  const mine = (a, b) => {
+    const p = world.ecosystem.player;
+    return !!p && (a === p || b === p);
+  };
+  world.events.on("attack", (e) => {
+    if (!e?.target || e.dodged || !mine(e.attacker, e.target)) return;
+    hitStop = Math.max(hitStop, e.critical ? 0.17 : e.parried ? 0.14 : e.heavy > 0 ? 0.07 + 0.05 * e.heavy : 0.045);
+  });
+  world.events.on("stagger", (e) => {
+    if (mine(e?.creature, e?.by)) hitStop = Math.max(hitStop, 0.1);
   });
 
   // First frames of the attract flight + an initial population around it.
