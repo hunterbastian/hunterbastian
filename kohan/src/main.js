@@ -105,6 +105,7 @@ try {
     stone: createMesh(gl, world.meshes.stone),
     stele: createMesh(gl, world.meshes.stele),
     far: createMesh(gl, world.meshes.far),
+    falls: createMesh(gl, world.meshes.falls),
     leaves: createMesh(gl, world.meshes.leaves),
     grass: createMesh(gl, world.meshes.grass),
     water: createMesh(gl, water),
@@ -318,6 +319,8 @@ function drawScene(m, eye, basis, refl, time) {
   meshes.stele.draw();
   lit.i1("u_mat", 4);
   meshes.far.draw();
+  lit.i1("u_mat", 5);
+  meshes.falls.draw();
 
   const fol = progs.foliage.use();
   setCommon(fol, m, eye, refl, time);

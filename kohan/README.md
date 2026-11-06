@@ -4,8 +4,13 @@
 spit of land, turned into a place you can walk around in first person. You start
 on a knoll looking across the cove at the tree, framed the way the painting is.
 From there you can walk the spit, wade out to a standing stone in the shallows,
-cross a sandbar of stepping stones to a lantern on the islet, or climb the main
-island and look back.
+or cross a sandbar of stepping stones and climb a stone stair to the lantern on
+top of the islet crag. Behind you, a bluff about 26 m tall rises from the main
+island. A waterfall drops off the face that looks at the tree into a plunge
+pool, and a creek ravine runs from the pool to the cove under a plank bridge. A
+trail cut into the cliffs spirals up three sides of the bluff to a cairn at the
+top, where you can look down on the tree, the cove and the town. Sea stacks
+stand out in the lake.
 
 The look comes from a post-processing stack in the order gsimone
 ([@ggsimm](https://x.com/ggsimm)) laid out for getting a modern renderer to look
@@ -39,7 +44,12 @@ python3 -m http.server 8000
 | `P`: cycle presets | Preset buttons |
 
 The lake turns you back once the water gets deeper than about 60 cm. You can
-wade the shallows; you move slower there.
+wade the shallows; you move slower there. If you fall into deeper water, such as
+the plunge pool, you can always head back toward the shallows.
+
+You can walk up slopes to about 50 degrees and up steps of about half a metre.
+Anything steeper is a wall: take the trail, the stair or the bridge. Walk off a
+ledge and you fall.
 
 ## The post stack
 
@@ -94,6 +104,14 @@ Everything is generated from a seed in `src/world.js`. Nothing is loaded.
 - **Island.** A signed-distance shoreline (the spit, the main island, the
   viewpoint knoll, the islet) shaped into a 1 m height grid with a wading shelf
   around every shore.
+- **Relief** (`src/relief.js`). A second pass carves the vertical parts into
+  that grid: the bluff (a ragged ellipse with a cliff band around it), the
+  trail cut across the cliff band as a ledge that climbs 26 m over about 100 m,
+  the stream channel on top, the plunge pool, a ramp out of the pool, the creek
+  ravine, and the islet crag. Each grid point also stores whether it's trail or
+  cliff, so the shader can draw worn paths and banded rock.
+- **Waterfall.** Ribbons whose streaks scroll at the speed of the water. The
+  drop is pushed out until it clears the rock face, then splashes into the pool.
 - **The tree.** A hand-placed skeleton that follows the painting: a heavy trunk
   forking into a tall leader that leans left and a limb that reaches right, with
   roots spread over a mound. Nineteen flat foliage tiers hang off it, each built
@@ -117,12 +135,17 @@ Everything is generated from a seed in `src/world.js`. Nothing is loaded.
 - `style.css`: the interface.
 - `src/main.js`: boot, render loop, presets, interaction.
 - `src/world.js`: terrain, tree, props and the far shore.
+- `src/relief.js`: the bluff, trail, waterfall channel, pool, creek and crag.
 - `src/shaders.js`: all GLSL, for the scene and the post stack.
 - `src/post.js`: the post stack.
-- `src/player.js`: the first-person walker, keyboard, mouse and touch input.
+- `src/player.js`: the first-person walker (slope limits, ledges, stairs and the
+  bridge), keyboard, mouse and touch input.
 - `src/leaves.js`: falling and floating leaves.
 - `src/gl.js`, `src/math.js`: WebGL2 and math helpers.
 - `smoke-test.mjs`: loads the page headlessly, renders every preset and fails
   on any console error. Run `node smoke-test.mjs` with Playwright installed.
+- `walk-test.mjs`: walks the routes (the bluff trail, the bridge, the islet
+  stair, out of the pool, down the creek) and checks that a cliff face stops
+  you. Plain Node: `node walk-test.mjs`.
 
 Respects `prefers-reduced-motion`: no head bob, still grain, steady lantern.

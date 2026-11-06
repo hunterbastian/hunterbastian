@@ -25,6 +25,7 @@ const vec3 PAL_RUST = vec3(0.478, 0.290, 0.180);
 const vec3 PAL_RUST_L = vec3(0.647, 0.376, 0.173);
 const vec3 PAL_TAN = vec3(0.784, 0.604, 0.384);
 const vec3 PAL_PURP = vec3(0.235, 0.239, 0.431);
+const vec3 PAL_PERI = vec3(0.376, 0.502, 0.816);
 const vec3 PAL_PERI_L = vec3(0.541, 0.635, 0.925);
 const vec3 PAL_CLOUD = vec3(0.808, 0.859, 0.969);
 
@@ -205,13 +206,23 @@ in vec3 v_col;
 in vec4 v_ext;
 out vec4 o;
 
-vec3 terrainAlbedo(vec3 wp, vec3 n, out float ao) {
+vec3 terrainAlbedo(vec3 wp, vec3 n, vec2 masks, out float ao) {
   float n1 = fbm(wp.xz * 0.08);
   float n2 = vnoise(wp.xz * 1.7);
   float flatness = smoothstep(0.78, 0.95, n.y);
   vec3 alb = mix(PAL_RUST_D * 0.8, PAL_RUST * 0.92, smoothstep(0.4, 0.75, n1));
   alb = mix(alb, PAL_TAN * 0.85, smoothstep(0.74, 0.9, n2 * 0.6 + n1 * 0.5) * flatness * smoothstep(0.25, 0.7, wp.y) * 0.6);
-  alb = mix(alb, PAL_CHAR, (1.0 - smoothstep(0.55, 0.85, n.y)) * 0.55);
+  // bare rock in layered bands on cliffs and steep ground
+  float steep = 1.0 - smoothstep(0.5, 0.82, n.y);
+  float rockAmt = clamp(max(steep, masks.y * 0.7), 0.0, 1.0);
+  float strata = vnoise(vec2(wp.y * 0.85 + vnoise(wp.xz * 0.1) * 2.6, (wp.x + wp.z) * 0.05));
+  float weather = vnoise(vec2((wp.x - wp.z) * 0.8, wp.y * 0.07));
+  vec3 rock = mix(PAL_SLATE * 0.72, PAL_SLATE * 1.02, smoothstep(0.3, 0.78, strata));
+  rock = mix(rock, PAL_RUST_D * 0.92, smoothstep(0.58, 0.85, weather) * 0.55);
+  rock *= 0.86 + 0.24 * vnoise(wp.xz * 0.7 + wp.y * 0.45);
+  alb = mix(alb, rock, rockAmt);
+  // worn trail
+  alb = mix(alb, vec3(0.5, 0.39, 0.3) * (0.85 + 0.3 * vnoise(wp.xz * 2.0)), masks.x * 0.75);
   float wet = 1.0 - smoothstep(0.02, 0.45, wp.y);
   alb = mix(alb, alb * 0.5 + PAL_CHAR * 0.2, wet);
   if (wp.y < 0.0) alb = mix(alb, vec3(0.16, 0.18, 0.42), clamp(-wp.y * 1.2, 0.0, 0.9));
@@ -258,11 +269,29 @@ void main() {
     o = vec4(applyFog(e, v_wp), 1.0);
     return;
   }
+  if (u_mat == 5) {
+    // running water: streaks scroll along the ribbon (v is metres along the flow)
+    float u = v_ext.x, v = v_ext.y, speed = v_ext.z;
+    float s1 = vnoise(vec2(u * 9.0, v * 0.45 - u_time * speed * 0.45));
+    float s2 = vnoise(vec2(u * 21.0 + 7.0, v * 1.3 - u_time * speed * 1.3));
+    float edge = smoothstep(0.0, 0.2, u) * smoothstep(1.0, 0.8, u);
+    float body = s1 * 0.5 + s2 * 0.5 + edge * 0.55;
+    if (body < 0.55) discard;
+    vec3 c = mix(PAL_PERI, PAL_CLOUD, smoothstep(0.3, 0.8, s1 * 0.6 + s2 * 0.4));
+    c = mix(c, vec3(1.0), smoothstep(0.75, 0.95, s2) * 0.8);
+    if (abs(speed) < 3.0) {
+      // the slow stream on the bluff top reads as water in a channel, not foam
+      c = mix(vec3(0.22, 0.28, 0.64), PAL_PERI, smoothstep(0.45, 0.8, s1));
+      c = mix(c, PAL_PERI_L, smoothstep(0.78, 0.92, s2) * 0.8);
+    }
+    o = vec4(applyFog(c, v_wp), 1.0);
+    return;
+  }
   vec3 alb;
   float ao = 1.0;
   float sh = 1.0;
   if (u_mat == 0) {
-    alb = terrainAlbedo(v_wp, n, ao);
+    alb = terrainAlbedo(v_wp, n, v_col.xy, ao);
     sh = canopyShadow(v_wp);
   } else if (u_mat == 1) {
     alb = barkAlbedo(v_ext);

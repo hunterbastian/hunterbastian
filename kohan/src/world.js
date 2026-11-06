@@ -3,6 +3,7 @@
 // Everything is generated from a seed; no textures or models are loaded.
 
 import { clamp, lerp, smoothstep, mulberry32, vnoise, fbm, v3 } from "./math.js";
+import { applyRelief, BLUFF, ellipseR, PHI_FALL } from "./relief.js";
 
 // --- The hero view -----------------------------------------------------------
 // You start on a knoll looking across the cove at the tree, the way the
@@ -165,6 +166,14 @@ export class Terrain {
         this.h[j * n + i] = rawHeight(this.x0 + i * this.step, this.z0 + j * this.step);
       }
     }
+    // per-vertex masks: worn trail, cliff rock
+    this.mask = new Float32Array(n * n * 3);
+    this.relief = applyRelief(this, ISLET);
+  }
+  maskAt(x, z, c = 0) {
+    const i = Math.round((x - this.x0) / this.step), j = Math.round((z - this.z0) / this.step);
+    if (i < 0 || j < 0 || i >= this.n || j >= this.n) return 0;
+    return this.mask[(j * this.n + i) * 3 + c];
   }
   heightAt(x, z) {
     const fx = (x - this.x0) / this.step;
@@ -188,7 +197,7 @@ export class Terrain {
     const n = this.n, H = this.h, s = this.step;
     const pos = new Float32Array(n * n * 3);
     const nrm = new Float32Array(n * n * 3);
-    const col = new Float32Array(n * n * 3);
+    const col = this.mask.slice();
     const ext = new Float32Array(n * n * 4);
     for (let j = 0; j < n; j++) {
       for (let i = 0; i < n; i++) {
@@ -610,6 +619,7 @@ export function buildWorld(opts = {}) {
     if (Math.hypot(x - TREE[0], z - TREE[1]) < 1.7) continue;
     if (Math.hypot(x - HERO.x, z - HERO.z) < 2.2 && !reed) continue;
     if (terrain.normalAt(x, z)[1] < 0.82 && !reed) continue;
+    if (terrain.maskAt(x, z, 0) > 0.25) continue;
     const patch = fbm(x * 0.07, z * 0.07, 3, 21);
     const nearTree = Math.hypot(x - TREE[0], z - TREE[1]) < 26;
     if (!reed && patch < (nearTree ? -0.35 : -0.05)) continue;
@@ -656,15 +666,16 @@ export function buildWorld(opts = {}) {
     colliders.push({ x, z, r: s * 1.05 });
   }
 
-  const steps = [];
-  for (let i = 0; i < 9; i++) {
-    const t = (i + 0.5) / 9;
-    const x = lerp(-31.5, -45.5, t) + (rng() - 0.5) * 0.6;
-    const z = lerp(2.2, -10.8, t) + (rng() - 0.5) * 0.6;
+  // Things you can stand on that aren't terrain: stepping stones, stairs, the bridge.
+  const supports = [];
+  for (let i = 0; i < 7; i++) {
+    const t = (i + 0.5) / 7;
+    const x = lerp(-31.5, -41.2, t) + (rng() - 0.5) * 0.6;
+    const z = lerp(2.2, -6.4, t) + (rng() - 0.5) * 0.6;
     const r = 0.62 + rng() * 0.18;
     const top = 0.14 + rng() * 0.06;
     prism(stone, [x, -0.7, z], r, r * 0.88, 0.7 + top, 7, rng() * 6, [0.36, 0.36, 0.42]);
-    steps.push({ x, z, r: r * 0.9, top: top });
+    supports.push({ type: "circle", x, z, r: r * 0.9, top });
   }
 
   // Stone lantern on the islet. Its firebox window can be lit.
@@ -682,6 +693,179 @@ export function buildWorld(opts = {}) {
   prism(stone, [lx, fb + 0.44, lz], 0.82, 0.12, 0.42, 6, Math.PI / 6, lc);
   prism(stone, [lx, fb + 0.86, lz], 0.1, 0.0, 0.22, 6, 0, lc);
   colliders.push({ x: lx, z: lz, r: 0.75 });
+
+  // --- Relief props ------------------------------------------------------------
+  const relief = terrain.relief;
+
+  // A stone stair up the islet crag, facing the sandbar.
+  {
+    const ax = 0.764, az = 0.645;
+    const N = 16, tread = 0.45, rIn = 2.5;
+    const rOut = rIn + N * tread;
+    const g0 = Math.max(terrain.heightAt(lx + ax * rOut, lz + az * rOut), -0.25);
+    const gTop = lg;
+    const rot = Math.atan2(-ax, az);
+    for (let k = 0; k < N; k++) {
+      const top = g0 + ((gTop - g0) * (k + 1)) / N;
+      const rm = rOut - (k + 0.5) * tread;
+      const cx = lx + ax * rm, cz = lz + az * rm;
+      box(stone, [cx, (top - 0.9) / 2, cz], [1.8, top + 0.9, tread + 0.02], rot, k % 2 ? [0.4, 0.4, 0.46] : [0.36, 0.36, 0.42]);
+      supports.push({ type: "box", x: cx, z: cz, ax, az, hl: tread / 2 + 0.01, hw: 0.9, topA: top, topB: top, minY: -Infinity });
+    }
+  }
+
+  // A plank footbridge over the creek ravine.
+  {
+    const c = [20, 36.6];
+    const ax = 0.184, az = -0.983;
+    const px = -az, pz = ax;
+    const hl = 6.8;
+    const hA = terrain.heightAt(c[0] - ax * hl, c[1] - az * hl) + 0.12;
+    const hB = terrain.heightAt(c[0] + ax * hl, c[1] + az * hl) + 0.12;
+    const rot = Math.atan2(-ax, az);
+    const planks = 14;
+    for (let k = 0; k < planks; k++) {
+      const t = (k + 0.5) / planks;
+      const a = lerp(-hl, hl, t);
+      box(stone, [c[0] + ax * a, lerp(hA, hB, t) - 0.09, c[1] + az * a], [2.2, 0.18, (2 * hl) / planks - 0.05], rot, k % 2 ? [0.36, 0.27, 0.22] : [0.42, 0.31, 0.24]);
+    }
+    const postAt = (t, side) => {
+      const a = lerp(-hl, hl, t);
+      return [c[0] + ax * a + px * side * 1.05, lerp(hA, hB, t), c[1] + az * a + pz * side * 1.05];
+    };
+    for (const side of [-1, 1]) {
+      for (let k = 0; k <= 4; k++) {
+        const p = postAt(k / 4, side);
+        box(stone, [p[0], p[1] + 0.35, p[2]], [0.14, 1.1, 0.14], rot, [0.26, 0.2, 0.17]);
+        if (k < 4) {
+          const q = postAt((k + 0.5) / 4, side);
+          box(stone, [q[0], q[1] + 0.86, q[2]], [0.09, 0.09, (2 * hl) / 4], rot, [0.3, 0.23, 0.19]);
+        }
+      }
+    }
+    for (const t of [0.38, 0.62]) {
+      const a = lerp(-hl, hl, t);
+      const top = lerp(hA, hB, t);
+      box(stone, [c[0] + ax * a, (top - 0.7) / 2, c[1] + az * a], [0.3, top + 0.7, 0.3], rot, [0.24, 0.18, 0.16]);
+    }
+    supports.push({ type: "box", x: c[0], z: c[1], ax, az, hl, hw: 1.1, topA: hA, topB: hB, minY: Math.min(hA, hB) - 1.6 });
+  }
+
+  // The waterfall: a stream across the bluff top, then the drop into the plunge pool.
+  const falls = new Geo();
+  {
+    const fd = relief.fallDir;
+    const tn = [-fd[1], fd[0]];
+    const ribbon = (pts, width, speed) => {
+      let along = 0;
+      const b0 = falls.n;
+      pts.forEach((p, i) => {
+        if (i) along += Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1], p[2] - pts[i - 1][2]);
+        const w = width(i / (pts.length - 1));
+        for (const u of [0, 1]) {
+          const off = (u - 0.5) * w;
+          falls.v([p[0] + tn[0] * off, p[1], p[2] + tn[1] * off], [fd[0], 0.4, fd[1]], [1, 1, 1], [u, along, speed, 0]);
+        }
+      });
+      for (let i = 0; i < pts.length - 1; i++) {
+        const a = b0 + i * 2;
+        falls.q(a, a + 1, a + 3, a + 2);
+      }
+    };
+    const S = relief.spring, Lp = relief.lip;
+    const chan = [];
+    for (let k = 0; k <= 12; k++) {
+      const t = k / 12;
+      const x = lerp(S[0], Lp[0], t), z = lerp(S[1], Lp[1], t);
+      chan.push([x, terrain.heightAt(x, z) + 0.4, z]);
+    }
+    ribbon(chan, (t) => lerp(0.8, 1.3, t), 1.6);
+    const topY = chan[chan.length - 1][1];
+    const drop = [];
+    let d = 0.2;
+    const N = 30;
+    for (let k = 0; k <= N; k++) {
+      const t = k / N;
+      const y = lerp(topY, 0.06, Math.pow(t, 0.9));
+      d = Math.max(d, 0.2 + 2.2 * Math.sqrt(t));
+      // keep the water just outside the rock face
+      for (let guard = 0; guard < 200; guard++) {
+        const x = Lp[0] + fd[0] * d, z = Lp[1] + fd[1] * d;
+        if (terrain.heightAt(x, z) < y - 0.7 || (k === N && terrain.heightAt(x, z) < -0.3)) break;
+        d += 0.15;
+      }
+      drop.push([Lp[0] + fd[0] * d, y, Lp[1] + fd[1] * d]);
+    }
+    drop.unshift(chan[chan.length - 1]);
+    ribbon(drop, (t) => lerp(1.8, 4.2, t), 8);
+    const B = drop[drop.length - 1];
+    for (let k = 0; k < 3; k++) {
+      const a = (k / 3) * Math.PI;
+      const ex = Math.cos(a) * 2.4, ez = Math.sin(a) * 2.4;
+      const i0 = falls.v([B[0] - ex, B[1] - 0.2, B[2] - ez], [0, 1, 0], [1, 1, 1], [0, 0, -2.5, 0]);
+      falls.v([B[0] + ex, B[1] - 0.2, B[2] + ez], [0, 1, 0], [1, 1, 1], [1, 0, -2.5, 0]);
+      falls.v([B[0] + ex, B[1] + 2.4, B[2] + ez], [0, 1, 0], [1, 1, 1], [1, 2.6, -2.5, 0]);
+      falls.v([B[0] - ex, B[1] + 2.4, B[2] - ez], [0, 1, 0], [1, 1, 1], [0, 2.6, -2.5, 0]);
+      falls.q(i0, i0 + 1, i0 + 2, i0 + 3);
+    }
+
+    // A cairn at the bluff edge, looking back at the tree.
+    const cx = Lp[0] - fd[0] * 2.2 + tn[0] * 4.5, cz = Lp[1] - fd[1] * 2.2 + tn[1] * 4.5;
+    let cy = terrain.heightAt(cx, cz) - 0.05;
+    let cr = 0.75;
+    for (let k = 0; k < 6; k++) {
+      const hgt = 0.2 + rng() * 0.08;
+      prism(stone, [cx + (rng() - 0.5) * 0.12, cy, cz + (rng() - 0.5) * 0.12], cr, cr * 0.85, hgt, 6, rng() * 6, k % 2 ? [0.5, 0.5, 0.56] : [0.42, 0.42, 0.48]);
+      cy += hgt;
+      cr *= 0.8;
+    }
+    colliders.push({ x: cx, z: cz, r: 0.8 });
+  }
+
+  // A young tree on the bluff top, boulders fallen at the foot of the cliffs.
+  youngTree(terrain, bark, leaves, rng, BLUFF.x - 4, BLUFF.z + 3, 1.2);
+  colliders.push({ x: BLUFF.x - 4, z: BLUFF.z + 3, r: 0.45 });
+  for (let k = 0, placed = 0; k < 200 && placed < 12; k++) {
+    const phi = rng() * Math.PI * 2;
+    const re = 1 / Math.hypot(Math.cos(phi) / BLUFF.rx, Math.sin(phi) / BLUFF.rz);
+    const r = re + BLUFF.W + 0.5 + rng() * 3;
+    const x = BLUFF.x + Math.cos(phi) * r, z = BLUFF.z + Math.sin(phi) * r;
+    if (terrain.maskAt(x, z, 0) > 0.05 || Math.hypot(x - relief.pool[0], z - relief.pool[1]) < 9) continue;
+    const g = terrain.heightAt(x, z);
+    if (g < 0.3) continue;
+    const s = 0.7 + rng() * 1.3;
+    icoRock(stone, rng, [x, g - s * 0.2, z], [s * 1.2, s * 0.8, s], rockTones[placed % 4]);
+    colliders.push({ x, z, r: s * 1.05 });
+    placed++;
+  }
+
+  // Rust shrubs clinging to ledges on the cliff faces.
+  for (let k = 0, placed = 0; k < 400 && placed < 26; k++) {
+    const phi = rng() * Math.PI * 2;
+    let dphi = Math.abs(phi - PHI_FALL) % (Math.PI * 2);
+    if (dphi > Math.PI) dphi = Math.PI * 2 - dphi;
+    if (dphi < 0.35) continue;
+    const r = ellipseR(phi) + 1 + rng() * (BLUFF.W - 2);
+    const x = BLUFF.x + Math.cos(phi) * r, z = BLUFF.z + Math.sin(phi) * r;
+    if (terrain.maskAt(x, z, 0) > 0.05) continue;
+    const g = terrain.heightAt(x, z);
+    const s = 0.6 + rng() * 0.6;
+    foliagePad(leaves, [x, g + 0.2, z], [1.0 * s, 0.45 * s, 0.9 * s], rng, { density: 14, size: [0.35, 0.55], dim: 0.8 });
+    placed++;
+  }
+
+  // Sea stacks standing in the lake.
+  for (const [x, z, H] of [[98, 30, 16], [93, 72, 22], [68, 108, 13], [60, -30, 18]]) {
+    let y = -6;
+    let w = 3.4 + rng() * 1.2;
+    while (y < H) {
+      const segH = 3 + rng() * 2;
+      icoRock(stone, rng, [x + (rng() - 0.5) * 0.9, y + segH * 0.5, z + (rng() - 0.5) * 0.9], [w, segH * 0.75, w * 0.9], rockTones[Math.floor(rng() * 4)]);
+      y += segH * 0.8;
+      w *= 0.94;
+    }
+    foliagePad(leaves, [x, y + 0.6, z], [w * 0.75, 0.5, w * 0.65], rng, { density: 10, dim: 0.9 });
+  }
 
   // The standing stone in the shallows of the cove, inscription facing the knoll.
   const stele = new Geo();
@@ -782,11 +966,12 @@ export function buildWorld(opts = {}) {
       stone: stone.arrays(),
       stele: stele.arrays(),
       far: far.arrays(),
+      falls: falls.arrays(),
     },
     spots,
     canopy,
     colliders,
-    steps,
+    supports,
     sunDir,
     windDir,
     poi: {

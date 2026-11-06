@@ -5,6 +5,7 @@ import { clamp, lerp } from "./math.js";
 
 const EYE = 1.62;
 const WADE_LIMIT = -0.62; // deeper than this and the lake turns you back
+const STEP = 0.55; // highest rise you can walk up without hopping (about a 50 degree slope)
 
 export class Player {
   constructor(world, start) {
@@ -22,20 +23,47 @@ export class Player {
     this.speed = 0;
   }
 
-  groundAt(x, z) {
+  // Terrain height, raised by anything built on it. The bridge only holds you
+  // when you're up at its level, so you can still wade the creek under it.
+  groundAt(x, z, yRef = Infinity) {
     let g = this.world.terrain.heightAt(x, z);
-    for (const s of this.world.steps) {
-      if (Math.hypot(x - s.x, z - s.z) < s.r) g = Math.max(g, s.top);
+    for (const s of this.world.supports) {
+      if (s.type === "circle") {
+        if (Math.hypot(x - s.x, z - s.z) < s.r) g = Math.max(g, s.top);
+        continue;
+      }
+      const dx = x - s.x, dz = z - s.z;
+      const a = dx * s.ax + dz * s.az;
+      const b = -dx * s.az + dz * s.ax;
+      if (Math.abs(a) > s.hl || Math.abs(b) > s.hw) continue;
+      const top = lerp(s.topA, s.topB, (a + s.hl) / (2 * s.hl));
+      if (s.minY === -Infinity || yRef > top - 1.6) g = Math.max(g, top);
     }
     return g;
   }
 
   walkable(x, z) {
-    return this.groundAt(x, z) > WADE_LIMIT;
+    return this.groundAt(x, z, this.y + 0.3) > WADE_LIMIT;
   }
 
   get wading() {
-    return this.groundAt(this.x, this.z) < -0.04;
+    return this.groundAt(this.x, this.z, this.y + 0.3) < -0.04;
+  }
+
+  // Can we move to (nx, nz)? Looks a little ahead so steep faces stop you
+  // even though each frame's step is tiny.
+  canMove(nx, nz) {
+    const ref = this.y + 0.3;
+    const g = this.groundAt(nx, nz, ref);
+    // the lake turns you back where it gets deep, but if you're already in deep
+    // water (fell into the plunge pool), you can always head for shallower ground
+    if (g <= WADE_LIMIT && g < this.groundAt(this.x, this.z, ref) - 1e-4) return false;
+    if (this.air) return g <= this.y + 0.15;
+    const dx = nx - this.x, dz = nz - this.z;
+    const d = Math.hypot(dx, dz) || 1;
+    const ahead = this.groundAt(nx + (dx / d) * 0.35, nz + (dz / d) * 0.35, ref);
+    const from = Math.max(this.y, this.groundAt(this.x, this.z, ref));
+    return Math.max(g, ahead) - from <= STEP;
   }
 
   update(dt, inp, reduceMotion) {
@@ -60,9 +88,9 @@ export class Player {
 
     let nx = this.x + this.vx * dt;
     let nz = this.z + this.vz * dt;
-    if (!this.walkable(nx, nz)) {
-      if (this.walkable(nx, this.z)) nz = this.z;
-      else if (this.walkable(this.x, nz)) nx = this.x;
+    if (!this.canMove(nx, nz)) {
+      if (this.canMove(nx, this.z)) nz = this.z;
+      else if (this.canMove(this.x, nz)) nx = this.x;
       else {
         nx = this.x;
         nz = this.z;
@@ -79,24 +107,31 @@ export class Player {
         nz = c.z + (dz / d) * min;
       }
     }
-    if (this.walkable(nx, nz)) {
+    if ((nx !== this.x || nz !== this.z) && this.canMove(nx, nz)) {
       this.x = nx;
       this.z = nz;
     }
 
-    const g = this.groundAt(this.x, this.z);
+    const g = this.groundAt(this.x, this.z, this.y + 0.3);
     if (inp.jump && !this.air) {
       this.vy = 4.4;
       this.air = true;
     }
+    // walked off a ledge: fall instead of sliding down
+    if (!this.air && g < this.y - 0.6) {
+      this.air = true;
+      this.vy = 0;
+    }
     if (this.air) {
-      this.vy -= 13 * dt;
+      this.vy = Math.max(this.vy - 13 * dt, -30);
       this.y += this.vy * dt;
       if (this.y <= g) {
         this.y = g;
         this.air = false;
         this.vy = 0;
       }
+    } else if (g < this.y) {
+      this.y = g;
     } else {
       this.y = lerp(this.y, g, 1 - Math.exp(-dt * 16));
     }
