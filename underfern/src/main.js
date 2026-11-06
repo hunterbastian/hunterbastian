@@ -357,6 +357,7 @@ function startSurvival(speciesId, { growth = 0, from = null, pos = null, creativ
   const spot = pos || (from ? { x: from.x, z: from.z } : pickSpawn(species));
   const heading = from ? from.heading : Math.random() * Math.PI * 2;
   game.creative = !!creative && !from;
+  game.sawTree = false;
   const creature = eco.spawn(species.id, spot.x, spot.z, {
     growth: from ? from.growth : game.creative ? 1 : growth,
     heading,
@@ -580,6 +581,12 @@ function step(dt) {
       // The "death" listener only fires while playing; catch a death that
       // landed while paused (or before the listener existed) here.
       if (game.state === "playing" && p && p.alive === false) onPlayerDeath();
+      // The Underfern: a word the first time you come near it in a life.
+      const tree = world.landmarks?.tree?.site;
+      if (tree && p && !game.sawTree && Math.hypot(p.position.x - tree.x, p.position.z - tree.z) < tree.r + 70) {
+        game.sawTree = true;
+        hud.toast("The Underfern — older than every bone on this island", "good", "leaf");
+      }
       game.survived += dt;
       game.saveTimer += dt;
       if (game.saveTimer > 10) {

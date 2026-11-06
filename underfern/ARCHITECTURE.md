@@ -118,6 +118,7 @@ underfern/
   src/world/retro.js    INTEGRATION the Retro HD render style's post pass: bloom, soften, fringe, grade, grain
   src/world/retro-sd.js INTEGRATION the Retro SD render style: Kawase bloom, DOF, sun shafts, 6-bit dither, deflicker, composite + CRT
   src/world/landmarks.js TERRAIN    colossal fossils and stone wonders: placement, meshes, colliders
+  src/world/underfern.js TERRAIN    the Underfern: the island's one giant tree fern (placement, geometry, glow, motes)
   src/world/atmosphere.js ATMOSPHERE fireflies and motes, light shafts, peak wisps and spindrift, cave fungi
   src/world/world.js    INTEGRATION
   src/creatures/species.js  DINO-ART
@@ -527,6 +528,62 @@ All of it runs in the materials' own fragment shaders: no extra pass, the same c
 in both render styles. Shader cache keys stay what they were (`"sauria-…"` keys
 included) — every program of a key gets the same patch.
 
+### `world/underfern.js` (TERRAIN) — the Underfern
+
+```js
+export function planUnderfern(terrain, seed, others) // → { kind: "underfern", label, x, z, y, yaw, r: 32, seed } | null — pure
+export function buildUnderfern(rng, detail)          // → { bark, fronds: BufferGeometry, cols: [{ x, z, r, height }], top }
+export const TREE                                   // shared uniforms: uTreeGlow (night), uTreeDay, uTreeGlowCol
+export class UnderfernTree {
+  constructor(site, { shadows, detail })
+  site; colliders; group /* trunk, fronds, motes */; height; triangles
+  update(camera, fogFar, sky)   // visibility (to 1.7× the haze: its crown stands above it) and the hour's glow
+  dispose()
+}
+```
+
+**Placement.** The island's one giant tree fern sits on the `"underfern-tree"` stream.
+It is planned after the six landmarks, so they keep their places. The spot is the
+best-scoring candidate (distance to the island's land centroid, plus seeded jitter)
+that meets all of these:
+- forest at its centre, dry and gentle under its 32 m footprint (9 m of rise at most);
+- no rock or water under the footprint;
+- clear of caves, fresh water, passes, trails and lookouts, and ≥ 150 m from any
+  landmark;
+- no hillside within 45–60 m rising more than 30 m above it, so the crown has room.
+
+Plains are allowed if no forest spot qualifies. `World` builds it in the landmarks
+step and hands it to `Landmarks.addTree`.
+
+**Geometry.**
+- *Trunk:* about 80 m tall, a lofted, leaning tube. Its foot flares, it carries
+  fibrous ridges, and the stubs of old fronds knob it higher up.
+- *Roots:* 9 buttress roots (6 on low), as Bezier tubes into the ground; ~40% of
+  them arch 7–11 m high.
+- *Crown:* 28 fronds 55–70 m long (18 on low).
+  - Each is a rachis tube plus pinnae: three-segment quads whose serrated outline is
+    cut in the shader, from `aUv`.
+  - 2–3 fiddleheads, as logarithmic-spiral tubes.
+- *Budget:* about 21k triangles on high.
+
+**Colliders.** A centre circle and rings of 6 and 10 fill the trunk's foot. Circles
+also sit wherever a root runs within 3.2 m of the ground; the high arches stay open.
+
+**Shading.**
+- *Bark* (`"underfern-tree-bark"`): world-space fibres, moss on whatever faces up,
+  and lichen spots that glow at night.
+- *Fronds* (`"underfern-tree-fronds"`, double-sided):
+  - They sway from `aSway`/`aPhase`, using `LOOK.uLookScreen.w` (time) and
+    `LOOK.uLookWind`.
+  - At night the midribs, stems and fiddleheads glow.
+  - By day there is a backlit sun term: green-gold when you look up toward the sun.
+- *Motes:* ~220 additive points drifting up around the trunk; warm by day, cool and
+  bright at night.
+
+`main.js` shows a one-time "The Underfern" note each life, the first time the
+player comes within its footprint + 70 m. The map draws it with a fern glyph and a
+larger name, and lists it in the legend.
+
 ### `world/landmarks.js` (TERRAIN) — the island's wonders
 
 ```js
@@ -538,7 +595,9 @@ export class Landmarks {
   colliders;      // all of them; World hands the Landmarks to Vegetation, whose collidersNear reports them
   group; meshes;  // one mesh per site (bone or stone material); hidden past the haze
   stats;          // { sites, triangles, genMs }
-  update(camera, fogFar)
+  tree;           // the Underfern (world/underfern.js) once addTree has run, else null
+  addTree(tree)   // its site joins `sites` (map, clearings, keep-out), its colliders join `colliders`
+  update(camera, fogFar, sky)
   siteAt(x, z)    // the site whose footprint covers (x, z), or null
   dispose()
 }

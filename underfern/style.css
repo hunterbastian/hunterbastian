@@ -3360,6 +3360,11 @@ button:disabled {
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-8 -8 16 16'%3E%3Cpath d='M-6.5 4.5L-4.5-1.3Q0-7.8 4.5-1.3L6.5 4.5' fill='none' stroke='%23342e24' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M-6.5 4.5L-4.5-1.3Q0-7.8 4.5-1.3L6.5 4.5' fill='none' stroke='%235c5854' stroke-width='1.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
+.lg--tree {
+  background: center / contain no-repeat
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-8 -8 16 16'%3E%3Cpath d='M0 7V-2M0-2Q-3.3-4.7-6.3 1.3M0-2Q-2.3-6.3-4-5.3M0-2Q0-7-0.3-7M0-2Q2.3-6.3 4-5.3M0-2Q3.3-4.7 6.3 1.3' fill='none' stroke='%23342e24' stroke-width='2.6' stroke-linecap='round'/%3E%3Cpath d='M0 7V-2M0-2Q-3.3-4.7-6.3 1.3M0-2Q-2.3-6.3-4-5.3M0-2Q0-7-0.3-7M0-2Q2.3-6.3 4-5.3M0-2Q3.3-4.7 6.3 1.3' fill='none' stroke='%234a703a' stroke-width='1.2' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+
 .map__hint {
   margin: auto 0 0;
   font-size: 12px;

@@ -11,6 +11,7 @@ import { Sky } from "./sky.js";
 import { Vegetation } from "./vegetation.js";
 import { Wind } from "./wind.js";
 import { Landmarks } from "./landmarks.js";
+import { planUnderfern, UnderfernTree } from "./underfern.js";
 import { Atmosphere } from "./atmosphere.js";
 import { Ecosystem } from "../creatures/ecosystem.js";
 import { SPECIES } from "../creatures/species.js";
@@ -98,7 +99,7 @@ export class World {
       this.sky.shelter = ceil !== Infinity && cam.y < ceil + 0.5 ? t.shelterAt(cam.x, cam.z) : 0;
     }
     this.sky.update(dt, focus, this.camera);
-    if (this.landmarks) this.landmarks.update(this.camera, this.sky.fog.far);
+    if (this.landmarks) this.landmarks.update(this.camera, this.sky.fog.far, this.sky);
     if (this.vegetation) this.vegetation.update(dt, focus);
     if (this.atmosphere) this.atmosphere.update(dt, focus, this.sky, this.camera, this.renderer ? this.renderer.domElement.height : 720);
     this.ecosystem.update(dt, focus);
@@ -165,7 +166,7 @@ export class World {
         },
       },
       {
-        label: "Unearthing the old bones",
+        label: "Raising the Underfern",
         weight: 0.03,
         run: () => {
           this.landmarks = new Landmarks(this.terrain, {
@@ -173,6 +174,13 @@ export class World {
             shadows: !!q.shadows,
             detail: (q.vegetationDensity ?? 1) < 0.7 ? 0.5 : 1,
           });
+          // The Underfern, planned after the others so they keep their places.
+          const site = planUnderfern(this.terrain, this.seed, this.landmarks.sites);
+          if (site) {
+            this.landmarks.addTree(
+              new UnderfernTree(site, { shadows: !!q.shadows, detail: (q.vegetationDensity ?? 1) < 0.7 ? 0.5 : 1 }),
+            );
+          }
           this.scene.add(this.landmarks.group);
         },
       },

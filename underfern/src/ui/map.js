@@ -210,6 +210,7 @@ export class MapView {
             <li><span class="lg lg--cave"></span>Cave mouth &amp; passage</li>
             <li><span class="lg lg--bone"></span>Old bones — fossil giants</li>
             <li><span class="lg lg--stone"></span>Stone arch, sea stacks, basalt</li>
+            <li><span class="lg lg--tree"></span>The Underfern</li>
           </ul>
           <p class="map__hint"><span class="map__hint-keys"><kbd class="kbd">M</kbd> or <kbd class="kbd">Esc</kbd> to close</span><span class="map__hint-touch">Tap anywhere to close</span></p>
         </aside>
@@ -323,6 +324,7 @@ export class MapView {
     const PAPER = "rgba(244, 238, 222, 0.95)";
     const BONE = "rgba(236, 226, 200, 0.98)";
     const STONE = "rgba(92, 88, 84, 0.95)";
+    const FERN = "rgba(74, 112, 58, 0.98)";
     ctx.save();
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
@@ -343,6 +345,16 @@ export class MapView {
           shape.quadraticCurveTo(x + r * 0.35, -r * 0.55, x - r * 0.05, -r * 0.95);
           shape.moveTo(x, 0);
           shape.quadraticCurveTo(x + r * 0.35, r * 0.55, x - r * 0.05, r * 0.95);
+        }
+      } else if (s.kind === "underfern") {
+        // A tree fern: a trunk, and fronds arching out of its crown.
+        const R = r * 1.55;
+        const cy0 = -R * 0.3;
+        shape.moveTo(0, R * 0.95);
+        shape.lineTo(0, cy0);
+        for (const [tx, ty] of [[-1, 0.2], [-0.62, -0.72], [0, -1], [0.62, -0.72], [1, 0.2]]) {
+          shape.moveTo(0, cy0);
+          shape.quadraticCurveTo(tx * R * 0.55, cy0 + (Math.min(ty, -0.2) - 0.45) * R * 0.6, tx * R, ty * R);
         }
       } else if (s.kind === "arch") {
         shape.moveTo(-r, r * 0.7);
@@ -373,15 +385,16 @@ export class MapView {
       ctx.strokeStyle = INK;
       ctx.lineWidth = (s.fossil ? 2.8 : 2.4) * u;
       ctx.stroke(shape);
-      ctx.strokeStyle = s.fossil ? BONE : STONE;
+      ctx.strokeStyle = s.fossil ? BONE : s.kind === "underfern" ? FERN : STONE;
       ctx.lineWidth = (s.fossil ? 1.3 : 1.2) * u;
       ctx.stroke(shape);
       ctx.restore();
-      // Its name, beside it.
-      ctx.font = `italic ${Math.round(9.5 * u)}px "Fraunces", Georgia, serif`;
+      // Its name, beside it (the Underfern's a size larger).
+      const big = s.kind === "underfern";
+      ctx.font = `italic ${big ? "600 " : ""}${Math.round((big ? 11.5 : 9.5) * u)}px "Fraunces", Georgia, serif`;
       ctx.textBaseline = "middle";
       const label = s.label;
-      const lx = cx + r * 1.5;
+      const lx = cx + r * (big ? 2 : 1.5);
       ctx.lineWidth = 3 * u;
       ctx.strokeStyle = PAPER;
       ctx.strokeText(label, lx, cy);

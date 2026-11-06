@@ -4,6 +4,17 @@
 /** @type {{ v: string, date: string, title: string, notes: string[] }[]} */
 export const CHANGELOG = [
   {
+    v: "0.13",
+    date: "2026-11-06",
+    title: "The Underfern",
+    notes: [
+      "The island's namesake has grown: one colossal tree fern, some 100 m tall, in a forest valley near the island's heart.",
+      "Buttress roots arch over the ground — some high enough to walk beneath — and a crown of fronds 55–70 m long nods in the wind, with fiddleheads still curled at the top.",
+      "Sunlight glows green-gold through the fronds; after dark their veins and the lichen on its bark glow blue-green, and motes drift up around it.",
+      "It's on the map, and you'll know when you've found it.",
+    ],
+  },
+  {
     v: "0.12",
     date: "2026-11-06",
     title: "Made for iPhone",

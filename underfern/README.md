@@ -183,6 +183,13 @@ anything alive on it:
   half-buried skull and a buried neck arching out of the grass;
 - a natural stone arch, sea stacks standing in the shallows and a basalt causeway.
 
+And at the island's heart stands **the Underfern** itself:
+- one colossal tree fern some 100 m tall, in a forest valley;
+- buttress roots arching over the ground, a few high enough to walk beneath;
+- fronds 55–70 m long nodding in the wind, with fiddleheads still curled at the top;
+- sunlight glows through the fronds by day. At night their veins and the lichen on
+  the bark glow blue-green, and motes drift up around it.
+
 Creatures walk around the landmarks, and nothing spawns inside one.
 
 There are **caves** to find: a great cavern with a skylight, a tunnel with a mouth at
@@ -363,6 +370,7 @@ Plain ES modules under `src/`, loaded by `index.html` through an import map:
   - `look.js`: the painterly lighting, mist, haze and grade shared by every
     material
   - `landmarks.js`: the fossils and stone wonders
+  - `underfern.js`: the Underfern, the island's one giant tree fern
   - `atmosphere.js`: fireflies, light shafts, peak wisps and cave fungi
 - `creatures/`:
   - species data and the procedural skinned dinosaur models

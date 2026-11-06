@@ -171,7 +171,7 @@ function seaSpot(T, x, z, r) {
 const V3 = THREE.Vector3;
 
 /** Accumulates positions, colours and a burial term (0 at the ground … 1 above ~2.5 m), and triangles. */
-class Geo {
+export class Geo {
   constructor() {
     this.p = [];
     this.c = [];
@@ -209,7 +209,7 @@ function hash3(ix, iy, iz, s) {
 }
 
 /** Smooth 3D value noise in [-1, 1] (build time only). */
-function noise3(x, y, z, s) {
+export function noise3(x, y, z, s) {
   const ix = Math.floor(x);
   const iy = Math.floor(y);
   const iz = Math.floor(z);
@@ -228,14 +228,14 @@ function noise3(x, y, z, s) {
 }
 
 /** Two octaves of noise3 — craggy stone, knobbly bone. */
-const crag = (p, f, s) => noise3(p.x * f, p.y * f, p.z * f, s) * 0.65 + noise3(p.x * f * 2.7, p.y * f * 2.7, p.z * f * 2.7, s + 7) * 0.35;
+export const crag = (p, f, s) => noise3(p.x * f, p.y * f, p.z * f, s) * 0.65 + noise3(p.x * f * 2.7, p.y * f * 2.7, p.z * f * 2.7, s + 7) * 0.35;
 
 /**
  * Lofted tube through `pts` with per-point radii (parallel-transport frames,
  * so curves don't twist). `o.bump(p, s, a)` → relative radius change, `o.ex`
  * stretches the section along the binormal, `o.caps` closes the ends.
  */
-function tube(g, pts, radii, sides, col, o = {}) {
+export function tube(g, pts, radii, sides, col, o = {}) {
   const n = pts.length;
   const T = [];
   const N = [];
@@ -812,6 +812,8 @@ export class Landmarks {
     this._bone = makeMaterial(false);
     this._stone = makeMaterial(true);
     this.meshes = [];
+    /** The Underfern, once added (addTree), or null. */
+    this.tree = null;
     let tris = 0;
     for (const s of this.sites) {
       const rng = makeRng(s.seed);
@@ -840,11 +842,31 @@ export class Landmarks {
   }
 
   /**
+   * Take in the Underfern (world/underfern.js): its site joins the others (the
+   * map, the vegetation's clearings, the spawn keep-out), its colliders too.
+   * @param {import("./underfern.js").UnderfernTree} tree
+   */
+  addTree(tree) {
+    this.tree = tree;
+    const s = tree.site;
+    s.id = this.sites.length;
+    s.colliders = tree.colliders;
+    this.sites.push(s);
+    this.colliders.push(...tree.colliders);
+    this.group.add(tree.group);
+    this.terrain.addKeepOut?.(s.x, s.z, s.r);
+    this.stats.sites = this.sites.length;
+    this.stats.triangles += tree.triangles;
+  }
+
+  /**
    * Hide sites lost in the haze (cheaper than drawing fog-coloured bones).
    * @param {THREE.Camera} camera
    * @param {number} fogFar metres
+   * @param {object} [sky] the Sky (the Underfern glows by night)
    */
-  update(camera, fogFar = Infinity) {
+  update(camera, fogFar = Infinity, sky = null) {
+    this.tree?.update(camera, fogFar, sky);
     if (!camera) return;
     const p = camera.position;
     for (let i = 0; i < this.meshes.length; i++) {
@@ -861,6 +883,7 @@ export class Landmarks {
   }
 
   dispose() {
+    this.tree?.dispose();
     for (const m of this.meshes) m.geometry.dispose();
     this._bone.dispose();
     this._stone.dispose();

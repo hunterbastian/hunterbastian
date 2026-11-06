@@ -16,6 +16,7 @@ import { SPECIES, PLAYABLE, getSpecies, growthScale, growthStage } from "../src/
 import { Wind } from "../src/world/wind.js";
 import { World } from "../src/world/world.js";
 import { planLandmarks, LANDMARK_KINDS } from "../src/world/landmarks.js";
+import { planUnderfern, buildUnderfern } from "../src/world/underfern.js";
 import { migrateSettings } from "../src/core/migrate.js";
 import { DynamicResolution } from "../src/core/dynres.js";
 import { weatherForDay, WEATHER_KINDS } from "../src/world/sky.js";
@@ -845,6 +846,41 @@ test("landmarks: fossils and stone wonders on valid ground, clear of caves, lake
   // Another island, other places.
   const other = planLandmarks(getTerrain(), WORLD.seed + 7);
   assert(other.some((o, i) => !sites[i] || Math.hypot(o.x - sites[i].x, o.z - sites[i].z) > 1), "another seed moves them");
+});
+
+test("the Underfern: one giant tree fern on gentle forest ground near the island's heart, clear of everything; same per seed", () => {
+  const t = getHiTerrain();
+  const others = planLandmarks(t, WORLD.seed);
+  const site = planUnderfern(t, WORLD.seed, others);
+  assert(site, "the island should have its Underfern");
+  assert.equal(JSON.stringify(planUnderfern(t, WORLD.seed, others)), JSON.stringify(site), "same seed and terrain, same place:");
+  const at = `the Underfern at ${site.x.toFixed(0)}, ${site.z.toFixed(0)}`;
+  assert(site.kind === "underfern" && site.label === "The Underfern", "named for the game");
+  assert(["forest", "plains"].includes(t.biomeAt(site.x, site.z)), `${at}: in the forest (or its edge), got ${t.biomeAt(site.x, site.z)}`);
+  for (let k = 0; k < 16; k++) {
+    const a = (k / 16) * Math.PI * 2;
+    for (const d of [0, site.r * 0.5, site.r]) {
+      const x = site.x + Math.cos(a) * d;
+      const z = site.z + Math.sin(a) * d;
+      assert(t.heightAt(x, z) > t.seaLevel + 1, `${at}: its roots are on dry ground`);
+      assert(!t.nearCave(x, z), `${at}: clear of the caves`);
+      assert(t.biomeAt(x, z) !== "rock", `${at}: not on bare rock`);
+    }
+  }
+  assert.equal(t.nearestFreshWater(site.x, site.z, site.r + 10), null, `${at}: no lake or river among its roots:`);
+  for (const p of [...t.passes, ...t.lookouts]) assert(Math.hypot(p.x - site.x, p.z - site.z) > site.r + 30, `${at}: clear of the passes and lookouts`);
+  for (const o of others) assert(Math.hypot(o.x - site.x, o.z - site.z) >= 150, `${at}: spaced from the ${o.kind}`);
+
+  const full = buildUnderfern(makeRng(site.seed), 1);
+  const low = buildUnderfern(makeRng(site.seed), 0.5);
+  const tris = (b) => (b.bark.index.count + b.fronds.index.count) / 3;
+  assert(tris(full) < 30000 && tris(low) < tris(full) * 0.7, `triangle budget: ${tris(full)} full, ${tris(low)} low`);
+  assert(full.top.y > 75 && full.top.y < 90, `the trunk stands ~80 m (top at ${full.top.y.toFixed(1)} m)`);
+  for (const name of ["aUv", "aSway", "aPhase", "aGlow"]) assert(full.fronds.attributes[name], `fronds carry ${name}`);
+  assert(full.cols.length > 17, `the trunk and the roots that touch the ground collide (${full.cols.length} circles)`);
+  for (const c of full.cols) assert(c.r <= 4.5 && Math.hypot(c.x, c.z) < site.r + 6, `collider within the footprint, r ≤ 4.5 (got r ${c.r} at ${Math.hypot(c.x, c.z).toFixed(1)} m)`);
+  const crown = full.fronds.boundingBox;
+  assert(crown.max.y > 95 && Math.max(crown.max.x - crown.min.x, crown.max.z - crown.min.z) > 70, `the crown spreads wide above the trunk (top ${crown.max.y.toFixed(0)} m, ${(crown.max.x - crown.min.x).toFixed(0)} × ${(crown.max.z - crown.min.z).toFixed(0)} m)`);
 });
 
 /* --- creatures/species.js ------------------------------------------------- */
