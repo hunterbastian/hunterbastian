@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1e3a5f"/>
+      <stop offset="55%" stop-color="#0b1220"/>
+      <stop offset="100%" stop-color="#081018"/>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="6" fill="url(#sky)"/>
+  <circle cx="23.5" cy="8" r="3.2" fill="#ffd27a"/>
+  <circle cx="8" cy="7" r="0.7" fill="#f3f6fb" opacity="0.8"/>
+  <circle cx="13" cy="5.5" r="0.5" fill="#f3f6fb" opacity="0.7"/>
+  <circle cx="18" cy="9" r="0.45" fill="#f3f6fb" opacity="0.65"/>
+  <polygon points="7,24 11,12 15,24" fill="#2f6b45"/>
+  <polygon points="8.5,24 11,15.5 13.5,24" fill="#3d8a58"/>
+  <rect x="10.2" y="24" width="1.6" height="2.2" fill="#3a2a1c"/>
+  <polygon points="14,25 19,9 24,25" fill="#245c38"/>
+  <polygon points="16,25 19,13 22,25" fill="#34804c"/>
+  <rect x="18.1" y="25" width="1.8" height="2.4" fill="#3a2a1c"/>
+  <polygon points="21,26 25.5,16 30,26" fill="#2a6840"/>
+  <polygon points="22.4,26 25.5,18.5 28.6,26" fill="#3a8752"/>
+  <rect x="24.7" y="26" width="1.6" height="2" fill="#3a2a1c"/>
+  <ellipse cx="16" cy="29" rx="12" ry="2.2" fill="#1a3324" opacity="0.85"/>
+</svg>
