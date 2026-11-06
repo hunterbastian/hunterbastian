@@ -4,6 +4,17 @@
 /** @type {{ v: string, date: string, title: string, notes: string[] }[]} */
 export const CHANGELOG = [
   {
+    v: "0.15",
+    date: "2026-11-06",
+    title: "The golden Underfern",
+    notes: [
+      "The Underfern is now an Erdtree of a fern: some 200 m to the top of its crown, seen from every shore.",
+      "Its trunk is braided from twisting trunks, with golden light showing through the gaps and running up its bark in veins.",
+      "Golden fronds 90–110 m long glow softly by day and blaze at night, inside a halo of light.",
+      "Golden leaves drift down from the crown, and the haze barely dims it.",
+    ],
+  },
+  {
     v: "0.14",
     date: "2026-11-06",
     title: "Retro SD, retuned",

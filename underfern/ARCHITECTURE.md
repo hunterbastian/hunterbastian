@@ -543,43 +543,50 @@ export class UnderfernTree {
 }
 ```
 
-**Placement.** The island's one giant tree fern sits on the `"underfern-tree"` stream.
+**Placement.** The island's one giant tree fern sits on the `"underfern-tree"` stream (footprint r 44).
 It is planned after the six landmarks, so they keep their places. The spot is the
 best-scoring candidate (distance to the island's land centroid, plus seeded jitter)
 that meets all of these:
-- forest at its centre, dry and gentle under its 32 m footprint (9 m of rise at most);
+- forest at its centre, dry and gentle under its 44 m footprint (12 m of rise at most);
 - no rock or water under the footprint;
-- clear of caves, fresh water, passes, trails and lookouts, and ≥ 150 m from any
+- clear of caves, fresh water, passes, trails and lookouts, and ≥ 160 m from any
   landmark;
-- no hillside within 45–60 m rising more than 30 m above it, so the crown has room.
+- no hillside within 65–90 m rising more than 55 m above it, so the crown has room.
 
 Plains are allowed if no forest spot qualifies. `World` builds it in the landmarks
 step and hands it to `Landmarks.addTree`.
 
-**Geometry.**
-- *Trunk:* about 80 m tall, a lofted, leaning tube. Its foot flares, it carries
-  fibrous ridges, and the stubs of old fronds knob it higher up.
-- *Roots:* 9 buttress roots (6 on low), as Bezier tubes into the ground; ~40% of
-  them arch 7–11 m high.
-- *Crown:* 28 fronds 55–70 m long (18 on low).
+**Geometry** (golden, after Elden Ring's Erdtree).
+- *Trunk:* about 140 m tall and leaning. It is 7 strands (5 on low) braided round a
+  glowing core: each strand is a lofted tube on a helix, 1.3–1.8 half-turns up the
+  trunk, swelling and thinning so the gaps open onto the core's light. The foot
+  flares to about 22 m.
+- *Roots:* 11 buttress roots (7 on low), as Bezier tubes into the ground; ~40% of
+  them arch 9–15 m high.
+- *Crown:* 28 fronds 90–110 m long (18 on low).
   - Each is a rachis tube plus pinnae: three-segment quads whose serrated outline is
     cut in the shader, from `aUv`.
   - 2–3 fiddleheads, as logarithmic-spiral tubes.
-- *Budget:* about 21k triangles on high.
+- *Budget:* about 26k triangles on high.
 
-**Colliders.** A centre circle and rings of 6 and 10 fill the trunk's foot. Circles
+**Colliders.** A centre circle and rings of 6, 11 and 16 fill the trunk's foot. Circles
 also sit wherever a root runs within 3.2 m of the ground; the high arches stay open.
 
 **Shading.**
-- *Bark* (`"underfern-tree-bark"`): world-space fibres, moss on whatever faces up,
-  and lichen spots that glow at night.
-- *Fronds* (`"underfern-tree-fronds"`, double-sided):
+- *Bark* (`"underfern-tree-bark-gold"`): pale ash-gold, with world-space fibres,
+  moss on whatever faces up, and golden veins glowing up the strands.
+- *Fronds* (`"underfern-tree-fronds-gold"`, double-sided; the core shares it):
   - They sway from `aSway`/`aPhase`, using `LOOK.uLookScreen.w` (time) and
     `LOOK.uLookWind`.
-  - At night the midribs, stems and fiddleheads glow.
+  - They glow gold from their own colour, the midribs, stems and core more. At
+    `uTreeGlow` 0.35 by day it is soft; at 1 at night it blazes.
   - By day there is a backlit sun term: green-gold when you look up toward the sun.
-- *Motes:* ~220 additive points drifting up around the trunk; warm by day, cool and
-  bright at night.
+- *Halo:* a camera-facing additive disc of gold set back behind the crown, faint by
+  day and brighter at night.
+- *Leaves:* ~320 additive golden points falling and fluttering from the crown.
+- *Haze:* both materials scale the haze depth by `HAZE` (0.35), so the haze takes
+  the tree a third as fast as anything else. It is never hidden, so its crown stands
+  over the island from every shore.
 
 `main.js` shows a one-time "The Underfern" note each life, the first time the
 player comes within its footprint + 70 m. The map draws it with a fern glyph and a

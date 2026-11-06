@@ -585,7 +585,7 @@ function step(dt) {
       const tree = world.landmarks?.tree?.site;
       if (tree && p && !game.sawTree && Math.hypot(p.position.x - tree.x, p.position.z - tree.z) < tree.r + 70) {
         game.sawTree = true;
-        hud.toast("The Underfern — older than every bone on this island", "good", "leaf");
+        hud.toast("The Underfern — its light reaches every shore of the island", "good", "leaf");
       }
       game.survived += dt;
       game.saveTimer += dt;

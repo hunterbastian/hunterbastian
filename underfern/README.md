@@ -183,12 +183,15 @@ anything alive on it:
   half-buried skull and a buried neck arching out of the grass;
 - a natural stone arch, sea stacks standing in the shallows and a basalt causeway.
 
-And at the island's heart stands **the Underfern** itself:
-- one colossal tree fern some 100 m tall, in a forest valley;
+And at the island's heart stands **the Underfern** itself, a golden tree fern in the
+spirit of Elden Ring's Erdtree, seen from every shore:
+- some 200 m to the top of its crown, in a forest valley;
+- its trunk braided from twisting trunks, golden light showing through the gaps
+  and running up its bark in veins;
 - buttress roots arching over the ground, a few high enough to walk beneath;
-- fronds 55–70 m long nodding in the wind, with fiddleheads still curled at the top;
-- sunlight glows through the fronds by day. At night their veins and the lichen on
-  the bark glow blue-green, and motes drift up around it.
+- golden fronds 90–110 m long nodding in the wind, with fiddleheads curled at the
+  top. They glow softly by day and blaze at night, inside a halo of light;
+- golden leaves drifting down from the crown. The haze barely dims it.
 
 Creatures walk around the landmarks, and nothing spawns inside one.
 

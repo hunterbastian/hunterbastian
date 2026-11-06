@@ -848,7 +848,7 @@ test("landmarks: fossils and stone wonders on valid ground, clear of caves, lake
   assert(other.some((o, i) => !sites[i] || Math.hypot(o.x - sites[i].x, o.z - sites[i].z) > 1), "another seed moves them");
 });
 
-test("the Underfern: one giant tree fern on gentle forest ground near the island's heart, clear of everything; same per seed", () => {
+test("the Underfern: one giant golden tree fern on gentle forest ground near the island's heart, clear of everything; same per seed", () => {
   const t = getHiTerrain();
   const others = planLandmarks(t, WORLD.seed);
   const site = planUnderfern(t, WORLD.seed, others);
@@ -875,12 +875,12 @@ test("the Underfern: one giant tree fern on gentle forest ground near the island
   const low = buildUnderfern(makeRng(site.seed), 0.5);
   const tris = (b) => (b.bark.index.count + b.fronds.index.count) / 3;
   assert(tris(full) < 30000 && tris(low) < tris(full) * 0.7, `triangle budget: ${tris(full)} full, ${tris(low)} low`);
-  assert(full.top.y > 75 && full.top.y < 90, `the trunk stands ~80 m (top at ${full.top.y.toFixed(1)} m)`);
+  assert(full.top.y > 130 && full.top.y < 150, `the trunk stands ~140 m (top at ${full.top.y.toFixed(1)} m)`);
   for (const name of ["aUv", "aSway", "aPhase", "aGlow"]) assert(full.fronds.attributes[name], `fronds carry ${name}`);
   assert(full.cols.length > 17, `the trunk and the roots that touch the ground collide (${full.cols.length} circles)`);
   for (const c of full.cols) assert(c.r <= 4.5 && Math.hypot(c.x, c.z) < site.r + 6, `collider within the footprint, r ≤ 4.5 (got r ${c.r} at ${Math.hypot(c.x, c.z).toFixed(1)} m)`);
   const crown = full.fronds.boundingBox;
-  assert(crown.max.y > 95 && Math.max(crown.max.x - crown.min.x, crown.max.z - crown.min.z) > 70, `the crown spreads wide above the trunk (top ${crown.max.y.toFixed(0)} m, ${(crown.max.x - crown.min.x).toFixed(0)} × ${(crown.max.z - crown.min.z).toFixed(0)} m)`);
+  assert(crown.max.y > 160 && Math.max(crown.max.x - crown.min.x, crown.max.z - crown.min.z) > 150, `the crown spreads wide above the trunk (top ${crown.max.y.toFixed(0)} m, ${(crown.max.x - crown.min.x).toFixed(0)} × ${(crown.max.z - crown.min.z).toFixed(0)} m)`);
 });
 
 /* --- creatures/species.js ------------------------------------------------- */
