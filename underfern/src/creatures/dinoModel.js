@@ -2586,7 +2586,7 @@ const A_EAT = 4;
 const A_DRINK = 5;
 const A_REST = 6;
 const LEG_STRIDE = 15; // floats per leg in a pose: ground ball (3), meta dir (3), toe pitch, limp ball (3), limp meta (3), -, limp weight
-const DEFAULT_ANIM = Object.freeze({ speed: 0, crouch: 0, swim: 0, turn: 0, action: null, actionT: 0, lookYaw: 0, hurt: 0 });
+const DEFAULT_ANIM = Object.freeze({ speed: 0, crouch: 0, swim: 0, turn: 0, action: null, actionT: 0, lookYaw: 0, hurt: 0, heavy: 0, charge: 0, stagger: 0, brace: 0 });
 
 const _e = new THREE.Euler(0, 0, 0, "YXZ");
 const _va = new V3();
@@ -2895,6 +2895,11 @@ export class DinoModel {
     this._swim = damp(this._swim, clamp(a.swim || 0, 0, 1), 3, dt);
     this._turn = damp(this._turn, a.turn || 0, 5, dt);
     this._look = damp(this._look, clamp(a.lookYaw || 0, -1.2, 1.2), 7, dt);
+    // Combat: how hard the swing is, the wind-up held, reeling, braced.
+    this._heavy = damp(this._heavy || 0, clamp(a.heavy || 0, 0, 1), 12, dt);
+    this._charge = damp(this._charge || 0, clamp(a.charge || 0, 0, 1), 10, dt);
+    this._stagger = damp(this._stagger || 0, clamp(a.stagger || 0, 0, 1), 10, dt);
+    this._brace = damp(this._brace || 0, clamp(a.brace || 0, 0, 1), 10, dt);
     const fr = (this._speed * this._speed) / (9.81 * legW);
     this._runRaw = smoothstep(0.4, 2.2, fr);
     this._run = this._runRaw * this._gaitAmp;
@@ -3252,8 +3257,35 @@ export class DinoModel {
       arms(-env * 0.3, 0);
     }
 
+    /* Heavies swing bigger; a held charge sinks and trembles; reeling droops and sways; a brace digs in. */
+    const big = 1 + 0.55 * this._heavy;
+    const ch = this._charge;
+    if (ch > 0.001) {
+      const quiver = 0.012 * ch * Math.sin(time * 38);
+      P[1] -= ch * H * 0.05;
+      P[iH] += quiver;
+      P[iC] -= quiver * 0.6;
+      tail(0, -ch * 0.02, 0, Math.min(3, nT));
+    }
+    const sg = this._stagger;
+    if (sg > 0.001) {
+      neck(0, (sg * 0.28) / Math.max(1, nN * 0.6));
+      P[iHead] += sg * 0.25;
+      P[iJaw] += sg * 0.2;
+      P[iH + 2] += sg * 0.08 * Math.sin(time * 9);
+      P[1] -= sg * H * 0.06;
+      tail(0, sg * 0.04);
+      arms(sg * 0.2, sg * 0.2);
+    }
+    const br = this._brace;
+    if (br > 0.001) {
+      neck(0, (br * 0.12) / Math.max(1, nN * 0.6));
+      P[iHead] += br * 0.08;
+      tail(0, -br * 0.04, 0, nT, 0.6);
+    }
+
     /* Bite: wind up with jaws open, lunge, snap shut. */
-    const wB = w[A_BITE];
+    const wB = w[A_BITE] * big;
     if (wB > 0.001) {
       const tb = T[A_BITE];
       const wind = smoothstep(0, 0.25, tb) * (1 - smoothstep(0.25, 0.42, tb));
@@ -3268,7 +3300,7 @@ export class DinoModel {
     }
 
     /* Tail swipe: twist the hips away, then whip the tail across. */
-    const wT = w[A_TAIL];
+    const wT = w[A_TAIL] * big;
     if (wT > 0.001) {
       const tt = T[A_TAIL];
       const wind = smoothstep(0, 0.3, tt) * (1 - smoothstep(0.3, 0.5, tt));
@@ -3285,7 +3317,7 @@ export class DinoModel {
     }
 
     /* Kick: bipeds strike with a hind foot; quadrupeds rear and stamp with the forelimbs. */
-    const wK = w[A_KICK];
+    const wK = w[A_KICK] * (bp.quad ? 1 : Math.min(1.3, big)); // a quadruped's rear blends limb weights: keep ≤ 1
     if (wK > 0.001) {
       const tk = T[A_KICK];
       if (!bp.quad) {

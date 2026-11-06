@@ -35,12 +35,50 @@ const LEG_HEAL_TIME = 70; // seconds a broken leg takes to heal (resting heals �
 const QUADRUPEDS = new Set(["stegosaurus", "diplodocus", "brontosaurus", "camptosaurus"]); // fallback when body.plan is absent
 const ATTACK_TYPES = { bite: true, tail: true, kick: true };
 
-// One-shot attack timing: total duration and the moment (0..1) the blow lands.
+// One-shot attack timing: total duration, the moment (0..1) the blow lands,
+// the lunge, and the moment the wind-up is fully cocked (a charged heavy is
+// held there, then released straight into the strike).
 const ATTACK_TIMING = {
-  bite: { dur: 0.55, strike: 0.42, lunge: 1.6 },
-  kick: { dur: 0.6, strike: 0.45, lunge: 0.9 },
-  tail: { dur: 0.85, strike: 0.5, lunge: 0 },
+  bite: { dur: 0.55, strike: 0.42, lunge: 1.6, cocked: 0.24 },
+  kick: { dur: 0.6, strike: 0.45, lunge: 0.9, cocked: 0.3 },
+  tail: { dur: 0.85, strike: 0.5, lunge: 0, cocked: 0.3 },
 };
+
+/* Combat — the Elden Ring-style layer on top of the attacks:
+ *   heavy   hold to charge (wind-up held, slow to move), release to strike:
+ *           harder, more poise damage, a longer lunge, a longer recovery.
+ *   dodge   up to DODGE_MAX_MASS: a quick hop with invulnerable frames.
+ *   brace   heavier animals plant themselves instead: hits do less and cost
+ *           stamina, a brace started just before a blow parries it (the
+ *           attacker staggers), and a guard run out of stamina breaks.
+ *   poise   every hit wears it down; at 0 the animal staggers, open to a
+ *           critical bite. It comes back after a short respite.
+ *   buildup bleed and crush meters fill with hits and burst when full: a
+ *           haemorrhage, or a broken leg.
+ */
+const CHARGE_TIME = 0.9; // s to a full charge (× heft)
+const CHARGE_HOLD = 0.6; // s a full charge can be held before it lets go on its own
+const HEAVY_STAMINA = 2.1; // × attackStamina
+const HEAVY_DUR = 1.3; // × attack duration (a longer recovery)
+const DODGE_MAX_MASS = 2500; // kg: lighter animals dodge, heavier ones brace
+const DODGE_DUR = 0.42; // s
+const DODGE_IFRAMES = [0.04, 0.62]; // share of the dodge that can't be hit
+const DODGE_STAMINA = 16;
+const DODGE_COOLDOWN = 0.2;
+const BRACE_DAMAGE = 0.45; // share of damage that gets through a brace
+const BRACE_POISE = 0.35; // … and of poise damage
+const BRACE_STAMINA = 0.35; // stamina per point of raw damage blocked
+const PARRY_WINDOW = 0.22; // s: a brace this fresh parries the blow
+const POISE_DELAY = 2.5; // s after a hit before poise comes back
+const POISE_REGEN = 0.3; // × poiseMax per second
+const STAGGER_TIME = 1.25; // s (× heft)
+const STAGGER_VULN = 1.25; // damage taken while staggered
+const CRIT_LIGHT = 2.5; // critical bite on a staggered animal
+const CRIT_HEAVY = 3.2;
+const BUILDUP_DELAY = 3; // s before the meters drain
+const BUILDUP_DECAY = 10; // per second
+const HAEMORRHAGE = 0.1; // × maxHealth when the bleed meter bursts
+const CRUSH_LEG = 0.6; // × LEG_HEAL_TIME when the crush meter bursts
 
 // Noise by gait — the AI hearing sense (ai.js _detect) reads creature.noise.
 const GAIT_NOISE = { idle: 0.05, walk: 0.25, trot: 0.5, sprint: 1, swim: 0.3 };
@@ -76,6 +114,7 @@ const _near = [];
 const _targets = [];
 const _colliders = [];
 const _spheres = [];
+const _hit = { dealt: 0, dodged: false, parried: false, braced: false, staggered: false, critical: false };
 
 let nextId = 1;
 
@@ -155,6 +194,14 @@ export class Creature {
       sprint: false,
       crouch: false,
       bite: false,
+      /** Held: charge a heavy attack; letting go strikes. */
+      heavy: false,
+      /** Edge: let a charge go without striking. */
+      cancelHeavy: false,
+      /** Edge: dodge (lighter animals) — toward the move direction, or back. */
+      dodge: false,
+      /** Held: brace (heavier animals). */
+      brace: false,
       eat: false,
       drink: false,
       call: false,
@@ -240,6 +287,28 @@ export class Creature {
     this._attackDur = 0.6;
     this._attackStrikeAt = 0.45;
     this._attackStruck = false;
+    // Combat (see the tuning notes above).
+    /** Heaviness of the attack in progress: 0 light … 1 a fully charged heavy. */
+    this.heavy = 0;
+    this._chargeT = -1; // s charging a heavy, < 0 = not charging
+    this._dodgeT = -1; // 0..1 through a dodge, < 0 = not dodging
+    this._dodgeX = 0;
+    this._dodgeZ = 0;
+    this._dodgeSide = 0; // -1 … 1, which way the body rolls
+    this._dodgeCd = 0;
+    /** Braced against blows (heavy animals; see canDodge). */
+    this.bracing = false;
+    this._braceAt = -Infinity; // age when the brace was planted
+    this._braceBlend = 0;
+    this.poise = 1; // set to poiseMax below
+    this._poiseDelay = 0;
+    this._staggerT = 0; // s of stagger left
+    this._staggerBlend = 0;
+    /** Status buildup (0..100): bleed bursts into a haemorrhage, crush into a broken leg. */
+    this.buildup = { bleed: 0, crush: 0 };
+    this._buildupDelay = 0;
+    /** Optional creature the attacks home in on (the player's lock-on target). */
+    this.aimTarget = null;
     this._callT = -1;
     this._noiseSpike = 0;
     this._headroom = 0;
@@ -257,9 +326,10 @@ export class Creature {
     this._modelScale = NaN;
     this._carcass = null; // set when the ecosystem turns this body into a carcass
     this._disposed = false;
-    this._anim = { speed: 0, crouch: 0, swim: 0, turn: 0, action: null, actionT: 0, lookYaw: 0, hurt: 0 };
+    this._anim = { speed: 0, crouch: 0, swim: 0, turn: 0, action: null, actionT: 0, lookYaw: 0, hurt: 0, heavy: 0, charge: 0, stagger: 0, brace: 0 };
 
     this.health = this.maxHealth;
+    this.poise = this.poiseMax;
 
     this.model = createDinoModel(this.species, { seed: this.seed });
     if (this.model && this.model.object) {
@@ -293,6 +363,41 @@ export class Creature {
   /** Max HP — 15 % of the adult value at hatching, 100 % as an adult. */
   get maxHealth() {
     return this.species.health * lerp(0.15, 1, this.growth);
+  }
+
+  /**
+   * Poise: how much punishment it takes before it staggers. From the species
+   * (`poise`), or from its adult mass; juveniles have half.
+   */
+  get poiseMax() {
+    const sp = this.species;
+    const adult = sp.poise ?? 25 + 20 * Math.log2(Math.max(10, sp.mass) / 100);
+    return Math.max(8, adult * lerp(0.5, 1, this.growth));
+  }
+
+  /** Light enough to dodge; heavier animals brace instead. */
+  get canDodge() {
+    return this.mass <= DODGE_MAX_MASS;
+  }
+
+  /** Reeling from a broken guard or poise: can't act, open to a critical bite. */
+  get staggered() {
+    return this._staggerT > 0;
+  }
+
+  /** Charge of a heavy attack being wound up, 0..1, or -1 when not charging. */
+  get charge() {
+    return this._chargeT < 0 ? -1 : clamp(this._chargeT / this._chargeMax(), 0, 1);
+  }
+
+  /** In a dodge's invulnerable frames. */
+  get dodging() {
+    return this._dodgeT >= DODGE_IFRAMES[0] && this._dodgeT <= DODGE_IFRAMES[1];
+  }
+
+  /** True while an attack is wound up, striking or recovering. */
+  get attacking() {
+    return this._attackT >= 0;
   }
 
   /** Collision circle radius (m) around the hips. */
@@ -496,6 +601,29 @@ export class Creature {
     this.callCooldown = Math.max(0, this.callCooldown - dt);
     this._restLock = Math.max(0, this._restLock - dt);
     this._noiseSpike = Math.max(0, this._noiseSpike - dt * 0.8);
+    this._dodgeCd = Math.max(0, this._dodgeCd - dt);
+    // Stagger runs out with poise restored; poise otherwise returns after a respite.
+    if (this._staggerT > 0) {
+      this._staggerT = Math.max(0, this._staggerT - dt);
+      if (this._staggerT === 0) this.poise = this.poiseMax;
+    } else if (this._poiseDelay > 0) this._poiseDelay -= dt;
+    else this.poise = Math.min(this.poiseMax, this.poise + this.poiseMax * POISE_REGEN * dt);
+    this._staggerBlend = damp(this._staggerBlend, this._staggerT > 0 ? 1 : 0, this._staggerT > 0 ? 14 : 4, dt);
+    if (this._buildupDelay > 0) this._buildupDelay -= dt;
+    else {
+      const b = this.buildup;
+      b.bleed = Math.max(0, b.bleed - BUILDUP_DECAY * dt);
+      b.crush = Math.max(0, b.crush - BUILDUP_DECAY * dt);
+    }
+  }
+
+  /** Bigger animals do everything a touch slower (0.8 … 1.3). */
+  _heft() {
+    return clamp(0.85 + Math.log10(Math.max(1, this.mass) / 100) * 0.12, 0.8, 1.3);
+  }
+
+  _chargeMax() {
+    return CHARGE_TIME * this._heft();
   }
 
   /* --- Movement --------------------------------------------------------- */
@@ -513,6 +641,8 @@ export class Creature {
 
     let mx = +intent.moveX || 0;
     let mz = +intent.moveZ || 0;
+    // Reeling or mid-hop: the legs aren't the animal's own.
+    if (this._staggerT > 0 || this._dodgeT >= 0) mx = mz = 0;
     let mag = Math.hypot(mx, mz);
     if (mag > 1) {
       mx /= mag;
@@ -548,6 +678,7 @@ export class Creature {
 
     if (this.stamina <= 0.01) this.exhausted = true;
     else if (this.exhausted && this.stamina >= 15) this.exhausted = false;
+    const charging = this._chargeT >= 0;
     const sprinting =
       !!intent.sprint &&
       moving &&
@@ -555,7 +686,9 @@ export class Creature {
       !this.exhausted &&
       this.legBroken <= 0 &&
       !this.swimming &&
-      !this.airborne;
+      !this.airborne &&
+      !charging &&
+      !this.bracing;
     this._sprinting = sprinting;
     this.crouching = !!intent.crouch && !sprinting && !this.swimming && !this.resting;
     this._crouchBlend = damp(this._crouchBlend, this.crouching ? 1 : 0, 8, dt);
@@ -569,11 +702,21 @@ export class Creature {
       aligned = Math.cos(err);
       let rate = t.turnRate * lerp(1.4, 1, smoothstep(0, 0.6, this.growth)); // juveniles are nimble
       if (sprinting) rate *= 0.6;
+      if (charging || this.bracing) rate *= 0.6;
       if (this.swimming) rate *= 0.75;
       if (this.legBroken > 0) rate *= 0.7;
       rate *= 1 - this._restBlend * 0.9;
       turnTarget = clamp(err * 5, -rate, rate);
     }
+    if (charging && !moving && this.aimTarget && this.aimTarget.alive !== false && this.aimTarget.position) {
+      const ax = this.aimTarget.position.x - pos.x;
+      const az = this.aimTarget.position.z - pos.z;
+      if (ax * ax + az * az > 1e-4) {
+        const want = this._attackKind === "tail" ? yawFromDir(-ax, -az) : yawFromDir(ax, az);
+        turnTarget = clamp(angleDiff(this.heading, want) * 4, -t.turnRate * 0.6, t.turnRate * 0.6);
+      }
+    }
+    if (this._staggerT > 0 || this._dodgeT >= 0) turnTarget = 0;
     this.turnSpeed = damp(this.turnSpeed, turnTarget, 12, dt);
     if (!this.airborne) this.heading = wrapAngle(this.heading + this.turnSpeed * dt);
 
@@ -591,7 +734,8 @@ export class Creature {
       // Facing away from the goal: slow down and turn instead of carving a huge arc.
       target *= clamp((aligned + 0.35) / 1.35, 0.12, 1);
       if (!this.swimming && depth > 0) target *= 1 - 0.45 * clamp(depth / hip, 0, 1); // wading
-      if (attacking) target *= 0.6;
+      if (attacking) target *= this.heavy > 0 ? 0.3 : 0.6;
+      if (charging || this.bracing) target *= 0.3;
       target *= 1 - this._restBlend;
     }
 
@@ -854,9 +998,57 @@ export class Creature {
 
   _actions(dt) {
     const intent = this.intent;
+    // Reeling: nothing but recovering.
+    if (this._staggerT > 0) {
+      intent.bite = intent.dodge = intent.call = intent.cancelHeavy = false;
+      this.bracing = false;
+    }
+    const free = this._staggerT <= 0 && !this.airborne && this._dodgeT < 0;
+
+    // Dodge (lighter animals): cancels a charge, or the recovery after a strike.
+    if (intent.dodge) {
+      intent.dodge = false;
+      const recovering = this._attackT < 0 || (this._attackStruck && this._attackT > this._attackStrikeAt + 0.12);
+      if (free && recovering && this.canDodge && this._dodgeCd <= 0 && this.stamina >= 6 && !this.swimming && this.legBroken <= 0) this._startDodge();
+    }
+    if (this._dodgeT >= 0) {
+      this._dodgeT += dt / (DODGE_DUR * this._heft());
+      if (this._dodgeT >= 1) {
+        this._dodgeT = -1;
+        this._dodgeCd = DODGE_COOLDOWN;
+      }
+    }
+
+    // Brace (heavier animals): held; a fresh brace parries.
+    const brace = !!intent.brace && !this.canDodge && free && this._attackT < 0 && this._chargeT < 0 && !this.swimming && this.stamina > 0;
+    if (brace && !this.bracing) this._braceAt = this.age;
+    this.bracing = brace;
+    if (brace) this._staminaDelay = Math.max(this._staminaDelay, 0.4);
+    this._braceBlend = damp(this._braceBlend, brace ? 1 : 0, brace ? 12 : 6, dt);
+
+    // Heavy: hold to wind up, let go to strike.
+    if (intent.heavy && this._chargeT < 0 && this._attackT < 0 && free && this.biteCooldown <= 0 && this.stamina > 6 && !this.bracing) {
+      this._chargeT = 0;
+      this._callT = -1;
+      this.world.events?.emit("charge", { creature: this });
+    }
+    if (this._chargeT >= 0) {
+      if (!free || intent.cancelHeavy) this._chargeT = -1;
+      else {
+        this._chargeT += dt;
+        this._staminaDelay = Math.max(this._staminaDelay, 0.5);
+        if (!intent.heavy || this._chargeT >= this._chargeMax() + CHARGE_HOLD) {
+          const c = clamp(this._chargeT / this._chargeMax(), 0, 1);
+          this._chargeT = -1;
+          this._startAttack(c);
+        }
+      }
+    }
+    intent.cancelHeavy = false;
+
     if (intent.bite) {
       intent.bite = false;
-      if (this._attackT < 0 && this.biteCooldown <= 0 && this.stamina > 2 && !this.airborne) this._startAttack();
+      if (this._attackT < 0 && this._chargeT < 0 && this.biteCooldown <= 0 && this.stamina > 2 && free && !this.bracing) this._startAttack();
     }
     if (intent.call) {
       intent.call = false;
@@ -868,7 +1060,10 @@ export class Creature {
         this._attackStruck = true;
         this._strike();
       }
-      if (this._attackT >= 1) this._attackT = -1;
+      if (this._attackT >= 1) {
+        this._attackT = -1;
+        this.heavy = 0;
+      }
     }
     if (this._callT >= 0) {
       this._callT += dt / this._t.callDur;
@@ -876,28 +1071,93 @@ export class Creature {
     }
   }
 
-  _startAttack() {
+  /**
+   * Start an attack: a light one, or (charge given, 0..1) a heavy one that
+   * picks up from the cocked wind-up the charge held.
+   * @param {number} [charge] -1 light, else the heavy's charge
+   */
+  _startAttack(charge = -1) {
     const t = this._t;
     const kind = ATTACK_TIMING[this._attackKind] ? this._attackKind : "bite";
     const timing = ATTACK_TIMING[kind];
+    const heavy = charge >= 0;
     // Bigger animals wind up a touch slower; never longer than the cooldown.
-    const heft = clamp(0.85 + Math.log10(Math.max(1, this.mass) / 100) * 0.12, 0.8, 1.3);
+    const heft = this._heft();
     this._attackKind = kind;
-    this._attackDur = Math.min(timing.dur * heft, t.biteCooldown * 0.9 || timing.dur);
+    this._attackDur = Math.min(timing.dur * heft, t.biteCooldown * 0.9 || timing.dur) * (heavy ? HEAVY_DUR : 1);
     this._attackStrikeAt = timing.strike;
-    this._attackT = 0;
+    this._attackT = heavy ? timing.cocked : 0;
     this._attackStruck = false;
+    this.heavy = heavy ? 0.5 + 0.5 * charge : 0;
     this._callT = -1;
-    this.biteCooldown = t.biteCooldown;
-    this.stamina = Math.max(0, this.stamina - t.attackStamina);
+    this.biteCooldown = t.biteCooldown * (heavy ? 1.2 : 1);
+    this.stamina = Math.max(0, this.stamina - t.attackStamina * (heavy ? HEAVY_STAMINA : 1));
     this._staminaDelay = 0.8;
     this._restLock = Math.max(this._restLock, 1);
+    this._aim(heavy ? 0.9 : 0.6);
     // Good swimmers still lunge from the water; everyone else needs footing.
     if (timing.lunge > 0 && (!this.swimming || t.swimAbility >= GOOD_SWIMMER)) {
-      const l = timing.lunge * lerp(0.5, 1, this.scale);
+      const l = timing.lunge * lerp(0.5, 1, this.scale) * (heavy ? lerp(1.4, 2.2, charge) : 1);
       this._kx += Math.sin(this.heading) * l;
       this._kz += Math.cos(this.heading) * l;
     }
+  }
+
+  /** Swing toward the aim target (lock-on) by up to `maxTurn` radians. */
+  _aim(maxTurn) {
+    const a = this.aimTarget;
+    if (!a || a === this || a.alive === false || !a.position) return;
+    const dx = a.position.x - this.position.x;
+    const dz = a.position.z - this.position.z;
+    if (dx * dx + dz * dz > 40 * 40 || dx * dx + dz * dz < 1e-4) return;
+    // Tail swingers aim their tail.
+    const want = this._attackKind === "tail" ? yawFromDir(-dx, -dz) : yawFromDir(dx, dz);
+    const err = angleDiff(this.heading, want);
+    this.heading = wrapAngle(this.heading + clamp(err, -maxTurn, maxTurn));
+  }
+
+  /** Hop toward the move direction (or straight back), invulnerable mid-hop. */
+  _startDodge() {
+    let dx = +this.intent.moveX || 0;
+    let dz = +this.intent.moveZ || 0;
+    let m = Math.hypot(dx, dz);
+    if (m < 0.1) {
+      dx = -Math.sin(this.heading);
+      dz = -Math.cos(this.heading);
+      m = 1;
+    }
+    dx /= m;
+    dz /= m;
+    this._chargeT = -1;
+    this._attackT = -1;
+    this._callT = -1;
+    this.heavy = 0;
+    this._dodgeT = 0;
+    this._dodgeX = dx;
+    this._dodgeZ = dz;
+    // Which way it leans: + when the hop goes to the animal's right.
+    this._dodgeSide = clamp(dx * Math.cos(this.heading) - dz * Math.sin(this.heading), -1, 1);
+    const dist = clamp((2.2 + 0.25 * this.species.length) * lerp(0.6, 1, this.scale), 1.5, 5);
+    // Knockback-style impulse: it decays at 6/s, so v0 = 6 × distance.
+    this._kx += dx * dist * 6;
+    this._kz += dz * dist * 6;
+    this.stamina = Math.max(0, this.stamina - DODGE_STAMINA);
+    this._staminaDelay = 0.7;
+    this.world.events?.emit("dodge", { creature: this });
+  }
+
+  /** Poise or guard broken: reel for a moment, open to a critical bite. */
+  _stagger(by = null) {
+    if (!this.alive || this.invulnerable) return;
+    this._staggerT = STAGGER_TIME * this._heft();
+    this.poise = 0;
+    this._attackT = -1;
+    this._chargeT = -1;
+    this._callT = -1;
+    this.heavy = 0;
+    this.bracing = false;
+    this._restLock = Math.max(this._restLock, REST_LOCK);
+    this.world.events?.emit("stagger", { creature: this, by });
   }
 
   _startCall() {
@@ -952,25 +1212,136 @@ export class Creature {
 
     const t = this._t;
     const growthMul = lerp(0.12, 1, this.growth);
-    let raw = t.bite * growthMul;
+    const heavy = this.heavy;
+    let raw = t.bite * growthMul * (heavy > 0 ? lerp(1.2, 2.1, heavy) : 1);
     let dealt = 0;
+    const res = _hit;
+    res.dealt = 0;
+    res.dodged = res.parried = res.braced = res.staggered = res.critical = false;
     if (best) {
       const victim = best;
       if (victim.swimming || victim.submerged > 0.2) raw *= t.wetBite;
-      dealt = victim.takeDamage(raw, this, kind, t.pierce);
       const armor = clamp(victim.species?.armor ?? 0, 0, 0.9) * (1 - t.pierce);
-      const bleed = t.bleed * growthMul * (1 - armor * 0.5);
-      if (victim.alive && bleed > 0 && typeof victim.bleeding === "number") {
-        const cap = (victim.maxHealth ?? 100) * 0.06; // never an instant bleed-out
-        victim.bleeding = Math.min(cap, victim.bleeding + bleed);
+      // Poise damage grows a little with the size gap; heavies hit poise far harder.
+      const vm = victim.mass ?? 80;
+      const sizeK = clamp(Math.pow(this.mass / Math.max(1, vm), 0.15), 0.6, 1.6);
+      const poiseDmg = raw * (heavy > 0 ? lerp(1.0, 1.5, heavy) : 0.45) * sizeK;
+      const bleedAdd = t.bleed * 8 * growthMul * (heavy > 0 ? 1.6 : 1) * (1 - armor * 0.5);
+      const vPoise = victim.poiseMax ?? 60;
+      const crushAdd = ((100 * poiseDmg) / (vPoise * 3)) * (kind === "bite" ? 0.6 : 1);
+      if (typeof victim.receiveHit === "function") {
+        victim.receiveHit(this, raw, kind, t.pierce, heavy, poiseDmg, bleedAdd, crushAdd, res);
+      } else {
+        res.dealt = victim.takeDamage(raw, this, kind, t.pierce);
       }
-      this._knockback(victim, kind);
-      // Spiky armour ("thorns"): biting it hurts the biter.
-      const thorns = victim._t ? victim._t.thorns : victim.species?.thorns ?? 0;
-      if (kind === "bite" && thorns > 0 && this.alive) this.takeDamage(raw * thorns, victim, "tail");
+      dealt = res.dealt;
+      if (!res.dodged && !res.parried) {
+        // The slow bleed from each wound (the buildup's burst is the big one).
+        const bleed = t.bleed * growthMul * (1 - armor * 0.5) * 0.5 * (res.braced ? 0.4 : 1);
+        if (victim.alive && bleed > 0 && typeof victim.bleeding === "number") {
+          const cap = (victim.maxHealth ?? 100) * 0.06; // never an instant bleed-out
+          victim.bleeding = Math.min(cap, victim.bleeding + bleed);
+        }
+        this._knockback(victim, kind, (heavy > 0 ? 1.6 : 1) * (res.braced ? 0.35 : 1));
+        // Spiky armour ("thorns"): biting it hurts the biter.
+        const thorns = victim._t ? victim._t.thorns : victim.species?.thorns ?? 0;
+        if (kind === "bite" && thorns > 0 && this.alive) this.takeDamage(raw * thorns, victim, "tail");
+      }
     }
     this._noiseSpike = Math.max(this._noiseSpike, 0.8);
-    this.world.events?.emit("attack", { attacker: this, target: best, damage: dealt, kind });
+    this.world.events?.emit("attack", {
+      attacker: this,
+      target: best,
+      damage: dealt,
+      kind,
+      heavy,
+      dodged: res.dodged,
+      parried: res.parried,
+      braced: res.braced,
+      staggered: res.staggered,
+      critical: res.critical,
+    });
+  }
+
+  /**
+   * Take a blow from another animal's attack: dodges, braces, parries, poise,
+   * criticals and buildup all resolve here (plain damage goes through
+   * takeDamage). Fills `out` and returns it.
+   * @param {Creature} by
+   * @param {number} raw damage before armour
+   * @param {string} kind "bite" | "kick" | "tail"
+   * @param {number} pierce share of armour ignored
+   * @param {number} heavy 0 light … 1 a full heavy
+   * @param {number} poiseDmg
+   * @param {number} bleedAdd bleed buildup
+   * @param {number} crushAdd crush buildup
+   * @param {object} [out]
+   */
+  receiveHit(by, raw, kind, pierce, heavy, poiseDmg, bleedAdd, crushAdd, out = {}) {
+    out.dealt = 0;
+    out.dodged = out.parried = out.braced = out.staggered = out.critical = false;
+    if (!this.alive || this.invulnerable) return out;
+    if (this.dodging) {
+      out.dodged = true;
+      this.world.events?.emit("dodged", { creature: this, by });
+      return out;
+    }
+    let mul = 1;
+    let poiseMul = 1;
+    let buildMul = 1;
+    if (this._staggerT > 0) {
+      // A critical bite on a reeling animal: it ends the stagger.
+      mul = heavy > 0 ? CRIT_HEAVY : CRIT_LIGHT;
+      out.critical = true;
+    } else if (this.bracing) {
+      if (this.age - this._braceAt <= PARRY_WINDOW) {
+        out.parried = true;
+        if (by && by !== this && typeof by._stagger === "function") by._stagger(this);
+        this.world.events?.emit("parry", { creature: this, by });
+        return out;
+      }
+      out.braced = true;
+      mul = BRACE_DAMAGE;
+      poiseMul = BRACE_POISE;
+      buildMul = 0.4;
+      this.stamina = Math.max(0, this.stamina - raw * BRACE_STAMINA);
+      this._staminaDelay = Math.max(this._staminaDelay, 0.8);
+    }
+    out.dealt = this.takeDamage(raw * mul, by, kind, pierce);
+    if (!this.alive) return out;
+    if (out.critical) {
+      this._staggerT = 0;
+      this.poise = this.poiseMax;
+      bleedAdd += 60;
+    } else if (out.braced && this.stamina <= 0) {
+      this._stagger(by); // guard broken
+      out.staggered = true;
+    } else {
+      this.poise -= poiseDmg * poiseMul;
+      this._poiseDelay = POISE_DELAY;
+      if (this.poise <= 0) {
+        this._stagger(by);
+        out.staggered = true;
+      }
+    }
+    // Buildup: the meters fill, and burst when full.
+    const b = this.buildup;
+    b.bleed += bleedAdd * buildMul;
+    b.crush += crushAdd * buildMul;
+    this._buildupDelay = BUILDUP_DELAY;
+    if (b.bleed >= 100) {
+      b.bleed = 0;
+      const burst = this.maxHealth * HAEMORRHAGE;
+      this.bleeding = Math.min(this.maxHealth * 0.06, this.bleeding + this.maxHealth * 0.004);
+      this.takeDamage(burst, by, "bleed");
+      this.world.events?.emit("haemorrhage", { creature: this, by, damage: burst });
+    }
+    if (this.alive && b.crush >= 100) {
+      b.crush = 0;
+      this.legBroken = Math.max(this.legBroken, LEG_HEAL_TIME * CRUSH_LEG);
+      this.world.events?.emit("crush", { creature: this, by });
+    }
+    return out;
   }
 
   // Surface distance (m) from the strike sweep to the target's body, or
@@ -1035,7 +1406,7 @@ export class Creature {
     return kind === "tail" ? ang >= TAIL_ARC_MIN : ang <= BITE_CONE;
   }
 
-  _knockback(victim, kind) {
+  _knockback(victim, kind, k = 1) {
     const vp = victim.position;
     let dx = vp.x - this.position.x;
     let dz = vp.z - this.position.z;
@@ -1049,7 +1420,7 @@ export class Creature {
     }
     const m = this.mass;
     const vm = victim.mass ?? 80;
-    const kb = clamp((3.2 * m) / (m + vm), 0.15, 3.2) * (kind === "tail" ? 1.5 : 1);
+    const kb = clamp((3.2 * m) / (m + vm), 0.15, 3.2) * (kind === "tail" ? 1.5 : 1) * k;
     victim._kx += dx * kb;
     victim._kz += dz * kb;
     victim._restLock = Math.max(victim._restLock, REST_LOCK);
@@ -1255,6 +1626,11 @@ export class Creature {
     } else if (this._attackT >= 0) {
       action = this._attackKind;
       actionT = this._attackT;
+    } else if (this._chargeT >= 0) {
+      // Winding up a heavy: hold the cocked pose.
+      const kind = ATTACK_TIMING[this._attackKind] ? this._attackKind : "bite";
+      action = kind;
+      actionT = ATTACK_TIMING[kind].cocked * smoothstep(0, 0.35, this._chargeT / this._chargeMax());
     } else if (this._callT >= 0) {
       action = "call";
       actionT = this._callT;
@@ -1262,7 +1638,11 @@ export class Creature {
     else if (this.drinking) action = "drink";
     else if (this.resting) action = "rest";
     a.speed = this.alive ? this._animSpeed : 0;
-    a.crouch = this._crouchBlend;
+    a.crouch = Math.max(this._crouchBlend, this._braceBlend * 0.7);
+    a.heavy = this._attackT >= 0 ? this.heavy : 0;
+    a.charge = this._chargeT >= 0 ? clamp(this._chargeT / this._chargeMax(), 0, 1) : 0;
+    a.stagger = this.alive ? this._staggerBlend : 0;
+    a.brace = this._braceBlend;
     a.swim = this.submerged;
     a.turn = this.alive ? this.turnSpeed : 0;
     a.action = action;
@@ -1307,7 +1687,15 @@ export class Creature {
     if (!m || !m.object) return;
     const o = m.object;
     o.position.copy(this.position);
-    o.rotation.set(this._pitch, this.heading, this._roll);
+    let roll = this._roll;
+    if (this._dodgeT >= 0) {
+      // The hop: up and over, leaning into it.
+      const k = Math.sin(Math.PI * clamp(this._dodgeT, 0, 1));
+      o.position.y += k * this.hipHeight * 0.22;
+      roll -= this._dodgeSide * 0.38 * k;
+    }
+    if (this._staggerBlend > 0.01) roll += this._staggerBlend * 0.09 * Math.sin(this.age * 9);
+    o.rotation.set(this._pitch, this.heading, roll);
     const s = this.scale;
     if (s !== this._modelScale) {
       this._modelScale = s;
@@ -1396,11 +1784,18 @@ export class Creature {
     this.gait = "idle";
     this._attackT = -1;
     this._callT = -1;
+    this._chargeT = -1;
+    this._dodgeT = -1;
+    this._staggerT = 0;
+    this.bracing = false;
+    this.heavy = 0;
+    this.aimTarget = null;
     this._deadT = 0;
     this.noise = 0;
     const it = this.intent;
     it.moveX = it.moveZ = 0;
     it.sprint = it.crouch = it.bite = it.eat = it.drink = it.call = it.rest = false;
+    it.heavy = it.dodge = it.brace = it.cancelHeavy = false;
     if (killer && killer !== this && typeof killer.kills === "number") killer.kills++;
     this.world.events?.emit("death", { creature: this, cause, killer });
   }

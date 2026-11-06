@@ -1289,6 +1289,180 @@ test("creature: an invulnerable (creative) creature shrugs off bites, falls, sta
   w.ecosystem.remove(c);
 });
 
+/** Two adults squared up for a fight: `a` facing `b`, b's body right under a's jaws. */
+function squareUp(a, b) {
+  const fx = Math.sin(a.heading);
+  const fz = Math.cos(a.heading);
+  const head = a.headPosition(new THREE.Vector3());
+  b.position.set(head.x + fx * b.radius * 0.6, a.position.y, head.z + fz * b.radius * 0.6);
+  b._kx = b._kz = a._kx = a._kz = 0;
+  b.update(0.016);
+}
+
+test("combat: heavies charge, hit harder and wear down poise; a staggered animal takes a critical bite", () => {
+  const w = getWorld();
+  const eco = w.ecosystem;
+  const cap = eco.npcCap;
+  eco.npcCap = 0;
+  const p = landSpot(31);
+  const a = eco.spawn("allosaurus", p.x, p.z, { growth: 1, heading: 0 });
+  const b = eco.spawn("utahraptor", p.x, p.z + 6, { growth: 1, heading: Math.PI });
+  a.brain = b.brain = null;
+  const fight = (seconds) => {
+    for (let i = 0; i < seconds / 0.05; i++) {
+      a.update(0.05);
+      b.update(0.05);
+    }
+  };
+  const reset = () => {
+    b.health = b.maxHealth;
+    b._staggerT = 0;
+    b.poise = b.poiseMax;
+    b.bleeding = 0;
+    b.buildup.bleed = b.buildup.crush = 0;
+    a.biteCooldown = 0;
+    a.stamina = 100;
+    squareUp(a, b);
+  };
+  try {
+    assert(a.poiseMax > b.poiseMax && b.poiseMax > 20, `poise grows with mass (${a.poiseMax.toFixed(0)} vs ${b.poiseMax.toFixed(0)})`);
+    // A light bite.
+    reset();
+    let hits = capture("attack", () => {
+      a.intent.bite = true;
+      fight(0.8);
+    });
+    const light = hits.find((e) => e.target === b);
+    assert(light && light.damage > 0 && light.heavy === 0, `a light bite lands (${JSON.stringify(hits.map((e) => [e.damage, e.heavy]))})`);
+    const poiseAfterLight = b.poise;
+    // A full heavy: wind up, let go.
+    reset();
+    hits = capture("attack", () => {
+      a.intent.heavy = true;
+      fight(1.0);
+      assert(a.charge > 0.9 && a._attackT < 0, `holding winds up a heavy (charge ${a.charge.toFixed(2)})`);
+      a.intent.heavy = false;
+      squareUp(a, b);
+      fight(1.2);
+    });
+    const heavy = hits.find((e) => e.target === b);
+    assert(heavy && heavy.heavy > 0.9, "letting go strikes a full heavy");
+    assert(heavy.damage > light.damage * 1.8, `a heavy hits far harder (${heavy.damage.toFixed(0)} vs ${light.damage.toFixed(0)})`);
+    assert(b.staggered || b.poise < poiseAfterLight - 20, "and wears down far more poise");
+    // Poise gone: the next blow staggers; the one after is a critical.
+    reset();
+    b.poise = 1;
+    let swings = [];
+    const staggers = capture("stagger", () => {
+      swings = capture("attack", () => {
+        a.intent.bite = true;
+        fight(0.8);
+      });
+    });
+    assert(b.staggered && staggers.length === 1 && staggers[0].by === a, `breaking poise staggers it (staggered ${b.staggered} ${b._staggerT.toFixed(2)}, ${staggers.length} staggers, swings ${JSON.stringify(swings.map((e) => [e.target === b, e.damage.toFixed(0), e.staggered]))}, poise ${b.poise.toFixed(1)})`);
+    assert(b.intent.bite === false, "a reeling animal can't act");
+    a.biteCooldown = 0;
+    a.stamina = 100;
+    squareUp(a, b);
+    b._staggerT = 2; // still reeling
+    const hp = b.health;
+    hits = capture("attack", () => {
+      a.intent.bite = true;
+      fight(0.8);
+    });
+    const crit = hits.find((e) => e.target === b);
+    assert(crit && crit.critical, "a bite on a staggered animal is a critical");
+    assert(hp - b.health > light.damage * 2, `the critical bites deep (${(hp - b.health).toFixed(0)} vs a light ${light.damage.toFixed(0)})`);
+    assert(!b.staggered && b.poise === b.poiseMax, "and ends the stagger, poise restored");
+  } finally {
+    eco.remove(a);
+    eco.remove(b);
+    eco.npcCap = cap;
+  }
+});
+
+test("combat: a dodge's invulnerable frames make a blow miss; heavier animals brace instead, and a fresh brace parries", () => {
+  const w = getWorld();
+  const eco = w.ecosystem;
+  const cap = eco.npcCap;
+  eco.npcCap = 0;
+  const p = landSpot(32);
+  const raptor = eco.spawn("utahraptor", p.x, p.z, { growth: 1, heading: 0 });
+  const steg = eco.spawn("stegosaurus", p.x + 20, p.z, { growth: 1, heading: 0 });
+  const rex = eco.spawn("tyrannosaurus", p.x + 40, p.z, { growth: 1, heading: 0 });
+  raptor.brain = steg.brain = rex.brain = null;
+  try {
+    assert(raptor.canDodge && !steg.canDodge && !rex.canDodge, "light animals dodge, heavy ones brace");
+    // Dodge back, out from under the bite.
+    const x0 = raptor.position.x;
+    const z0 = raptor.position.z;
+    raptor.intent.dodge = true;
+    raptor.update(0.05);
+    assert(raptor.dodging, "mid-hop it can't be hit");
+    let r = raptor.receiveHit(rex, 150, "bite", 0, 0, 60, 0, 0);
+    assert(r.dodged && r.dealt === 0 && raptor.health === raptor.maxHealth, "the bite passes through the dodge");
+    step(raptor, 0.6);
+    assert(!raptor.dodging && raptor._dodgeT < 0, "the dodge ends");
+    assert(Math.hypot(raptor.position.x - x0, raptor.position.z - z0) > 1.5, "having carried it out of the way");
+    raptor.intent.brace = true;
+    raptor.update(0.05);
+    assert(!raptor.bracing, "a dodger doesn't brace");
+    raptor.intent.brace = false;
+    // Brace: the first instant parries — the attacker reels.
+    steg.intent.brace = true;
+    steg.update(0.05);
+    assert(steg.bracing, "the Stegosaurus braces");
+    r = steg.receiveHit(raptor, 40, "bite", 0, 0, 18, 0, 0);
+    assert(r.parried && r.dealt === 0 && raptor.staggered, "a fresh brace parries, staggering the biter");
+    // Later in the brace: the blow is softened and costs stamina.
+    step(steg, 0.5);
+    steg.stamina = 100;
+    const hp = steg.health;
+    r = steg.receiveHit(rex, 100, "bite", 0, 0, 40, 0, 0);
+    const armor = steg.species.armor;
+    assert(r.braced && !r.parried, "an older brace blocks");
+    assert.near(hp - steg.health, 100 * 0.45 * (1 - armor), 1e-6, "through a brace, ×0.45 after armour:");
+    assert.near(steg.stamina, 100 - 100 * 0.35, 1e-6, "and stamina pays for it:");
+    // A guard with no stamina left breaks.
+    steg.stamina = 5;
+    r = steg.receiveHit(rex, 100, "bite", 0, 0, 40, 0, 0);
+    assert(r.staggered && steg.staggered && !steg.bracing, "out of stamina, the guard breaks");
+  } finally {
+    eco.remove(raptor);
+    eco.remove(steg);
+    eco.remove(rex);
+    eco.npcCap = cap;
+  }
+});
+
+test("combat: bleed and crush buildup fill with hits, burst when full, and drain off", () => {
+  const w = getWorld();
+  const eco = w.ecosystem;
+  const p = landSpot(33);
+  const a = eco.spawn("utahraptor", p.x, p.z, { growth: 1 });
+  const v = eco.spawn("camptosaurus", p.x + 10, p.z, { growth: 1 });
+  a.brain = v.brain = null;
+  try {
+    v.receiveHit(a, 5, "bite", 0, 0, 1, 60, 0);
+    assert.near(v.buildup.bleed, 60, 1e-6, "bleed fills:");
+    const hp = v.health;
+    const bursts = capture("haemorrhage", () => v.receiveHit(a, 5, "bite", 0, 0, 1, 60, 0));
+    assert.equal(bursts.length, 1, "a full meter bursts:");
+    assert(hp - v.health > v.maxHealth * 0.09, "a haemorrhage takes a tenth of its health");
+    assert.equal(v.buildup.bleed, 0, "and empties the meter:");
+    const crush = capture("crush", () => v.receiveHit(a, 5, "kick", 0, 1, 1, 0, 120));
+    assert(crush.length === 1 && v.legBroken > 30, "a full crush meter breaks a leg");
+    v.receiveHit(a, 5, "bite", 0, 0, 1, 40, 0);
+    step(v, 1);
+    assert.near(v.buildup.bleed, 40, 1e-6, "the meter holds for a moment:");
+    step(v, 4);
+    assert(v.buildup.bleed < 30, `then drains (${v.buildup.bleed.toFixed(1)})`);
+  } finally {
+    eco.remove(a);
+    eco.remove(v);
+  }
+});
+
 test("creature + ecosystem: death credits the killer and leaves a carcass that is eaten and rots away", () => {
   const w = getWorld();
   const eco = w.ecosystem;
