@@ -105,6 +105,15 @@ try {
   check(s.warmth > 0 && s.dist > 0, `expected walking and warmth on the path, got ${JSON.stringify(s)}`);
   await shot("path");
 
+  // the view toggle: ASCII by default, V switches to pixels and back, and it's remembered
+  check((await page.evaluate(() => ember.view)) === "ascii", "expected the ASCII view by default");
+  await press("v");
+  await wait(300);
+  check((await page.evaluate(() => [ember.view, localStorage.getItem("ember:view")].join())) === "pixel,pixel", "expected V to switch to pixels");
+  await shot("path-pixel");
+  await press("v");
+  await wait(200);
+
   // 1. the moth: dim, hum, dim, hold still, then part ways
   await walkToNext();
   await shot("path-arrived");

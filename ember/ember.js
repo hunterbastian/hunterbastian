@@ -74,10 +74,20 @@ const screen = canvas.getContext("2d");
 const stage = document.getElementById("stage");
 const live = document.getElementById("live");
 
-const buf = document.createElement("canvas");
-buf.width = BW;
-buf.height = BH;
-const ctx = buf.getContext("2d", { willReadFrequently: true });
+// The world is drawn into two layers (background and actors), the interface
+// into a third, so the ASCII view can treat each one differently.
+function makeLayer() {
+  const c = document.createElement("canvas");
+  c.width = BW;
+  c.height = BH;
+  return c.getContext("2d", { willReadFrequently: true });
+}
+const LAYERS = { bg: makeLayer(), act: makeLayer(), ui: makeLayer() };
+const comp = makeLayer(); // the pixel view flattens all three here
+let ctx = LAYERS.ui;
+function layer(name) {
+  ctx = LAYERS[name];
+}
 
 function resize() {
   const dpr = Math.min(window.devicePixelRatio || 1, 3);
@@ -108,45 +118,23 @@ const PAL_KEYS = new Set(PAL.map(([r, g, b]) => (r << 16) | (g << 8) | b));
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((v) => (v + 0.5) / 16 - 0.5);
 const SPREAD = 36;
 
-function pixelate() {
-  const img = ctx.getImageData(0, 0, BW, BH);
-  const d = img.data;
-  for (let y = 0; y < BH; y++) {
-    for (let x = 0; x < BW; x++) {
-      const i = (y * BW + x) * 4;
-      const r = d[i];
-      const g = d[i + 1];
-      const b = d[i + 2];
-      if (PAL_KEYS.has((r << 16) | (g << 8) | b)) continue;
-      const bias = BAYER[((y & 3) << 2) | (x & 3)] * SPREAD;
-      let best = 0;
-      let bestD = Infinity;
-      for (let p = 0; p < PAL.length; p++) {
-        const c = PAL[p];
-        const dr = r + bias - c[0];
-        const dg = g + bias - c[1];
-        const db = b + bias - c[2];
-        const dist = 2 * dr * dr + 4 * dg * dg + 3 * db * db;
-        if (dist < bestD) {
-          bestD = dist;
-          best = p;
-        }
-      }
-      const c = PAL[best];
-      d[i] = c[0];
-      d[i + 1] = c[1];
-      d[i + 2] = c[2];
-      d[i + 3] = 255;
-    }
-  }
-  ctx.putImageData(img, 0, 0);
-}
-
 function present() {
-  pixelate();
   screen.setTransform(1, 0, 0, 1, 0, 0);
   screen.imageSmoothingEnabled = false;
-  screen.drawImage(buf, 0, 0, canvas.width, canvas.height);
+  if (G.view === "ascii") {
+    drawAscii();
+  } else {
+    comp.setTransform(1, 0, 0, 1, 0, 0);
+    for (const g of [LAYERS.bg, LAYERS.act, LAYERS.ui]) comp.drawImage(g.canvas, 0, 0);
+    snapToPalette(comp);
+    screen.drawImage(comp.canvas, 0, 0, canvas.width, canvas.height);
+  }
+  if (G.fade > 0) {
+    screen.globalAlpha = G.fade;
+    screen.fillStyle = C.bg;
+    screen.fillRect(0, 0, canvas.width, canvas.height);
+    screen.globalAlpha = 1;
+  }
 }
 
 // Mirror on-screen text into a live region so screen readers can follow along.
@@ -211,6 +199,7 @@ const FONT = {
   "·": [".....", ".....", ".....", ".....", "..#.."],
   "(": ["...#.", "..#..", ".#...", ".#...", ".#...", "..#..", "...#."],
   ")": [".#...", "..#..", "...#.", "...#.", "...#.", "..#..", ".#..."],
+  "@": [".###.", "#...#", "#.###", "#.#.#", "#.###", "#....", ".###."],
 };
 const ADV = 6; // buffer pixels per character, including the gap
 
@@ -247,6 +236,7 @@ const SPR = {
   shard: [".#.", "#o#", "#o#", ".#."],
   icicle: ["###", "#o#", "#o#", ".#.", ".#.", ".#."],
   flame: ["..#..", ".###.", ".#o#.", "..#.."],
+  checker: ["#.#.#", ".#.#.", "#.#.#", ".#.#.", "#.#.#"],
   soundOn: ["...#.....", "..##..#..", "####...#.", "####.#.#.", "####...#.", "..##..#..", "...#....."],
   soundOff: ["...#.....", "..##.....", "####.#.#.", "####..#..", "####.#.#.", "..##.....", "...#....."],
 };
@@ -859,6 +849,7 @@ const KEYS = {
   KeyZ: "confirm", Enter: "confirm", Space: "confirm",
   KeyX: "cancel", ShiftLeft: "cancel", ShiftRight: "cancel", Escape: "cancel", Backspace: "cancel",
   KeyM: "mute",
+  KeyV: "view",
 };
 const held = new Set();
 const pressed = new Set(); // pressed since the last tick
@@ -1239,6 +1230,12 @@ const G = {
   floaters: [],
   particles: [],
   stars: [],
+  view: storage.get("ember:view") || "ascii",
+  glyphs: [], // free-floating glyphs for the ASCII view, rebuilt every frame
+  quiet: [], // rects where the letter field and motes stay out (the arena)
+  motes: [],
+  shakeX: 0,
+  shakeY: 0,
   overReady: false,
   overAt: null,
 };
@@ -1249,6 +1246,12 @@ const fill = (str) => str.replaceAll("{name}", G.foe?.name ?? "");
 function setScene(name) {
   G.scene = name;
   G.sceneT = 0;
+}
+
+// Drifting motes for the ASCII view: o*o clusters and snow.
+for (let i = 0; i < 30; i++) {
+  const big = Math.random() < 0.3;
+  G.motes.push({ x: rand(0, W), y: rand(0, H), vy: rand(0.08, 0.25), ph: rand(0, TAU), ch: big ? "o*o" : Math.random() < 0.5 ? "*" : ".", color: Math.random() < 0.5 ? C.ink : C.dim });
 }
 
 // Stars stay above the creature's name and out of the header corners, so
@@ -2230,6 +2233,16 @@ function dissolveFoe() {
 }
 
 function updateAmbient() {
+  if (!REDUCED) {
+    for (const m of G.motes) {
+      m.y += m.vy;
+      m.x += Math.sin(G.t * 0.01 + m.ph) * 0.15;
+      if (m.y > H + 6) {
+        m.y = -6;
+        m.x = rand(0, W);
+      }
+    }
+  }
   for (const p of G.particles) {
     p.age++;
     p.vy += p.g;
@@ -2310,7 +2323,30 @@ function drawMini(key, x, y, frame) {
   else drawBitmap(rows, x, y, { color: C.ink, color2: C.rune, color3: C.stone, center: true });
 }
 
+function bulletGlyph(b) {
+  switch (b.kind) {
+    case "spark": return ["+", C.core];
+    case "fly": return ["*", Math.sin(b.age * 0.3) > -0.4 ? C.glim : C.dim];
+    case "feather": {
+      const tilt = Math.sin(b.age * 0.06 + b.sway);
+      return [tilt < -0.35 ? "\\" : tilt > 0.35 ? "/" : "~", C.ink];
+    }
+    case "shard": return ["*", C.rune];
+    case "icicle": return b.harmless ? ["!", (b.age >> 2) % 2 ? C.rune : C.ink] : ["V", C.ink];
+    case "moth": return ["w", C.ink];
+    case "flash": return (b.age >> 2) % 2 ? null : ["x", C.dim];
+    default: return [b.r >= 4 ? "O" : "o", C.ink];
+  }
+}
+
 function drawBullets() {
+  if (G.view === "ascii") {
+    for (const b of G.bullets) {
+      const g = bulletGlyph(b);
+      if (g) G.glyphs.push({ x: b.x, y: b.y, ch: g[0], color: g[1], size: 1.6, clip: G.arenaClip, alpha: b.fade ? 1 - b.fade / 20 : Math.min(1, b.age / 8) });
+    }
+    return;
+  }
   for (const b of G.bullets) {
     const alpha = b.fade ? 1 - b.fade / 20 : Math.min(1, b.age / 8);
     const o = { center: true, alpha };
@@ -2419,7 +2455,8 @@ function drawFrame(b, { window = false } = {}) {
   if (w > 20 * PX && h > 12 * PX) chips(x, y, w, h);
   if (window) {
     fillPx(x + 3 * PX, y + 3 * PX, w - 6 * PX, h - 6 * PX, C.stoneD);
-    fillPx(x + 4 * PX, y + 4 * PX, w - 8 * PX, h - 8 * PX, C.bg);
+    ctx.clearRect(x + 4 * PX, y + 4 * PX, w - 8 * PX, h - 8 * PX);
+    G.quiet.push({ x: x + 4 * PX, y: y + 4 * PX, w: w - 8 * PX, h: h - 8 * PX });
     fillPx(x + 3 * PX, y + h - 4 * PX, w - 6 * PX, PX, C.stoneL);
     fillPx(x + w - 4 * PX, y + 3 * PX, PX, h - 6 * PX, C.stoneL);
   }
@@ -2483,7 +2520,7 @@ function drawNameplate(f) {
 /* --- the path ------------------------------------------------------------ */
 function drawHub() {
   if (G.box.y > 200) drawPath(); // the campfire and friends panels cover the path
-
+  layer("ui");
   // header: warmth on the left, distance on the right
   text("warmth", 20, 18, { color: C.dim });
   text(fmt(S.warmth), 20, 34, { scale: 2, color: C.ember });
@@ -2508,6 +2545,7 @@ function drawHub() {
 const ridgeY = (wx) => snap(176 + Math.sin(wx * 0.013) * 7 + Math.sin(wx * 0.041) * 3);
 
 function drawPath() {
+  layer("bg");
   const off = S.dist * PX_PER_M;
   const far = off * 0.3;
 
@@ -2550,6 +2588,7 @@ function drawPath() {
     }
   }
 
+  layer("act");
   const remaining = S.nextAt - S.dist;
   if (remaining < 26) {
     drawAhead(ROSTER[S.met % ROSTER.length], WALK_X + 72 + remaining * PX_PER_M, remaining <= 0 ? C.ink : C.dim);
@@ -2562,7 +2601,11 @@ function drawPath() {
     const y = GROUND - 24 + Math.round(Math.sin(G.t * 0.06 + i * 1.7) * 2) * PX;
     drawMini(f.key, x, y, Math.floor(G.t / 9 + i) % 2);
   });
-  if (S.friends.length > 8) text(`+${S.friends.length - 8}`, WALK_X - 32 - 8 * 30, GROUND - 30, { color: C.dim, align: "center" });
+  if (S.friends.length > 8) {
+    layer("ui");
+    text(`+${S.friends.length - 8}`, WALK_X - 32 - 8 * 30, GROUND - 30, { color: C.dim, align: "center" });
+    layer("act");
+  }
 
   drawEmber(WALK_X, ey);
 }
@@ -2615,8 +2658,10 @@ const BATTLE_GROUND = 142;
 
 function drawBattle() {
   const f = G.foe;
+  layer("bg");
   drawMountains(BATTLE_GROUND);
   drawSnowLine(BATTLE_GROUND);
+  layer("act");
   const pose = drawFoe(f);
 
   if (G.slash) {
@@ -2627,11 +2672,18 @@ function drawBattle() {
     ctx.globalAlpha = 1;
   }
 
+  layer("ui");
   const inArena = G.phase === "enemy" || G.phase === "dodge";
   if (!inArena && !f.dead) drawNameplate(f);
 
   const b = drawFrame(G.box, { window: inArena });
+  if (inArena) {
+    layer("act");
+    withClip(b, () => drawArena(b));
+    layer("ui");
+  }
   withClip(b, () => {
+    if (inArena) return;
     if (G.phase === "menu" || G.phase === "result") {
       const d = G.dialog;
       if (d) {
@@ -2642,8 +2694,6 @@ function drawBattle() {
       drawActs(b);
     } else if (G.phase === "strike") {
       drawStrike(b);
-    } else {
-      drawArena();
     }
   });
 
@@ -2684,7 +2734,8 @@ function drawStrike(b) {
   fillPx(cx - 2, cy - 20, 4, 40, s.stopped && (s.hold >> 2) % 2 === 0 ? C.ember : C.ink);
 }
 
-function drawArena() {
+function drawArena(b) {
+  G.arenaClip = { x: b.x + b.inset, y: b.y + b.inset, w: b.w - b.inset * 2, h: b.h - b.inset * 2 };
   const p = G.player;
   emberGlow(p.x, p.y, 0.8 - G.dimmed * 0.2);
   if (G.phase === "dodge" && G.pattern === "spiral" && G.patT >= 0) {
@@ -2693,7 +2744,9 @@ function drawArena() {
   }
   drawBullets();
   const blink = p.inv > 0 && (p.inv >> 2) % 2 === 0;
-  if (!blink) drawEmber(p.x, p.y);
+  if (blink) return;
+  if (G.view === "ascii") G.glyphs.push({ x: p.x, y: p.y, ch: "@", color: C.ember, size: 1.7 });
+  else drawEmber(p.x, p.y);
 }
 
 // hp as ten carved segments; mends as little flames on the right
@@ -2754,15 +2807,15 @@ function drawStack(d, y0, { lh = 22, maxW = 420 } = {}) {
   return y;
 }
 
-function drawSoundIcon() {
-  drawBitmap(muted ? SPR.soundOff : SPR.soundOn, W - 26, 20, { color: C.dim, center: true, alpha: 0.8 });
-}
 
 /* --- title & intro ------------------------------------------------------- */
 function drawTitle() {
+  layer("bg");
   emberGlow(W / 2, 164, 1.7);
-  text("ember", W / 2, 66, { scale: 4, align: "center", spacing: 1 });
+  layer("act");
   drawEmber(W / 2, 164, { scale: 2 });
+  layer("ui");
+  text("ember", W / 2, 66, { scale: 4, align: "center", spacing: 1 });
   text("a very small game", W / 2, 212, { color: C.dim, align: "center" });
 
   if (!S.started) {
@@ -2780,12 +2833,16 @@ function drawTitle() {
     });
     text(`${fmt(S.warmth)} warmth · ${S.friends.length} friends · ${fmt(S.dist)} m`, W / 2, 334, { color: C.dim, align: "center" });
   }
-  text("arrows move · z ok · x back · m sound", W / 2, 392, { color: C.dim, align: "center" });
+  text("arrows move · z ok · x back", W / 2, 378, { color: C.dim, align: "center" });
+  text("m sound · v ascii or pixels", W / 2, 396, { color: C.dim, align: "center" });
 }
 
 function drawIntro() {
+  layer("bg");
   emberGlow(W / 2, 200, 1.2);
+  layer("act");
   drawEmber(W / 2, 200);
+  layer("ui");
   drawStack(G.dialog, 250);
   if (G.dialog?.full) drawNext(W - 28, H - 28);
 }
@@ -2793,16 +2850,24 @@ function drawIntro() {
 /* --- losing -------------------------------------------------------------- */
 function drawOver() {
   if (G.sceneT < 30 && G.overAt) {
+    layer("bg");
     emberGlow(G.overAt.x, G.overAt.y, 1 - G.sceneT / 30);
+    layer("act");
     drawEmber(G.overAt.x, G.overAt.y, { alpha: 1 - G.sceneT / 30 });
   }
+  layer("ui");
   const y = drawStack(G.dialog, 180);
   if (G.overReady) text("z to keep going", W / 2, y + 34, { color: C.ember, align: "center", alpha: pulse() });
 }
 
 function drawParticles() {
   for (const p of G.particles) {
-    ctx.globalAlpha = 1 - p.age / p.life;
+    const alpha = 1 - p.age / p.life;
+    if (G.view === "ascii") {
+      G.glyphs.push({ x: p.x, y: p.y, ch: p.color === C.ember ? "*" : p.size > 1 && p.age % 40 < 20 ? "'" : ".", color: p.color, alpha });
+      continue;
+    }
+    ctx.globalAlpha = alpha;
     ctx.fillStyle = p.color;
     ctx.fillRect(snap(p.x), snap(p.y), p.size, p.size);
   }
@@ -2817,13 +2882,24 @@ function drawFloaters() {
 }
 
 function draw() {
-  ctx.setTransform(1 / PX, 0, 0, 1 / PX, 0, 0);
-  ctx.imageSmoothingEnabled = false;
-  ctx.fillStyle = C.bg;
-  ctx.fillRect(0, 0, W, H);
+  G.glyphs.length = 0;
+  G.quiet.length = 0;
+  G.shakeX = G.shake > 0 ? snap(rand(-1, 1) * G.shake) : 0;
+  G.shakeY = G.shake > 0 ? snap(rand(-1, 1) * G.shake) : 0;
+  for (const [name, g] of Object.entries(LAYERS)) {
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.globalAlpha = 1;
+    if (name === "bg") {
+      g.fillStyle = C.bg;
+      g.fillRect(0, 0, BW, BH);
+    } else {
+      g.clearRect(0, 0, BW, BH);
+    }
+    g.setTransform(1 / PX, 0, 0, 1 / PX, G.shakeX / PX, G.shakeY / PX);
+    g.imageSmoothingEnabled = false;
+  }
 
-  ctx.save();
-  if (G.shake > 0) ctx.translate(snap(rand(-1, 1) * G.shake), snap(rand(-1, 1) * G.shake));
+  layer("bg");
   drawStars();
   switch (G.scene) {
     case "title": drawTitle(); break;
@@ -2832,17 +2908,12 @@ function draw() {
     case "battle": drawBattle(); break;
     case "over": drawOver(); break;
   }
+  layer("act");
   drawParticles();
+  layer("ui");
   drawFloaters();
-  ctx.restore();
-
-  if (G.fade > 0) {
-    ctx.globalAlpha = G.fade;
-    ctx.fillStyle = C.bg;
-    ctx.fillRect(0, 0, W, H);
-    ctx.globalAlpha = 1;
-  }
-  drawSoundIcon();
+  LAYERS.ui.setTransform(1 / PX, 0, 0, 1 / PX, 0, 0); // the toggles don't shake
+  drawToggles();
   present();
 }
 
@@ -3110,17 +3181,274 @@ function showSpriteSheet() {
 }
 
 /* ----------------------------------------------------------------------- */
+/* ASCII view: the world drawn in glyphs, the stone UI kept as pixels       */
+/* ----------------------------------------------------------------------- */
+// The world is drawn into two layers (background, actors) and the interface
+// into a third. In the ASCII view each 2×2 block of world pixels becomes one
+// glyph, picked by what's there: every material has its own symbols, edges
+// follow their direction, your glow tints what it touches, and an empty sky
+// fills with a dim field of drifting letters. Bullets and particles skip the
+// grid and are drawn as glyphs at their exact positions. The UI goes on top,
+// pixel for pixel.
+const CELL = 2;
+const COLS = BW / CELL;
+const ROWS = BH / CELL;
+const MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace';
+const GLY = {
+  field: "#1d2c42", night: "#34465f", faint: "#435470", stone: "#7d899e", snow: "#eef3f8", white: "#ffffff",
+  body: "#5f6f88", bodyStone: "#8a96aa", moss: "#5f8a35", warm: "#d0782f", deep: "#7c4321",
+};
+
+// every palette color gets a bit, so a cell's contents are one small number
+const BIT = Object.fromEntries(Object.keys(C).map((k, i) => [k, 1 << i]));
+const RGB_BIT = new Map(Object.entries(C).map(([k, h]) => [parseInt(h.slice(1), 16), BIT[k]]));
+const PAL_LIST = Object.entries(C).map(([k, h]) => [BIT[k], [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16))]);
+function bitOf(r, g, b) {
+  const exact = RGB_BIT.get((r << 16) | (g << 8) | b);
+  if (exact) return exact;
+  let best = BIT.bg;
+  let bd = Infinity;
+  for (const [bit, [pr, pg, pb]] of PAL_LIST) {
+    const d = (r - pr) ** 2 + (g - pg) ** 2 + (b - pb) ** 2;
+    if (d < bd) {
+      bd = d;
+      best = bit;
+    }
+  }
+  return best;
+}
+const has = (mask, ...names) => names.some((n) => mask & BIT[n]);
+const hash2 = (x, y) => {
+  const v = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+  return v - Math.floor(v);
+};
+const pick = (str, h) => str[Math.floor(h * str.length) % str.length];
+
+// Glyph images, cached per character, color and size. Glyphs are drawn a
+// little bigger than their cell and centered on it, so neighbors touch and
+// shapes read as one texture; bold keeps the strokes alive at small sizes.
+const GLYPH_SCALE = 1.35;
+let atlas = new Map();
+function glyphImage(ch, color, w, h) {
+  const key = `${ch}|${color}|${w}|${h}`;
+  let c = atlas.get(key);
+  if (c) return c;
+  if (atlas.size > 4000) atlas = new Map();
+  const size = h * GLYPH_SCALE;
+  c = document.createElement("canvas");
+  c.width = Math.max(1, Math.ceil(Math.max(w, size * 0.62 * ch.length) + 2));
+  c.height = Math.max(1, Math.ceil(size + 2));
+  const g = c.getContext("2d");
+  g.font = `bold ${Math.round(size)}px ${MONO}`;
+  g.textAlign = "center";
+  g.textBaseline = "middle";
+  g.fillStyle = color;
+  g.fillText(ch, c.width / 2, c.height / 2 + size * 0.05);
+  atlas.set(key, c);
+  return c;
+}
+
+// Which way an edge runs through (x, y), from a Sobel pass over brightness.
+function edgeChar(L, x, y) {
+  const at = (xx, yy) => L[Math.min(BH - 1, Math.max(0, yy)) * BW + Math.min(BW - 1, Math.max(0, xx))];
+  const gx = at(x + 1, y - 1) + 2 * at(x + 1, y) + at(x + 1, y + 1) - at(x - 1, y - 1) - 2 * at(x - 1, y) - at(x - 1, y + 1);
+  const gy = at(x - 1, y + 1) + 2 * at(x, y + 1) + at(x + 1, y + 1) - at(x - 1, y - 1) - 2 * at(x, y - 1) - at(x + 1, y - 1);
+  if (Math.abs(gx) + Math.abs(gy) < 60) return null;
+  const a = ((Math.atan2(gy, gx) * 180) / Math.PI + 90 + 180) % 180;
+  return a < 22 || a >= 158 ? "-" : a < 68 ? "\\" : a < 112 ? "|" : "/";
+}
+
+function actorGlyph(m, L, x, y, h) {
+  if (has(m, "ember")) return [pick("@*+", h), C.ember];
+  if (has(m, "core")) return ["*", C.core];
+  if (has(m, "glim")) return ["*", C.glim];
+  if (has(m, "rune")) return [pick("FRYXTP", h), C.rune];
+  if (has(m, "ink")) return [edgeChar(L, x, y) || "#", GLY.white];
+  if (has(m, "dim")) return [edgeChar(L, x, y) || "+", C.dim];
+  if (has(m, "moss")) return ["o", GLY.moss];
+  if (has(m, "warm")) return [":", GLY.warm];
+  if (has(m, "deep")) return [".", GLY.deep];
+  if (has(m, "stone", "stoneL")) return [pick("#=", h), GLY.bodyStone];
+  return [pick("%#&", h), GLY.body];
+}
+
+function backgroundGlyph(m, L, x, y, h, cx, cy, quiet, drift) {
+  if (has(m, "ink")) return [(m !== BIT.ink && edgeChar(L, x, y)) || pick("*=~+", h), GLY.snow];
+  if (has(m, "moss")) return [pick("A^", h), GLY.moss];
+  if (has(m, "stone", "stoneL", "stoneD")) return [pick("#=%", h), GLY.stone];
+  if (has(m, "warm")) return [pick(":.", h), GLY.warm];
+  if (has(m, "deep")) return [pick(".:", h), GLY.deep];
+  if (has(m, "dim")) return [has(m, "night") ? "'" : pick("*.'", h), C.dim];
+  if (has(m, "faint")) return [pick(":.", h), GLY.faint];
+  if (has(m, "night")) return [(has(m, "bg") && edgeChar(L, x, y)) || pick(":;.'", h), GLY.night];
+  if (quiet) return null;
+  // the letter field: clustered like weather, drifting slowly down
+  const iy = Math.floor(cy - drift);
+  const d = 0.5 + 0.5 * Math.sin(cx * 0.19) * Math.sin(iy * 0.31 + 1.3);
+  if (hash2(cx, iy) < 0.03 + 0.3 * d * d * d) return [pick("Q08dbq", hash2(cx + 7, iy)), GLY.field];
+  return null;
+}
+
+// Snap a layer to the palette. With `transparent`, clear pixels are skipped
+// and partly clear ones keep their alpha, so fades blend over what's below.
+function snapToPalette(g, { transparent = false } = {}) {
+  const img = g.getImageData(0, 0, BW, BH);
+  const d = img.data;
+  for (let y = 0; y < BH; y++) {
+    for (let x = 0; x < BW; x++) {
+      const i = (y * BW + x) * 4;
+      if (transparent && d[i + 3] === 0) continue;
+      const r = d[i];
+      const gg = d[i + 1];
+      const b = d[i + 2];
+      if (PAL_KEYS.has((r << 16) | (gg << 8) | b)) continue;
+      const bias = BAYER[((y & 3) << 2) | (x & 3)] * SPREAD;
+      let best = 0;
+      let bestD = Infinity;
+      for (let p = 0; p < PAL.length; p++) {
+        const c = PAL[p];
+        const dr = r + bias - c[0];
+        const dg = gg + bias - c[1];
+        const db = b + bias - c[2];
+        const dist = 2 * dr * dr + 4 * dg * dg + 3 * db * db;
+        if (dist < bestD) {
+          bestD = dist;
+          best = p;
+        }
+      }
+      const c = PAL[best];
+      d[i] = c[0];
+      d[i + 1] = c[1];
+      d[i + 2] = c[2];
+      if (!transparent) d[i + 3] = 255;
+    }
+  }
+  g.putImageData(img, 0, 0);
+}
+
+const uiOut = makeLayer();
+const bgL = new Float32Array(BW * BH);
+const actL = new Float32Array(BW * BH);
+const worldGlyphs = document.createElement("canvas").getContext("2d");
+let asciiFrame = 0;
+
+function drawAscii() {
+  const SW = canvas.width;
+  const SH = canvas.height;
+  const cw = SW / COLS;
+  const chh = SH / ROWS;
+  const quietAt = (lx, ly) => G.quiet.some((q) => lx >= q.x && lx < q.x + q.w && ly >= q.y && ly < q.y + q.h);
+  // the world's glyphs are rebuilt every other frame; everything that moves
+  // fast (bullets, your ember in the arena, particles) is drawn every frame
+  const sized = worldGlyphs.canvas.width === SW && worldGlyphs.canvas.height === SH;
+  if (!sized) {
+    worldGlyphs.canvas.width = SW;
+    worldGlyphs.canvas.height = SH;
+  }
+  if (!sized || asciiFrame++ % 2 === 0) drawWorldGlyphs(SW, SH, cw, chh, quietAt);
+  screen.drawImage(worldGlyphs.canvas, 0, 0);
+  drawFreeGlyphs(SW, SH, cw, chh, quietAt);
+  drawInterfaceOver(SW, SH);
+}
+
+function drawWorldGlyphs(SW, SH, cw, chh, quietAt) {
+  const out = worldGlyphs;
+  out.fillStyle = C.bg;
+  out.fillRect(0, 0, SW, SH);
+  const bg = LAYERS.bg.getImageData(0, 0, BW, BH).data;
+  const act = LAYERS.act.getImageData(0, 0, BW, BH).data;
+  const ui = LAYERS.ui.getImageData(0, 0, BW, BH).data;
+  for (let i = 0, p = 0; p < BW * BH; p++, i += 4) {
+    bgL[p] = (bg[i] + bg[i + 1] + bg[i + 2]) / 3;
+    actL[p] = act[i + 3] > 60 ? (act[i] + act[i + 1] + act[i + 2]) / 3 + 40 : 0;
+  }
+  const drift = REDUCED ? 0 : G.t * 0.012;
+
+  for (let cy = 0; cy < ROWS; cy++) {
+    for (let cx = 0; cx < COLS; cx++) {
+      const x0 = cx * CELL;
+      const y0 = cy * CELL;
+      let bgMask = 0;
+      let actMask = 0;
+      let covered = 0;
+      for (let j = 0; j < CELL; j++) {
+        for (let k = 0; k < CELL; k++) {
+          const i = ((y0 + j) * BW + x0 + k) * 4;
+          if (ui[i + 3] > 200) covered++;
+          bgMask |= bitOf(bg[i], bg[i + 1], bg[i + 2]);
+          if (act[i + 3] > 60) actMask |= bitOf(act[i], act[i + 1], act[i + 2]);
+        }
+      }
+      if (covered === CELL * CELL) continue; // the interface will sit on top
+      const h = hash2(cx, cy);
+      const g = actMask
+        ? actorGlyph(actMask, actL, x0, y0, h)
+        : backgroundGlyph(bgMask, bgL, x0, y0, h, cx, cy, quietAt((x0 + 1) * PX, (y0 + 1) * PX), drift);
+      if (!g) continue;
+      const img = glyphImage(g[0], g[1], cw, chh);
+      out.drawImage(img, Math.round((cx + 0.5) * cw - img.width / 2), Math.round((cy + 0.5) * chh - img.height / 2));
+    }
+  }
+}
+
+// Free-floating glyphs: bullets, particles, drifting motes.
+function drawFreeGlyphs(SW, SH, cw, chh, quietAt) {
+  const sx = SW / W;
+  const sy = SH / H;
+  for (const o of G.glyphs) {
+    if (o.clip && (o.x < o.clip.x || o.x >= o.clip.x + o.clip.w || o.y < o.clip.y || o.y >= o.clip.y + o.clip.h)) continue;
+    const size = o.size ?? 1;
+    const img = glyphImage(o.ch, o.color, cw * size, chh * size);
+    screen.globalAlpha = o.alpha ?? 1;
+    screen.drawImage(img, Math.round((o.x + G.shakeX) * sx - img.width / 2), Math.round((o.y + G.shakeY) * sy - img.height / 2));
+  }
+  screen.globalAlpha = 1;
+  if (G.scene !== "battle" || G.phase !== "dodge") {
+    for (const m of G.motes) {
+      if (quietAt(m.x, m.y)) continue;
+      const img = glyphImage(m.ch, m.color, cw * m.ch.length, chh);
+      screen.drawImage(img, Math.round(m.x * sx - img.width / 2), Math.round(m.y * sy - img.height / 2));
+    }
+  }
+}
+
+// The stone interface, pixel for pixel, on top.
+function drawInterfaceOver(SW, SH) {
+  uiOut.setTransform(1, 0, 0, 1, 0, 0);
+  uiOut.clearRect(0, 0, BW, BH);
+  uiOut.drawImage(LAYERS.ui.canvas, 0, 0);
+  snapToPalette(uiOut, { transparent: true });
+  screen.drawImage(uiOut.canvas, 0, 0, SW, SH);
+}
+
+function toggleView() {
+  G.view = G.view === "ascii" ? "pixel" : "ascii";
+  storage.set("ember:view", G.view);
+  sfx.select();
+  say(G.view === "ascii" ? "ascii view" : "pixel view");
+}
+
+// The sound and view toggles in the top-right corner.
+function drawToggles() {
+  drawBitmap(muted ? SPR.soundOff : SPR.soundOn, W - 26, 20, { color: C.dim, center: true, alpha: 0.8 });
+  if (G.view === "ascii") text("@", W - 60, 20, { color: C.dim, align: "center", base: "middle" });
+  else drawBitmap(SPR.checker, W - 60, 20, { color: C.dim, center: true });
+}
+
+/* ----------------------------------------------------------------------- */
 /* Loop                                                                    */
 /* ----------------------------------------------------------------------- */
 function update() {
   G.t++;
   G.sceneT++;
   if (pressed.has("mute")) toggleMute();
+  if (pressed.has("view")) toggleView();
   for (let i = taps.length - 1; i >= 0; i--) {
-    if (taps[i].x > W - 44 && taps[i].y < 40) {
-      toggleMute();
-      taps.splice(i, 1);
-    }
+    if (taps[i].y >= 40) continue;
+    if (taps[i].x > W - 44) toggleMute();
+    else if (taps[i].x > W - 78) toggleView();
+    else continue;
+    taps.splice(i, 1);
   }
   if (S.started && !document.hidden) gain(warmthRate() / 60);
   if (S.started && G.t % 300 === 0) persist();

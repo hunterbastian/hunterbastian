@@ -35,6 +35,7 @@ python3 -m http.server 8000
 | move while dodging | arrow keys / WASD | drag anywhere |
 | move carefully | hold X or Shift | — |
 | sound on / off | M | speaker icon, top right |
+| ASCII or pixel view | V | `@` icon, top right |
 
 ## How to play
 
@@ -82,6 +83,24 @@ corners, engraved text, and stone tablets with an icon for every action. You
 dodge inside a dark window cut into the stone. Battles play out in front of
 snowy mountains, and the path runs through snowy pines under a moon.
 
+### ASCII view
+
+ember starts in an ASCII view: the world is drawn in glyphs while the stone
+interface stays pixel art. Press V, or tap the `@` icon, to switch to plain
+pixels and back. The game remembers your choice.
+
+- Every 2 × 2 block of world pixels becomes one glyph, picked by what's
+  there. Each material has its own symbols: snow `* = ~`, mountains `: ; .`
+  with `/ \` slopes, stone `# = %`, creature bodies `% # &`, runes `F R Y X`,
+  fire `@ * +`.
+- Outlines turn into `/ | \ -` strokes that follow the edge's direction.
+- Your glow tints what it touches with orange `: .`.
+- An empty sky fills with a dim field of letters that drifts slowly down, and
+  `o*o` motes and snow float over the world.
+- Bullets and particles skip the grid and are drawn as glyphs at their exact
+  positions, sized to match their hitboxes. In the dodge box you're a single
+  bright `@`.
+
 ## How it works
 
 Everything is laid out in 480 × 420 logical units and drawn straight onto a
@@ -107,7 +126,7 @@ follows a few rules:
 
 ### Sprite sheet
 
-`sprites/` holds the complete sprite sheet, 195 sprites, exported from the
+`sprites/` holds the complete sprite sheet, 196 sprites, exported from the
 game's own drawing code:
 
 | file | what it is |
@@ -128,7 +147,7 @@ node export-sprites.mjs
 ```
 
 
-- `ember.js` — the font, sprites and pixel pen, the save and offline-warmth
+- `ember.js` — the font, sprites and pixel pen, the ASCII renderer, the save and offline-warmth
   logic, the creatures and their attack patterns, a fixed-timestep loop
   (60 ticks/s), and all the drawing. Sound is synthesized with the Web Audio API.
 - `style.css` — centers the canvas, keeps its pixels sharp, and turns off page
