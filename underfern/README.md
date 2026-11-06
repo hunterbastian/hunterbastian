@@ -249,9 +249,9 @@ device.
     smooth upscale.
   - **Retro SD**: a GameCube / PS2 game on a CRT, after gsimone's breakdown of
     that look. It draws about 448 lines, at a whole number of screen pixels per
-    line. Then come a Kawase-blurred bloom, distance blur, sun shafts, 6-bit colour
+    line. Then come a Kawase-blurred bloom, distance blur, sun shafts, 5-bit colour
     with an ordered dither, and the GameCube's deflicker (each line blended with
-    the ones above and below). Last, composite-cable colour bleed and scanlines.
+    the ones above and below). Last, composite-cable colour bleed, scanlines whose beam swells with brightness, and a faint phosphor mask on dense screens.
   - **Detailed**: full resolution (antialiased on High quality), with soft light
     and fine surface detail.
   - **Pixel**: low-resolution render with a crisp nearest-neighbour upscale.

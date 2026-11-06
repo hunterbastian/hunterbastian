@@ -554,7 +554,7 @@ const BAYER4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
  * an ordered dither: exactly what the "pixel" render style does to the island.
  * The retro preview paints it a little under size (the browser stretches it
  * softly), then blooms the bright parts, drains a little colour and adds grain.
- * The SD preview paints it at half size, dithers it to 6 bits, doubles it back
+ * The SD preview paints it at half size, dithers it to 5 bits, doubles it back
  * up softly and draws scanlines over it.
  * @param {HTMLCanvasElement} canvas
  * @param {"retro" | "sd" | "detailed" | "pixel"} mode
@@ -678,7 +678,7 @@ function paintVista(canvas, mode) {
   ctx.putImageData(img, 0, 0);
 }
 
-/** The SD preview (2D, once): half-size frame, 6-bit dither, soft 2× and scanlines. */
+/** The SD preview (2D, once): half-size frame, 5-bit dither, soft 2× and scanlines. */
 function paintSD(canvas) {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
@@ -696,7 +696,7 @@ function paintSD(canvas) {
       for (let x = 0; x < lo.width; x++) {
         const o = (y * lo.width + x) * 4;
         const t = BAYER4[(y & 3) * 4 + (x & 3)] / 16;
-        for (let c = 0; c < 3; c++) d[o + c] = (Math.floor((d[o + c] / 255) * 63 + t) / 63) * 255;
+        for (let c = 0; c < 3; c++) d[o + c] = (Math.floor((d[o + c] / 255) * 31 + t) / 31) * 255;
       }
     }
     lctx.putImageData(img, 0, 0);

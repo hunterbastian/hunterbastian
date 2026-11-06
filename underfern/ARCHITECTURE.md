@@ -61,9 +61,10 @@ working (add, don't rename) and note it in your report.
   - a 4-iteration Kawase bloom
   - a plain quarter copy, Kawase-blurred for depth of field
   - a composite at source size: DOF by linear depth, bloom, shafts, a little
-    saturation, and 6-bit colour with a 4×4 Bayer dither
+    saturation, and 5-bit colour (`levels` 31) with a 4×4 Bayer dither
   - an output pass at canvas size: the GameCube deflicker (¼ ½ ¼ vertical), composite
-    chroma bleed in YIQ, and scanlines.)
+    chroma bleed in YIQ, scanlines whose beam swells with brightness, and a faint
+    aperture-grille mask at 3+ screen pixels per line.)
   `"retro"` (default — "Retro HD", a
   late-2000s console look: `world/retro.js` draws the scene into a sub-HD target,
   720 rows on high and 540 on low at most, then one short post pass adds a bright-pass
@@ -116,7 +117,7 @@ underfern/
   src/world/wind.js     ATMOSPHERE  wind field: scent drift for the AI's sense of smell, vegetation sway
   src/world/look.js     ATMOSPHERE  the painterly look: shared uniforms + shader hooks patched into every lit material
   src/world/retro.js    INTEGRATION the Retro HD render style's post pass: bloom, soften, fringe, grade, grain
-  src/world/retro-sd.js INTEGRATION the Retro SD render style: Kawase bloom, DOF, sun shafts, 6-bit dither, deflicker, composite + CRT
+  src/world/retro-sd.js INTEGRATION the Retro SD render style: Kawase bloom, DOF, sun shafts, 5-bit dither, deflicker, composite + CRT
   src/world/landmarks.js TERRAIN    colossal fossils and stone wonders: placement, meshes, colliders
   src/world/underfern.js TERRAIN    the Underfern: the island's one giant tree fern (placement, geometry, glow, motes)
   src/world/atmosphere.js ATMOSPHERE fireflies and motes, light shafts, peak wisps and spindrift, cave fungi

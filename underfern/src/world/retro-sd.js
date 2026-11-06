@@ -7,17 +7,21 @@
 //   2. Bloom: the bright parts shrunk to a quarter and Kawase-blurred.
 //   3. Depth of field: a blurred copy blended in more with distance.
 //   4. Sun shafts: the bright sky smeared out radially from the sun.
-//   5. Colour depth: 6 bits per channel (the GameCube's RGBA6 frame buffer)
-//      with a 4×4 ordered dither so it doesn't band.
+//   5. Colour depth: 5 bits per channel (the PS2's 16-bit frame buffers;
+//      the GameCube's RGBA6 was 6) with a 4×4 ordered dither, so gradients
+//      show the dither — and a little banding, on purpose.
 //   6. Deflicker: every line blended with the lines above and below it, the
 //      GameCube's copy filter — a big part of why its games look so soft.
-//   7. Composite cable and CRT: colour bleeding sideways, and scanlines.
+//   7. Composite cable and CRT: colour bleeding sideways; scanlines whose
+//      beam swells with brightness (bright lines all but close the gaps, as
+//      on a tube); and, given enough screen pixels per line, a faint
+//      aperture-grille phosphor mask.
 //
 //   scene ──► sceneRT (+ depth) at source size
 //   sceneRT ──bright pass, ¼ (alpha: sky)──► bloomA ─┬─radial, toward the sun──► shafts (¼)
 //                                                    └─Kawase ×4──► bloom
 //   sceneRT ──¼──► soft ──Kawase ×3──► soft (depth of field)
-//   all of it ──composite (DOF, bloom, shafts, grade, 6-bit dither)──► frameRT (source size)
+//   all of it ──composite (DOF, bloom, shafts, grade, 5-bit dither)──► frameRT (source size)
 //   frameRT ──output (deflicker, composite bleed, scanlines)──► canvas (k × source)
 //
 // The scene target poses as an XR target for the reason given in retro.js.
@@ -28,24 +32,29 @@ import { LOOK } from "./look.js";
 
 /** Tuning (display-referred values, 0..1). */
 export const RETRO_SD = {
-  // Bloom: bright pass (max channel), knee and strength.
-  threshold: 0.7,
-  knee: 0.25,
-  bloom: 0.5,
+  // Bloom: bright pass (max channel), knee and strength. Kept off the plain
+  // daylight sky, or it stacks with the island's own haze into fog.
+  threshold: 0.76,
+  knee: 0.22,
+  bloom: 0.36,
   // Depth of field: blur starts (m), is full (m), and how much of it.
-  dofStart: 70,
-  dofEnd: 420,
-  dof: 0.7,
-  // Sun shafts strength.
-  shafts: 0.55,
+  dofStart: 110,
+  dofEnd: 600,
+  dof: 0.55,
+  // Sun shafts strength, and how far round the sun they reach (uv).
+  shafts: 0.42,
+  shaftReach: 0.4,
   // Saturation (1 = unchanged): that era's screens ran a little hot.
-  saturation: 1.1,
-  // Levels per channel − 1 (63 = 6 bits).
-  levels: 63,
-  // Deflicker (0 off … 1 the full ¼ ½ ¼ filter), chroma bleed, scanline depth.
+  saturation: 1.12,
+  // Levels per channel − 1 (31 = 5 bits, the PS2's 16-bit frame buffers): the
+  // dither shows on smooth gradients, a little banding on purpose.
+  levels: 31,
+  // Deflicker (0 off … 1 the full ¼ ½ ¼ filter), chroma bleed, scanline depth,
+  // and the phosphor mask (only drawn at 3+ screen pixels per line).
   deflicker: 1,
   bleed: 1,
-  scanlines: 0.32,
+  scanlines: 0.36,
+  mask: 0.1,
 };
 
 const CLIP_GLSL = /* glsl */ `
@@ -102,6 +111,7 @@ const SHAFT_FRAG = /* glsl */ `
 uniform sampler2D tSrc;
 uniform vec2 uSun;    // the sun, in uv
 uniform float uShaft; // strength × how visible the sun is
+uniform float uReach; // how far round the sun the shafts gather (uv)
 varying vec2 vUv;
 void main() {
   vec2 stride = (vUv - uSun) * (0.9 / 28.0);
@@ -111,7 +121,7 @@ void main() {
   for (int i = 0; i < 28; i++) {
     uv -= stride;
     vec4 s = texture2D(tSrc, uv);
-    float nearSun = 1.0 - smoothstep(0.0, 0.55, distance(uv, uSun));
+    float nearSun = 1.0 - smoothstep(0.0, uReach, distance(uv, uSun));
     acc += s.rgb * s.a * nearSun * w;
     w *= 0.95;
   }
@@ -150,7 +160,7 @@ void main() {
   // A little more colour.
   float l = dot(c, vec3(0.299, 0.587, 0.114));
   c = mix(vec3(l), c, uFx.z);
-  // 6-bit colour with a 4×4 ordered dither.
+  // Fewer colours (5 bits a channel) with a 4×4 ordered dither.
   c = floor(clamp(c, 0.0, 1.0) * uFx.w + bayer4(gl_FragCoord.xy)) / uFx.w;
   gl_FragColor = vec4(c, 1.0);
 }
@@ -160,7 +170,7 @@ void main() {
 const OUTPUT_FRAG = /* glsl */ `
 uniform sampler2D tFrame;
 uniform vec2 uSrc;  // source size (px)
-uniform vec3 uCrt;  // x deflicker, y chroma bleed, z scanline depth
+uniform vec4 uCrt;  // x deflicker, y chroma bleed, z scanline depth, w phosphor mask
 varying vec2 vUv;
 
 const mat3 TO_YIQ = mat3(0.299, 0.596, 0.211, 0.587, -0.274, -0.523, 0.114, -0.322, 0.312);
@@ -188,8 +198,14 @@ void main() {
   yiq.yz = mix(yiq.yz, iq, uCrt.y);
   yiq.x = mix(yiq.x, (r1.x + l1.x) * 0.5, 0.18 * uCrt.y);
   c = TO_RGB * yiq;
-  // Scanlines: each line's beam fades toward its edge (brightness made up).
-  c *= (1.0 - uCrt.z * smoothstep(0.45, 0.95, fy)) * (1.0 + uCrt.z * 0.35);
+  // Scanlines: each line's beam fades toward its edge, and swells with
+  // brightness, so bright lines all but close the gap (brightness made up).
+  float lum = clamp(yiq.x, 0.0, 1.0);
+  c *= (1.0 - uCrt.z * smoothstep(0.45, 0.95, fy) * (1.0 - 0.6 * lum)) * (1.0 + uCrt.z * 0.3);
+  // Aperture grille: a faint red-green-blue stripe per screen column.
+  float col = mod(floor(gl_FragCoord.x), 3.0);
+  vec3 grille = vec3(col < 0.5 ? 1.0 : 0.0, col > 0.5 && col < 1.5 ? 1.0 : 0.0, col > 1.5 ? 1.0 : 0.0);
+  c *= mix(vec3(1.0), 0.8 + 0.6 * grille, uCrt.w);
   gl_FragColor = vec4(c, 1.0);
 }
 `;
@@ -217,7 +233,7 @@ export class RetroSDPass {
     // The blurs run at half precision; the passes that read depth or address
     // single pixels (down, composite, output) keep full precision.
     this.kawase = postMaterial("underfern-sd-kawase", { tSrc: { value: null }, uTexel: { value: new THREE.Vector2() }, uIter: { value: 0 } }, KAWASE_FRAG, "mediump");
-    this.shaft = postMaterial("underfern-sd-shafts", { tSrc: { value: this.bloomA.texture }, uSun: { value: new THREE.Vector2(0.5, 0.5) }, uShaft: { value: 0 } }, SHAFT_FRAG, "mediump");
+    this.shaft = postMaterial("underfern-sd-shafts", { tSrc: { value: this.bloomA.texture }, uSun: { value: new THREE.Vector2(0.5, 0.5) }, uShaft: { value: 0 }, uReach: { value: 0.4 } }, SHAFT_FRAG, "mediump");
     this.composite = postMaterial(
       "underfern-sd-composite",
       {
@@ -234,7 +250,7 @@ export class RetroSDPass {
     );
     this.output = postMaterial(
       "underfern-sd-output",
-      { tFrame: { value: this.frameRT.texture }, uSrc: { value: new THREE.Vector2(1, 1) }, uCrt: { value: new THREE.Vector3() } },
+      { tFrame: { value: this.frameRT.texture }, uSrc: { value: new THREE.Vector2(1, 1) }, uCrt: { value: new THREE.Vector4() } },
       OUTPUT_FRAG,
     );
     this.quad = fullScreenQuad(this.composite);
@@ -323,6 +339,7 @@ export class RetroSDPass {
     this._pass(this.down, this.bloomA);
     this._sun(camera);
     this.shaft.uniforms.uShaft.value = T.shafts * this.sunVisible;
+    this.shaft.uniforms.uReach.value = T.shaftReach;
     this._pass(this.shaft, this.shaftRT);
     const bloom = this._kawase(this.bloomA, this.bloomB, [0, 1, 2, 3]);
     // A plain quarter copy, blurred, for the depth of field.
@@ -337,8 +354,8 @@ export class RetroSDPass {
     u.uFx.value.set(T.bloom, T.shafts > 0 ? 1 : 0, T.saturation, T.levels);
     this._pass(this.composite, this.frameRT);
 
-    // Scanlines need at least two screen rows per line.
-    this.output.uniforms.uCrt.value.set(T.deflicker, T.bleed, this.scale >= 2 ? T.scanlines : 0);
+    // Scanlines need at least two screen rows per line; the mask, three.
+    this.output.uniforms.uCrt.value.set(T.deflicker, T.bleed, this.scale >= 2 ? T.scanlines : 0, this.scale >= 3 ? T.mask : 0);
     this._pass(this.output, prev);
   }
 

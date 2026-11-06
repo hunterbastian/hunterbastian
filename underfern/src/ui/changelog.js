@@ -4,6 +4,17 @@
 /** @type {{ v: string, date: string, title: string, notes: string[] }[]} */
 export const CHANGELOG = [
   {
+    v: "0.14",
+    date: "2026-11-06",
+    title: "Retro SD, retuned",
+    notes: [
+      "Clearer skies: a lighter bloom, sun shafts that stay close to the sun, and distance blur that starts further out.",
+      "5-bit colour, like the PS2's 16-bit frame buffers: the dither shows on smooth skies, with a little banding on purpose.",
+      "Scanlines swell with brightness, so bright lines all but close the gaps, as on a tube.",
+      "A faint phosphor mask on screens dense enough to show it.",
+    ],
+  },
+  {
     v: "0.13",
     date: "2026-11-06",
     title: "The Underfern",
