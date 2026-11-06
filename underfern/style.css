@@ -3534,6 +3534,15 @@ button:disabled {
   border-top: 2px dashed rgba(150, 62, 34, 0.85);
 }
 
+/* A rim with outward cliff ticks, like the map's mesas. */
+.lg--mesa {
+  border-radius: 50%;
+  border: 1px solid rgba(52, 46, 36, 0.9);
+  background: repeating-conic-gradient(rgba(52, 46, 36, 0.9) 0 8deg, transparent 8deg 30deg);
+  -webkit-mask: radial-gradient(circle, transparent 0 3px, #000 3px 7px);
+  mask: radial-gradient(circle, transparent 0 3px, #000 3px 7px);
+}
+
 .lg--cave {
   width: 12px;
   height: 7px;

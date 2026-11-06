@@ -190,6 +190,17 @@ bands of layered rock, and the cliffs are too steep to climb. One or two pass
 valleys cut right through the range, and switchback trails climb to **lookouts**
 high on the ridge, with the whole island below.
 
+The lowlands rise and fall too:
+- **Mesas** (three or four) stand out of the plains and forests: flat-topped
+  tablelands 80–120 m across, with sheer banded walls 25–35 m tall over aprons
+  of scree. Each one has a single rubble ramp up to its top, a quiet world of
+  its own with a view. Step off the edge anywhere else and you fall.
+- **Buttes** (two or three) are rock pillars 40–60 m tall that nothing climbs.
+- **Sea cliffs**: the rocky headlands rise about 25 m straight from a strip of
+  shingle.
+- The rolling country between them has more relief, with hills and hollows of
+  20–45 m.
+
 The island's **landmarks** are all from deep time, older and far bigger than
 anything alive on it:
 - the bones of colossal animals: a ribcage you can walk through, a great
@@ -217,6 +228,8 @@ light. Nothing spawns there.
 
 The map (M) marks:
 - the summits, with their heights;
+- the mesas and buttes, their rims hachured like cliffs, with the height of
+  each top and a mesa's ramp;
 - the passes and the trails to the lookouts;
 - the cave mouths;
 - the landmarks, by name.

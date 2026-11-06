@@ -282,6 +282,9 @@ export class Terrain {
   findSpawnPoint(rng, { biomes, minHeight = 1, maxSlope = 0.35, near, tries = 300 } = {}) // → {x, z} | null
                       // near = { x, z, minR, maxR } restricts to a ring; never inside a keep-out
   coastAt(x, z)       // 0..1 how far into the coastal belt: 1 on the open sand, ~0.5 in the dunes, 0 inland
+  mesas;              // [{ kind: "mesa" | "butte", x, z, r /* rim radius */, top, base /* above the sea */,
+                      //   reach /* scree apron */, rim: [{ x, z }] /* 48 points */,
+                      //   ramp: { x0, z0 /* at the rim */, x1, z1 /* at the foot */, width } | null }]
   addKeepOut(x, z, r) // keep spawns out of a circle (Landmarks adds every footprint)
   keptOut(x, z)       // inside any keep-out circle
   nearestFreshWater(x, z, maxRadius = 400) // → { x, z, dist } | null — a LAND point on the shore
@@ -335,6 +338,30 @@ offshore islets are welcome. **Three living biomes**:
   swathes where it is dry, and upland meadows on the massif's lower slopes.
 
 `biomeAt` returns one of `ocean`, `lake`, `coast`, `plains`, `forest` or `rock`.
+
+**Lowland relief.**
+- *Rolling country*: domain-warped, slope-damped fBm of about 20–45 m inland.
+- *Sea cliffs*: on the rocky headlands (`nCliff`), a ~26 m rise within 15 m of
+  the shore, with deeper water at their foot.
+- *Mesas and buttes* (`_placeMesas`, `_mesaField`): planned on the layout grid
+  from their own stream (`"underfern-mesas"`), so the rest of the layout keeps
+  its sequence.
+  - Sites: 3–4 mesas (rim radius 40–60 m, 24–36 m tall) and 2–3 buttes (10–16 m,
+    38–58 m). They sit well inland, clear of the range, off swamps, on ground
+    that varies less than 7 m under the top, and apart from each other.
+  - Shape: the rim is ragged (a noise-warped distance). A level top runs to a
+    rounded lip, then a sheer wall drops to the talus, and a concave scree apron
+    runs out onto the plain.
+  - Ramp: each mesa has one rubble ramp at grade 0.3, 13 m wide, pointing to low
+    open ground and, other things equal, toward the island's heart.
+  - How they're built: `_macro` raises them at the end of its land branch (a
+    smooth max), and the layout grid is patched the same way, so lakes, rivers,
+    caves and spawns all see them. Lakes and rivers keep out of their footprints
+    and ramps.
+  - After the lakes and rivers are carved, `_reraiseMesas` stands them back up
+    (a plain max), so a bank can't shave a wall.
+  - Caves avoid buttes and ramps. A mesa's wall may hold a den.
+  - Landmarks and the Underfern keep clear of all of them.
 
 **Mountains & caves.** Layout decisions are made on the fixed coarse layout grid
 (256², 6.25 m) from their own seed streams (`"underfern-massif"`, `"underfern-caves"`),

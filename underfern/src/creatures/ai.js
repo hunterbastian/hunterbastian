@@ -1872,6 +1872,9 @@ export class Brain {
         if (t.nearCave && t.nearCave(x, z)) continue; // caves: never a place to wander to
         const slope = t.slopeAt(x, z);
         if (slope > SLOPE_SOFT) continue;
+        // Not across a wall (a mesa's rim, a sea cliff, the range): steering
+        // would only walk it up to the foot, or off the brink.
+        if (t.slopeAt(px + (x - px) * 0.35, pz + (z - pz) * 0.35) > SLOPE_HARD || t.slopeAt(px + (x - px) * 0.7, pz + (z - pz) * 0.7) > SLOPE_HARD) score -= 1.4;
         const biome = t.biomeAt(x, z);
         if (biomes.includes(biome)) score += 1;
         if (prefer && biome === prefer) {

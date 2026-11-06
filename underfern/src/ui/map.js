@@ -206,6 +206,7 @@ export class MapView {
             <li><span class="lg lg--sw lg--fresh"></span>Lakes &amp; rivers — drinkable</li>
             <li><span class="lg lg--sw lg--sea"></span>Sea — salt</li>
             <li><span class="lg lg--peak"></span>Summit · height in metres</li>
+            <li><span class="lg lg--mesa"></span>Mesa · butte — sheer sides, height of the top</li>
             <li><span class="lg lg--route"></span>Pass &amp; trail to a lookout</li>
             <li><span class="lg lg--cave"></span>Cave mouth &amp; passage</li>
             <li><span class="lg lg--bone"></span>Old bones — fossil giants</li>

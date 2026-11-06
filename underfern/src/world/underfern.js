@@ -74,6 +74,12 @@ export function planUnderfern(terrain, seed, others = []) {
     for (const e of c.entrances) avoid.push({ x: e.x, z: e.z, r: 40 });
     for (const p of c.path) avoid.push({ x: p.x, z: p.z, r: 18 });
   }
+  // Mesas and buttes with their scree, and a mesa's ramp.
+  for (const m of T.mesas || []) {
+    avoid.push({ x: m.x, z: m.z, r: m.reach + 8 });
+    const R = m.ramp;
+    if (R) for (let t = 0; t <= 1.001; t += 0.125) avoid.push({ x: R.x0 + (R.x1 - R.x0) * t, z: R.z0 + (R.z1 - R.z0) * t, r: R.width * 0.5 + 12 });
+  }
   const clearOf = (x, z) => {
     for (const a of avoid) if (Math.hypot(x - a.x, z - a.z) < a.r + R * 0.7) return false;
     for (const s of others) if (Math.hypot(x - s.x, z - s.z) < 160) return false;

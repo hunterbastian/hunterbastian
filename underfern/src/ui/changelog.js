@@ -4,6 +4,19 @@
 /** @type {{ v: string, date: string, title: string, notes: string[] }[]} */
 export const CHANGELOG = [
   {
+    v: "0.17",
+    date: "2026-11-06",
+    title: "Higher ground",
+    notes: [
+      "Mesas rise out of the lowlands: flat-topped tablelands with sheer 25–35 m walls, each with one rubble ramp up to its top.",
+      "Buttes: rock pillars 40–60 m tall that nothing climbs.",
+      "The rocky headlands are now sea cliffs, rising about 25 m from a strip of shingle.",
+      "The rolling country between them has more rise and fall.",
+      "Step off a cliff and you fall: take the ramp.",
+      "The map hachures every mesa and butte like a cliff, with its height and its ramp.",
+    ],
+  },
+  {
     v: "0.16",
     date: "2026-11-06",
     title: "Fights with weight",

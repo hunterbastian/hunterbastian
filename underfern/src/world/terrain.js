@@ -1678,6 +1678,8 @@ export class Terrain {
     this.lakes = [];
     /** River centrelines: [[{ x, z }, …], …] in world metres, source → mouth. */
     this.rivers = [];
+    /** Mesas and buttes: [{ kind, x, z, r, top, base, reach, ramp: { x0, z0, x1, z1, width } | null }]. */
+    this.mesas = [];
     /** Generation statistics (timings, land fraction, counts) for debugging. */
     this.stats = {};
     /** Circles findSpawnPoint keeps out of (landmarks): [{ x, z, r }]. */
@@ -1703,6 +1705,7 @@ export class Terrain {
     timings.shape = now() - t;
     t = now();
     this._carveWater(g);
+    this._reraiseMesas(g, g.vgrid, this.heights);
     this._carveRoutes(g, true);
     this._carveCaves(g);
     this._classifyWater(g);
@@ -2275,6 +2278,9 @@ export class Terrain {
       nBand: createNoise2D(hash("underfern-massif", "band", this.seed)),
       nCave: createNoise2D(hash("underfern-caves", "shape", this.seed)),
       nRib: createNoise2D(hash("underfern-massif", "rib", this.seed)),
+      // Mesas and buttes (their own stream too).
+      nMesaEdge: createNoise2D(hash("underfern-mesas", "edge", this.seed)),
+      mesas: [],
       // The vertex grid in design metres.
       vgrid: { n: this._n, origin: -this.half / k, step: this.cellSize / k },
       lgrid: { n: LAYOUT_RES + 1, origin: -DESIGN_SIZE / 2, step: DESIGN_SIZE / LAYOUT_RES },
@@ -2401,6 +2407,24 @@ export class Terrain {
         }
       }
     }
+    // Mesas and buttes out in the lowlands: placed on the ground as it stands,
+    // then raised into the layout heights (exactly as _macro raises them at
+    // the vertices) so lakes, rivers, caves and spawns all see them.
+    this._placeMesas(g, rest, mtn);
+    if (g.mesas.length) {
+      for (const M of g.mesas) {
+        const rr = Math.max(M.reach, M.ramp ? M.ramp.end + M.ramp.halfW + M.ramp.bank : 0) + 1;
+        const [i0, i1, j0, j1] = this._gridBox(L, M.x, M.z, rr);
+        for (let iz = j0; iz <= j1; iz++) for (let ix = i0; ix <= i1; ix++) g.lMesaHit[iz * LN + ix] = 1;
+      }
+      for (let i = 0; i < LN * LN; i++) {
+        if (!g.lMesaHit[i]) continue;
+        const x = L.origin + (i % LN) * L.step;
+        const z = L.origin + ((i / LN) | 0) * L.step;
+        rest[i] = this._mesas(g, x, z, rest[i]);
+      }
+    }
+
     // Scale the mountain layer so the tallest peak lands on maxHeight (the
     // gullies and fine detail added later move it by only a metre or two).
     g.mtnScale = mtn[maxIdx] > 1 ? clamp((this.maxHeight - rest[maxIdx]) / mtn[maxIdx], 0.4, 2) : 1;
@@ -2594,7 +2618,7 @@ export class Terrain {
       // Sea floor: a shallow shelf off the beaches, then a drop to the deep.
       const mo = -m;
       h = -(0.06 * mo + 28 * smoothstep(12, 170, mo));
-      h -= cliff * 5 * smoothstep(0, 30, mo);
+      h -= cliff * 7 * smoothstep(0, 30, mo);
       h += 1.4 * g.nDetail(x * 0.01, z * 0.01) * smoothstep(20, 90, mo);
       if (h < -30) h = -30;
       if (crown > 0) h = Math.max(h, crown - 2);
@@ -2605,8 +2629,9 @@ export class Terrain {
       h = 0.04 * m * (1 - inland) + 2.4 * smoothstep(0, 70, m);
       // Rolling country: domain-warped, slope-damped fBm.
       const hills = erodedFbm2D(g.nHills, wx * 0.0034, wz * 0.0034, 5, 2, 0.5, 0.9);
-      h += fall * (2.5 + 9 * inland + (5 + 13 * inland) * hills);
-      h += cliff * 12 * smoothstep(1, 22, m) * (1 - inland * 0.6);
+      h += fall * (2.5 + 10 * inland + (5 + 17 * inland) * hills);
+      // Rocky headlands: a sheer rise of ~25 m straight up from a strand of shingle.
+      h += cliff * 26 * smoothstep(2, 15, m) * (1 - inland * 0.55);
 
       // Highlands and mountains along the spine.
       if (sd < 1e8) {
@@ -2646,6 +2671,8 @@ export class Terrain {
       sw = smoothstep(0.08, 0.34, swN) * (1 - hm) * smoothstep(15, 80, m) * (1 - smoothstep(7, 15, h)) * (1 - cliff);
       if (sw > 0) h = lerp(h, 0.9 + 0.5 * g.nDetail(x * 0.03, z * 0.03), sw * 0.9);
       h += crown;
+      // Mesas and buttes stand on whatever the ground is by now.
+      if (g.mesas.length) h = this._mesas(g, x, z, h);
     }
 
     // The last stretch to the tile edge sinks to the off-tile depth.
@@ -2667,6 +2694,283 @@ export class Terrain {
     return h;
   }
 
+  /* --- Generation: mesas and buttes ---------------------------------------- */
+
+  /**
+   * Choose where the mesas and buttes stand (g.mesas, design metres), on the
+   * layout grid's ground before they are raised into it: well inland, out of
+   * the range and its foothills, off swampy ground, on ground flat enough for
+   * a level top, apart from each other. Each mesa gets one rubble ramp,
+   * pointing down to open ground and, all else equal, toward the island's
+   * heart. Their own seed stream, so the rest of the layout keeps its sequence.
+   * @param {object} g
+   * @param {Float32Array} rest ground height without the mountain layer
+   * @param {Float32Array} mtn the (unscaled) mountain layer
+   */
+  _placeMesas(g, rest, mtn) {
+    const rng = makeRng(hash("underfern-mesas", this.seed));
+    const L = g.lgrid;
+    const LN = L.n;
+    const R = g.R;
+    g.mesas = [];
+    g.lMesaHit = new Uint8Array(LN * LN);
+    const idx = (x, z) => {
+      const ix = clamp(Math.round((x - L.origin) / L.step), 0, LN - 1);
+      const iz = clamp(Math.round((z - L.origin) / L.step), 0, LN - 1);
+      return iz * LN + ix;
+    };
+    const inland = (x, z) => g.lC[idx(x, z)] * R;
+    const spineDist = (x, z) => {
+      let best = Infinity;
+      for (let s = 0; s < g.spine.length; s += 2) best = Math.min(best, Math.hypot(g.spine[s] - x, g.spine[s + 1] - z));
+      return best;
+    };
+    const nE = g.nMesaEdge;
+    const plan = [];
+    const mesaCount = randInt(rng, 3, 4);
+    const butteCount = randInt(rng, 2, 3);
+    for (let i = 0; i < mesaCount; i++) plan.push("mesa");
+    for (let i = 0; i < butteCount; i++) plan.push("butte");
+
+    for (const kind of plan) {
+      const mesa = kind === "mesa";
+      for (let tries = 0; tries < 900; tries++) {
+        const a = rng() * TAU;
+        const dd = Math.sqrt(rng()) * R * 0.95;
+        const x = Math.cos(a) * dd;
+        const z = Math.sin(a) * dd;
+        const r = mesa ? rand(rng, 40, 60) : rand(rng, 10, 16);
+        const H = mesa ? rand(rng, 24, 36) : rand(rng, 38, 58);
+        const talus = mesa ? 0.42 : 0.3;
+        const wall = mesa ? Math.max(3, H * 0.11) : Math.max(2.2, H * 0.07);
+        const apron = (H * talus) / 0.6;
+        const wamp = r * (mesa ? 0.24 : 0.16);
+        const reach = r + wamp + wall + apron + 3;
+        const grade = 0.3;
+        const rampLen = mesa ? H / grade + 12 : 0;
+        // Inland, clear of the range itself, off swamps, on gentle ground.
+        if (inland(x, z) < reach + 45) continue;
+        if (spineDist(x, z) < g.rangeWidth * 1.5 + reach) continue;
+        const i0 = idx(x, z);
+        const h0 = rest[i0];
+        if (h0 < 2.5 || h0 > 34 || g.lHm[i0] > 0.35 || mtn[i0] > 0.3 || g.lSw[i0] > 0.2) continue;
+        let lo = h0;
+        let hi = h0;
+        let ok = true;
+        for (let k = 0; k < 16 && ok; k++) {
+          const t = (k / 16) * TAU;
+          for (const rr of [r * 0.6, r + wamp, reach]) {
+            const px = x + Math.cos(t) * rr;
+            const pz = z + Math.sin(t) * rr;
+            const j = idx(px, pz);
+            if (inland(px, pz) < 30 || g.lHm[j] > 0.45 || mtn[j] > 0.4 || g.lSw[j] > 0.35) ok = false;
+            if (rr <= r + wamp) {
+              lo = Math.min(lo, rest[j]);
+              hi = Math.max(hi, rest[j]);
+            }
+          }
+        }
+        if (!ok || hi - lo > (mesa ? 7 : 5)) continue;
+        if (g.mesas.some((o) => Math.hypot(o.x - x, o.z - z) < o.reach + reach + 70)) continue;
+
+        const M = {
+          kind,
+          x,
+          z,
+          r,
+          H,
+          wall,
+          apron,
+          wamp,
+          wf: (mesa ? 1.15 : 1.5) / r,
+          s: rand(rng, -400, 400),
+          base: (lo + hi) / 2,
+          top: (lo + hi) / 2 + H,
+          talusTop: (lo + hi) / 2 + H * talus,
+          undul: mesa ? 0.9 : 0.3,
+          reach,
+          reach2: reach * reach,
+          ramp: null,
+        };
+        if (mesa) {
+          // The ramp: toward open, low ground; prefer the island's heart.
+          const toCentre = Math.atan2(-z, -x);
+          let best = null;
+          for (let k = 0; k < 16; k++) {
+            const t = (k / 16) * TAU;
+            const ux = Math.cos(t);
+            const uz = Math.sin(t);
+            const fx = x + ux * (r + wamp + rampLen);
+            const fz = z + uz * (r + wamp + rampLen);
+            if (inland(fx, fz) < 25) continue;
+            const jf = idx(fx, fz);
+            if (g.lHm[jf] > 0.45 || mtn[jf] > 0.3 || g.lSw[jf] > 0.35 || Math.abs(rest[jf] - M.base) > 6) continue;
+            // The ramp must not run into another mesa.
+            const seg = { x, z, ux, uz, len: r + wamp + rampLen };
+            if (g.mesas.some((o) => this._segDist(seg, o.x, o.z) < o.reach + 15)) continue;
+            const off = Math.abs(Math.atan2(Math.sin(t - toCentre), Math.cos(t - toCentre)));
+            const score = off + 0.08 * Math.abs(rest[jf] - M.base) + rng() * 0.6;
+            if (!best || score < best.score) best = { score, ux, uz };
+          }
+          if (!best) continue;
+          M.ux = best.ux;
+          M.uz = best.uz;
+          // Where the ragged rim crosses the ramp's line: the ramp starts there.
+          let a0 = r;
+          for (let a = 0; a <= r * 2; a += 0.5) {
+            if (this._mesaDist(M, nE, x + M.ux * a, z + M.uz * a) >= r) {
+              a0 = a;
+              break;
+            }
+          }
+          M.ramp = { start: a0, end: a0 + rampLen, grade, halfW: 6.5, bank: 10 };
+        }
+        // Nor may a later mesa's body sit on this one's ramp.
+        if (g.mesas.some((o) => o.ramp && this._segDist({ x: o.x, z: o.z, ux: o.ux, uz: o.uz, len: o.ramp.end }, x, z) < reach + 15)) continue;
+        g.mesas.push(M);
+        break;
+      }
+    }
+    // Rivers keep out of a mesa's footprint and off its ramp.
+    g.lMesaKeep = new Uint8Array(LN * LN);
+    for (let i = 0; i < LN * LN; i++) {
+      if (this._mesaClear(g, L.origin + (i % LN) * L.step, L.origin + ((i / LN) | 0) * L.step) < 25) g.lMesaKeep[i] = 1;
+    }
+    // World-space summary (map, tests, landmarks).
+    const k = g.k;
+    this.mesas = g.mesas.map((M) => ({
+      kind: M.kind,
+      x: M.x * k,
+      z: M.z * k,
+      r: M.r * k,
+      top: M.top * k,
+      base: M.base * k,
+      reach: M.reach * k,
+      // The ragged rim, for the map: where the warped distance reaches r.
+      rim: Array.from({ length: 48 }, (_, q) => {
+        const t = (q / 48) * TAU;
+        const ux = Math.cos(t);
+        const uz = Math.sin(t);
+        let a = M.r * 0.5;
+        while (a < M.r * 2 && this._mesaDist(M, nE, M.x + ux * a, M.z + uz * a) < M.r) a += 0.5;
+        return { x: (M.x + ux * a) * k, z: (M.z + uz * a) * k };
+      }),
+      ramp: M.ramp
+        ? {
+            x0: (M.x + M.ux * M.ramp.start) * k,
+            z0: (M.z + M.uz * M.ramp.start) * k,
+            x1: (M.x + M.ux * (M.ramp.start + M.H / M.ramp.grade)) * k,
+            z1: (M.z + M.uz * (M.ramp.start + M.H / M.ramp.grade)) * k,
+            width: M.ramp.halfW * 2 * k,
+          }
+        : null,
+    }));
+  }
+
+  /** Distance from (x, z) to a segment { x, z, ux, uz, len } (a mesa's ramp line). */
+  _segDist(seg, x, z) {
+    const dx = x - seg.x;
+    const dz = z - seg.z;
+    const a = clamp(dx * seg.ux + dz * seg.uz, 0, seg.len);
+    return Math.hypot(dx - seg.ux * a, dz - seg.uz * a);
+  }
+
+  /**
+   * How far (x, z) is outside every mesa: past its scree apron, and for a
+   * mesa past its ramp's banks (negative inside). Infinity with none.
+   */
+  _mesaClear(g, x, z) {
+    let best = Infinity;
+    for (const M of g.mesas) {
+      best = Math.min(best, Math.hypot(x - M.x, z - M.z) - M.reach);
+      if (M.ramp) best = Math.min(best, this._segDist({ x: M.x, z: M.z, ux: M.ux, uz: M.uz, len: M.ramp.end }, x, z) - (M.ramp.halfW + M.ramp.bank));
+    }
+    return best;
+  }
+
+  /** Distance from a mesa's centre, warped so its rim runs ragged. */
+  _mesaDist(M, nE, x, z) {
+    const f = M.wf;
+    const wx = x - M.x + M.wamp * nE(x * f + M.s, z * f);
+    const wz = z - M.z + M.wamp * nE(x * f - M.s + 31.7, z * f + 11.3);
+    return Math.sqrt(wx * wx + wz * wz);
+  }
+
+  /**
+   * Raise the ground into the mesas and buttes: a level top (gently swelling)
+   * to a rounded lip, a sheer wall down to the talus, and a concave apron of
+   * scree out onto the plain; a mesa's ramp is a causeway of rubble leaning on
+   * its wall at a walkable grade. Smooth max with the ground beneath.
+   */
+  _mesas(g, x, z, h) {
+    const list = g.mesas;
+    for (let i = 0; i < list.length; i++) {
+      const hm = this._mesaField(g, list[i], x, z);
+      if (hm > h - 2) h = smax(h, hm, 2);
+    }
+    return h;
+  }
+
+  /** One mesa's (or butte's) surface at a design point; -Infinity outside it. */
+  _mesaField(g, M, x, z) {
+    const nE = g.nMesaEdge;
+    const dx = x - M.x;
+    const dz = z - M.z;
+    let hm = -Infinity;
+    if (dx * dx + dz * dz < M.reach2) {
+      const e = this._mesaDist(M, nE, x, z) - M.r; // metres past the rim
+      const top = M.top + M.undul * nE(x * 0.035 + M.s, z * 0.035 - M.s);
+      if (e <= 0) hm = top - 0.9 * smoothstep(-5, 0, e);
+      else {
+        // The wall's footing wanders, so the scree meets it unevenly.
+        const wall = M.wall * (0.75 + 0.5 * (0.5 + 0.5 * nE(x * 0.06 - M.s, z * 0.06)));
+        if (e < wall) hm = lerp(top - 0.9, M.talusTop, e / wall);
+        else {
+          const t = (e - wall) / M.apron;
+          if (t < 1) {
+            const u = 1 - t;
+            hm = M.base - 1 + (M.talusTop - M.base + 1) * u * u + 0.6 * nE(x * 0.11, z * 0.11) * u;
+          }
+        }
+      }
+    }
+    const rp = M.ramp;
+    if (rp) {
+      const a = dx * M.ux + dz * M.uz;
+      if (a > rp.start - 3 && a < rp.end) {
+        const l = Math.abs(dz * M.ux - dx * M.uz);
+        if (l < rp.halfW + rp.bank) {
+          let hr = M.top - Math.max(0, a - rp.start) * rp.grade;
+          hr -= Math.max(0, l - rp.halfW) * 1.15; // its banks
+          hr += 0.3 * nE(x * 0.09 + M.s, z * 0.09); // rubble
+          if (hr > hm) hm = hr;
+        }
+      }
+    }
+    return hm;
+  }
+
+  /**
+   * Lake and river banks smooth-min the ground on their way down, which
+   * would shave a nearby butte: after carving, the mesas stand back up
+   * (a plain max, a no-op wherever nothing was cut). Any grid.
+   */
+  _reraiseMesas(g, grid, H) {
+    const n = grid.n;
+    for (const M of g.mesas) {
+      const rr = Math.max(M.reach, M.ramp ? M.ramp.end + M.ramp.halfW + M.ramp.bank : 0) + 1;
+      const [ix0, ix1, iz0, iz1] = this._gridBox(grid, M.x, M.z, rr);
+      for (let iz = iz0; iz <= iz1; iz++) {
+        const z = grid.origin + iz * grid.step;
+        for (let ix = ix0; ix <= ix1; ix++) {
+          const i = iz * n + ix;
+          const hm = this._mesaField(g, M, grid.origin + ix * grid.step, z);
+          if (hm > H[i]) H[i] = hm;
+        }
+      }
+    }
+  }
+
   /* --- Generation: caves -------------------------------------------------- */
 
   /** Pick cave sites on the layout grid (see caves.js). */
@@ -2677,6 +2981,11 @@ export class Terrain {
     const avoid = [];
     for (const o of g.lookouts) avoid.push({ x: o.x, z: o.z, r: 60 });
     for (const p of g.passes) avoid.push({ x: p.x, z: p.z, r: 70 });
+    // Buttes are too slender to hollow; a mesa's wall may hold a den, but not under its ramp.
+    for (const M of g.mesas) {
+      if (M.kind === "butte") avoid.push({ x: M.x, z: M.z, r: M.reach + 20 });
+      else for (let a = M.ramp.start - 10; a <= M.ramp.end; a += 12) avoid.push({ x: M.x + M.ux * a, z: M.z + M.uz * a, r: 24 });
+    }
     for (const rt of g.routes) {
       if (rt.kind === "valley") continue;
       for (let i = 0; i < rt.pts.length; i += 4) avoid.push({ x: rt.pts[i], z: rt.pts[i + 1], r: 22 });
@@ -3184,6 +3493,7 @@ export class Terrain {
     // From here on the layout heights carry lake basins and river valleys too.
     g.lH = g.lHc.slice();
     this._carveRiverValleys(g, L, g.lH);
+    this._reraiseMesas(g, L, g.lH);
     const H = g.lH;
     const SPACING = ROUTE_SPACING;
     const finish = (pts, floorAt, kind, opts) => finishRoute(pts, floorAt, kind, opts);
@@ -3539,6 +3849,7 @@ export class Terrain {
         if (lakes.length >= target) break;
         const r = lakes.length === 0 ? rand(rng, 70, 92) : rand(rng, 40, 66);
         if (lakes.some((o) => Math.hypot(o.x - c.x, o.z - c.z) < o.r + r + 190)) continue;
+        if (this._mesaClear(g, c.x, c.z) < r * 1.5 + 30) continue;
         // Keep basins out of the range's footprint.
         let nearSpine = false;
         for (let s = 0; s < g.spine.length; s += 2) {
@@ -3566,8 +3877,9 @@ export class Terrain {
         lakes.push({ id: lakes.length, x: c.x, z: c.z, r, depth: rand(rng, 3.5, 7), lobes, reach: reach * 1.3 + 170 });
       }
     };
-    tryFill(pickSites(0.24, 0.25, 22));
-    if (lakes.length < 3) tryFill(pickSites(0.16, 0.5, 34));
+    // (Heights scaled with the rolling country's relief.)
+    tryFill(pickSites(0.24, 0.25, 28));
+    if (lakes.length < 3) tryFill(pickSites(0.16, 0.5, 42));
     g.lakes = lakes;
 
     // Carve the basins into a copy of the layout heights (for river routing)
@@ -3652,6 +3964,7 @@ export class Terrain {
             if (mx < 1 || mz < 1 || mx >= cw - 1 || mz >= cw - 1) continue;
             const m = mz * cw + mx;
             if (blocked && blocked(m)) continue;
+            if (g.lMesaKeep && g.lMesaKeep[lIdx(m)]) continue;
             const hb = Math.max(H[lIdx(m)], 0);
             const len = ox && oz ? cellM * Math.SQRT2 : cellM;
             const cost = len * (1 + Math.pow(hb / 7, 1.5) + 40 * Math.max(0, (hb - ha) / len));
@@ -3689,6 +4002,7 @@ export class Terrain {
         const i = iz * LN + ix;
         const hm = g.lHm[i];
         if (hm < minHm || hm > maxHm || g.lMm[i] > maxMtn || g.lC[i] < 0.12) continue;
+        if (g.lMesaKeep && g.lMesaKeep[i]) continue;
         if (H[i] < minH || H[i] > maxH) continue;
         out.push({ x: L.origin + ix * L.step, z: L.origin + iz * L.step, h: H[i] });
       }
@@ -4950,6 +5264,75 @@ export class Terrain {
       ctx.beginPath();
       ctx.arc(cx, cy, 2.2 * u, 0, TAU);
       ctx.fill();
+    }
+
+    // Mesas and buttes: the rim, hachured outward like a cliff on a survey
+    // plate (open where a mesa's ramp climbs it, dashed like a trail), and the
+    // height of the top.
+    ctx.lineCap = "round";
+    for (const m of this.mesas || []) {
+      const pts = m.rim;
+      if (!pts || pts.length < 3) continue;
+      const R = m.ramp;
+      const onRamp = (x, z) => {
+        if (!R) return false;
+        const ux = R.x1 - R.x0;
+        const uz = R.z1 - R.z0;
+        const l2 = ux * ux + uz * uz || 1;
+        const t = clamp(((x - R.x0) * ux + (z - R.z0) * uz) / l2, -0.15, 1);
+        return Math.hypot(x - (R.x0 + ux * t), z - (R.z0 + uz * t)) < R.width * 0.5 + 5;
+      };
+      const tick = (m.kind === "butte" ? 2.6 : 3.4) * u;
+      for (const [col, lw] of [[PAPER, 2.8 * u], [INK, 1.05 * u]]) {
+        ctx.strokeStyle = col;
+        ctx.lineWidth = lw;
+        ctx.beginPath();
+        for (let i = 0; i < pts.length; i++) {
+          const a = pts[i];
+          const b = pts[(i + 1) % pts.length];
+          const mx = (a.x + b.x) / 2;
+          const mz = (a.z + b.z) / 2;
+          if (onRamp(mx, mz)) continue;
+          let nx = mx - m.x;
+          let nz = mz - m.z;
+          const l = Math.hypot(nx, nz) || 1;
+          nx /= l;
+          nz /= l;
+          ctx.moveTo(P(mx), P(mz));
+          ctx.lineTo(P(mx) + nx * tick, P(mz) + nz * tick);
+        }
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      pts.forEach((p, i) => (i ? ctx.lineTo(P(p.x), P(p.z)) : ctx.moveTo(P(p.x), P(p.z))));
+      ctx.closePath();
+      ctx.lineWidth = 1.1 * u;
+      ctx.strokeStyle = INK;
+      ctx.stroke();
+      if (R) {
+        ctx.setLineDash([3 * u, 2.4 * u]);
+        for (const [col, lw] of [[PAPER, 3 * u], [ROUTE, 1.4 * u]]) {
+          ctx.strokeStyle = col;
+          ctx.lineWidth = lw;
+          ctx.beginPath();
+          ctx.moveTo(P(R.x1), P(R.z1));
+          ctx.lineTo(P(R.x0), P(R.z0));
+          ctx.stroke();
+        }
+        ctx.setLineDash([]);
+      }
+      ctx.textBaseline = "middle";
+      ctx.font = `italic ${Math.round(10 * u)}px "Fraunces", Georgia, serif`;
+      const label = `${Math.round(m.top)}`;
+      const lx = P(m.x);
+      const ly = P(m.z);
+      ctx.textAlign = "center";
+      ctx.lineWidth = 3 * u;
+      ctx.strokeStyle = PAPER;
+      ctx.strokeText(label, lx, ly);
+      ctx.fillStyle = INK;
+      ctx.fillText(label, lx, ly);
+      ctx.textAlign = "start";
     }
 
     // Summits: a triangle and the height, in the plate's italic.

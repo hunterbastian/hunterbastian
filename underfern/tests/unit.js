@@ -591,6 +591,71 @@ test("massif: walkable from the lowlands to every pass, lookout and cave mouth",
   }
 });
 
+test("mesas & buttes: stand out of the lowlands with sheer sides; every mesa top is walkable up its ramp, no butte's; same at any resolution", () => {
+  const t = getHiTerrain();
+  const lo = getTerrain();
+  const mesas = t.mesas.filter((m) => m.kind === "mesa");
+  const buttes = t.mesas.filter((m) => m.kind === "butte");
+  assert.range(mesas.length, 2, 4, "mesa count");
+  assert.range(buttes.length, 1, 3, "butte count");
+  const w = walkable(t);
+  for (const m of t.mesas) {
+    const name = `${m.kind} at ${m.x.toFixed(0)}, ${m.z.toFixed(0)}`;
+    assert(m.top - m.base > (m.kind === "mesa" ? 20 : 30), `${name}: stands ${(m.top - m.base).toFixed(0)} m tall`);
+    assert.near(t.surfaceAt(m.x, m.z), m.top + t.seaLevel, 3, `${name}: level top:`);
+    // Sheer: just outside the rim (away from a ramp) the ground drops like a wall.
+    let wall = 0;
+    let samples = 0;
+    for (const p of m.rim) {
+      const dx = p.x - m.x;
+      const dz = p.z - m.z;
+      const l = Math.hypot(dx, dz) || 1;
+      if (m.ramp) {
+        const R = m.ramp;
+        const ux = R.x1 - R.x0;
+        const uz = R.z1 - R.z0;
+        const ul = Math.hypot(ux, uz);
+        const lat = Math.abs(((p.x - R.x0) * uz - (p.z - R.z0) * ux) / ul);
+        if (lat < R.width + 14 && (p.x - m.x) * ux + (p.z - m.z) * uz > 0) continue;
+      }
+      samples++;
+      let steep = false;
+      for (const o of [1, 2, 3]) if (t.slopeAt(p.x + (dx / l) * o, p.z + (dz / l) * o) > 0.39) steep = true;
+      if (steep) wall++;
+    }
+    assert(wall / samples > 0.6, `${name}: a sheer rim (${wall}/${samples} rim samples are cliff)`);
+    // Clear of lakes and rivers.
+    for (let k = 0; k < 24; k++) {
+      const a = (k / 24) * Math.PI * 2;
+      for (const rr of [m.r * 1.2, m.reach]) assert(!t.isWater(m.x + Math.cos(a) * rr, m.z + Math.sin(a) * rr), `${name}: no water at its foot`);
+    }
+    if (m.kind === "mesa") {
+      const R = m.ramp;
+      assert(R, `${name}: has a ramp`);
+      // Walk up the ramp's line: never steeper than a creature can climb.
+      const len = Math.hypot(R.x1 - R.x0, R.z1 - R.z0);
+      let prev = t.heightAt(R.x1, R.z1);
+      let worst = 0;
+      for (let d = 2; d <= len; d += 2) {
+        const f = 1 - d / len;
+        const h = t.heightAt(R.x0 + (R.x1 - R.x0) * f, R.z0 + (R.z1 - R.z0) * f);
+        worst = Math.max(worst, (h - prev) / 2);
+        prev = h;
+      }
+      assert(worst < 0.75, `${name}: the ramp climbs at most ${worst.toFixed(2)} m per metre`);
+      assert(w.at(m.x, m.z, 6), `${name}: its top is reachable from the lowlands`);
+    } else {
+      assert(!w.at(m.x, m.z, 2), `${name}: nobody walks up a butte`);
+    }
+  }
+  // Placed on the fixed layout grid: the same mesas at another mesh resolution.
+  assert.equal(lo.mesas.length, t.mesas.length, "same number at another resolution:");
+  for (let i = 0; i < t.mesas.length; i++) {
+    assert.near(lo.mesas[i].x, t.mesas[i].x, 1e-6, "same x:");
+    assert.near(lo.mesas[i].top, t.mesas[i].top, 1e-6, "same top:");
+  }
+});
+
 test("caves: 3–6 of different sizes — dens, a tunnel with two mouths, a cavern with a skylight; same at any resolution", () => {
   const t = getHiTerrain();
   const lo = getTerrain();
