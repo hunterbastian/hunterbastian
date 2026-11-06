@@ -4,8 +4,8 @@
 //   node smoke-test.mjs
 //
 // It walks to the first creature and spares it, buys an upgrade at the
-// campfire, strikes down the second, loses to the third and wakes back at
-// the campfire, then checks that warmth builds while the page is closed.
+// campfire, strikes down the second, loses to the third (the dragon) and wakes
+// back at the campfire, then checks that warmth builds while the page is closed.
 //
 // Needs Playwright with Chromium (npm i -g playwright && npx playwright install chromium).
 import { spawn } from "node:child_process";
@@ -151,14 +151,14 @@ try {
   s = await playUntil((st) => st.scene === "hub", "back on the path after striking");
   check(s.met === 2 && s.warmth > before + 60, `expected a warmth burst, got ${JSON.stringify(s)}`);
 
-  // 4. the owl: get hit until the light goes out, then wake up at the campfire
+  // 4. the dragon: get hit until the light goes out, then wake up at the campfire
   await walkToNext();
   await approach();
   await wait(600);
-  await shot("battle-owl");
+  await shot("battle-dragon");
   await pick((await state()).menu, 1, 4); // talk
   await press("z"); // check
-  await playUntil((st) => st.scene === "battle" && st.phase === "dodge", "the owl's turn", { protect: false });
+  await playUntil((st) => st.scene === "battle" && st.phase === "dodge", "the dragon's turn", { protect: false });
   await wait(300);
   await page.evaluate(() => {
     ember.hp = 1;

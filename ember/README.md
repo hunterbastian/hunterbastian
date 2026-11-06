@@ -4,13 +4,13 @@ A very small pixel game about a small light walking a dark path.
 
 Your ember walks the path on its own and gathers **warmth**, even while the page
 is closed. Every so often something is waiting on the path ahead: a moth, a
-firefly, an owl. Each one is a short turn-based encounter where you dodge its
+firefly, an old frost dragon. Each one is a short turn-based encounter where you dodge its
 attacks inside a box. You can fight it, or calm it down until you can part ways.
 
 - **Spare it** and it follows your light, adding warmth every second from then on.
 - **Strike it down** and you get one burst of warmth, and it's gone.
 
-Spend warmth at the **campfire** on upgrades. After the owl, the path loops
+Spend warmth at the **campfire** on upgrades. After the dragon, the path loops
 into the next night with tougher creatures that give more warmth.
 
 No build step and no dependencies, not even a web font. Just open it.
@@ -51,6 +51,9 @@ much warmth each one adds.
 - **part**: leave. This only works once the creature doesn't want to fight
   anymore. When that happens, its name and `part` turn amber.
 
+Under each creature's name, **five runes** show how calm it is. They light up
+teal as it calms and all turn amber once it's ready to part ways.
+
 If your light goes out, you wake up at the campfire. You keep your warmth and
 friends, and the creature is still waiting.
 
@@ -72,18 +75,25 @@ the title screen.
 Respects `prefers-reduced-motion`: no screen shake, steadier flicker, and less
 jitter.
 
+## Look
+
+The interface is carved runestone: stone slabs with a lit bevel and chipped
+corners, engraved text, and stone tablets with an icon for every action. You
+dodge inside a dark window cut into the stone. Battles play out in front of
+snowy mountains, and the path runs through snowy pines under a moon.
+
 ## How it works
 
 Everything is laid out in 480 × 420 logical units and drawn straight onto a
 240 × 210 pixel grid, which is then scaled up with hard edges. The pixel art
 follows a few rules:
 
-- **No anti-aliasing.** The moth, firefly and owl are described as curves,
+- **No anti-aliasing.** The moth, firefly and dragon are described as curves,
   then rasterized onto the pixel grid by a small built-in "pixel pen":
   one-pixel outlines with doubled corner pixels removed, flat fills, and
   mirrored halves that come out exactly symmetric. Each animation frame is
-  baked once into a sprite (three wing frames, lantern on/off, four owl
-  moods) and reused.
+  baked once into a sprite (three wing frames, lantern on/off, the dragon's
+  four moods) and reused.
 - **One pixel size.** Large text and the big title ember are enlarged with
   Scale2x (EPX), which rounds off diagonals, so nothing turns into chunky
   blocks next to finer detail. Small sprites, bullets and the 5 × 7 font are
@@ -91,13 +101,13 @@ follows a few rules:
 - **Stepped light.** Glows fall off in flat bands with a little Bayer dither
   only where two bands meet, and they move in whole pixels so they don't
   shimmer.
-- **An 11-color palette.** Shadows lean cool, the ember is warm, and the
-  firefly has its own green. Anything left over, such as fades, is snapped to
+- **A 15-color palette.** A cold blue night, runestone greys and glowing
+  teal runes, with your ember the only warm thing, plus a firefly green. Anything left over, such as fades, is snapped to
   the palette with 4 × 4 ordered dithering.
 
 ### Sprite sheet
 
-`sprites/` holds the complete sprite sheet, 147 sprites, exported from the
+`sprites/` holds the complete sprite sheet, 195 sprites, exported from the
 game's own drawing code:
 
 | file | what it is |
@@ -105,10 +115,10 @@ game's own drawing code:
 | `ember-sprites.png` | every sprite and frame packed together, 1 px = 1 game pixel, on transparency |
 | `ember-sprites.json` | each frame's name, position and pivot (the point the game positions it by), in TexturePacker's JSON hash format |
 | `ember-sprites-preview.png` | the same sprites labeled, with the palette, at 4× |
-| `ember-palette.gpl` | the 11 colors, for Aseprite or GIMP |
+| `ember-palette.gpl` | the 15 colors, for Aseprite or GIMP |
 
 Frames are named by group, like `moth/wings-open`, `firefly/wings-up-lit-hit`,
-`owl/drowsy`, `friends/owl-blink`, `attacks/feather-left` and `font/a`. Open
+`dragon/wings-mid-drowsy`, `friends/dragon-b`, `attacks/feather-left` and `font/a`. Open
 `index.html#sprites` to see the sheet in the browser. After changing any
 sprite, re-export it with:
 
@@ -132,7 +142,7 @@ want to poke at it from the console.
 ## Smoke test
 
 `smoke-test.mjs` plays through the loop with scripted key presses. It spares
-the moth, buys an upgrade, strikes down the firefly, and loses to the owl. Then
+the moth, buys an upgrade, strikes down the firefly, and loses to the dragon. Then
 it checks that warmth built up while the page was closed. It saves screenshots
 and fails on any page error. It needs Playwright with Chromium:
 

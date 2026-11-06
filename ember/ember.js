@@ -22,14 +22,18 @@ const TAU = Math.PI * 2;
 const STEP = 1000 / 60;
 const MAX_AWAY = 8 * 3600; // offline warmth is capped at 8 hours
 
-// The whole game uses these eleven colors and nothing else. Shadows lean cool
-// (night), light leans warm (your ember), and fireflies get their own green.
+// The whole game uses these fifteen colors and nothing else: a cold blue night,
+// carved runestone greys, glowing teal runes, your warm ember, and a firefly green.
 const C = {
-  bg: "#0c0b10",
-  night: "#17151f",
-  faint: "#2d2a38",
-  dim: "#7f7a8c",
-  ink: "#efe9dc",
+  bg: "#0b1018",
+  night: "#18212d",
+  faint: "#2a333d",
+  dim: "#8e9aab",
+  ink: "#e6edf4",
+  stone: "#3b4352",
+  stoneL: "#5c6677",
+  stoneD: "#232832",
+  rune: "#6fd3c4",
   deep: "#2e1a12",
   warm: "#6b3a1c",
   ember: "#ffae57",
@@ -226,8 +230,8 @@ const SPR = {
   mothB: ["....#...#....", "...#*###*#...", "...#**#**#...", "...#**#**#...", "....#*#*#....", "....#*#*#....", ".....#.#.....", "............."],
   fireflyA: ["#.....#", ".#...#.", "..#.#..", "..###..", "..###..", ".#ooo#.", "..ooo..", "...o..."],
   fireflyB: [".......", "##...##", "..#.#..", "..###..", "..###..", ".#ooo#.", "..ooo..", "...o..."],
-  owlA: ["#.......#", ".#.....#.", ".#######.", "#ooo#ooo#", "#o.o#o.o#", "#ooo+ooo#", "#*******#", "#**#*#**#", ".#*****#.", "..#####..", "...+.+..."],
-  owlB: ["#.......#", ".#.....#.", ".#######.", "#########", "#ooo#ooo#", "####+####", "#*******#", "#**#*#**#", ".#*****#.", "..#####..", "...+.+..."],
+  dragonA: ["#..#...#..#", "##..###..##", "###.o#o.###", ".###.#.###.", "..##***##..", "...#***#...", "...##.##...", ".....#.##.."],
+  dragonB: ["...#...#...", "....###....", "#...o#o...#", "##..#.#..##", "###.***.###", ".##.***.##.", "...##.##...", ".....#.##.."],
   bugA: ["#.....#", "##.#.##", "#*###*#", ".#*#*#.", "...#..."],
   bugB: ["..#.#..", "..###..", ".#*#*#.", "..###..", "...#..."],
   // what gets thrown at you
@@ -239,10 +243,32 @@ const SPR = {
   featherF: [".#.#.", "#####"],
   featherR: ["...##", "..##.", ".##..", "#...."],
   // scenery
-  pine: ["..#..", ".###.", "..#..", ".###.", "#####", "..#.."],
+  pine: ["..o..", ".o#o.", "..#..", ".o#o.", "o###o", "..#.."],
+  shard: [".#.", "#o#", "#o#", ".#."],
+  icicle: ["###", "#o#", "#o#", ".#.", ".#.", ".#."],
+  flame: ["..#..", ".###.", ".#o#.", "..#.."],
   soundOn: ["...#.....", "..##..#..", "####...#.", "####.#.#.", "####...#.", "..##..#..", "...#....."],
   soundOff: ["...#.....", "..##.....", "####.#.#.", "####..#..", "####.#.#.", "..##.....", "...#....."],
 };
+
+// Tablet icons, 9 × 9.
+const ICON = {
+  strike: ["..#####..", ".######..", "#######..", "####..#..", ".##...#..", "......#..", "......#..", "......#..", "......#.."],
+  talk: ["#........", "##.......", ".##......", "..##.....", "..####...", "...######", "....#####", ".....####", "......##."],
+  mend: ["...###...", "....#....", "...###...", "..#...#..", ".#.....#.", ".#.###.#.", ".#.###.#.", "..#####..", "........."],
+  part: ["..#####..", ".#.....#.", "#..###..#", "#.#...#.#", "#.#...#.#", "#.#..##.#", "#.#...#.#", "#.#...#.#", "#########"],
+  approach: [".........", "#...#....", ".#...#...", "..#...#..", "...#...#.", "..#...#..", ".#...#...", "#...#....", "........."],
+  campfire: ["....#....", "...##....", "...###.#.", "..#####..", "..##.##..", ".##...##.", "..#####..", "#.......#", ".#######."],
+  friends: [".........", ".##...##.", "####.####", "#########", "#########", ".#######.", "..#####..", "...###...", "....#...."],
+};
+// The calm meter: five runes, after the old Norse alphabet.
+const RUNES = [
+  ["#..#.", "#.#..", "##..#", "#..#.", "#.#..", "##...", "#...."],
+  ["###..", "#..#.", "#...#", "#...#", "#...#", "#...#", "#...#"],
+  ["#....", "##...", "#.#..", "#..#.", "#.#..", "##...", "#...."],
+  ["##...", "#.#..", "##.#.", "#.#..", "#..#.", "#....", "#...."],
+  ["###..", "#..#.", "#..#.", "###..", "#.#..", "#..#.", "#...#"],
+];
 
 // Scale2x (EPX): doubles a sprite and rounds off its diagonals, so big text
 // and big sprites keep one-pixel detail instead of turning into blocks.
@@ -312,18 +338,20 @@ function drawBitmap(rows, x, y, { color = C.ink, color2, color3, color4, scale =
 const textWidth = (str, scale = 1, spacing = 0) =>
   str.length ? (str.length * (ADV + spacing) - 1 - spacing) * scale * PX : 0;
 
-function text(str, x, y, { scale = 1, color = C.ink, align = "left", alpha = 1, base = "top", spacing = 0 } = {}) {
+function text(str, x, y, { scale = 1, color = C.ink, align = "left", alpha = 1, base = "top", spacing = 0, shadow = null } = {}) {
   str = String(str).toLowerCase();
   const w = textWidth(str, scale, spacing);
   const tx = snap(align === "center" ? x - w / 2 : align === "right" ? x - w : x);
   const ty = snap(base === "middle" ? y - 3.5 * scale * PX : y);
   const step = (ADV + spacing) * scale * PX;
   ctx.globalAlpha = alpha;
-  for (let i = 0; i < str.length; i++) {
-    const rows = FONT[str[i]];
-    if (!rows) continue;
-    const g = bitmap(epx(rows, scale), [color]);
-    ctx.drawImage(g, tx + i * step, ty, g.width * PX, g.height * PX);
+  for (const [ox, col] of shadow ? [[PX, shadow], [0, color]] : [[0, color]]) {
+    for (let i = 0; i < str.length; i++) {
+      const rows = FONT[str[i]];
+      if (!rows) continue;
+      const g = bitmap(epx(rows, scale), [col]);
+      ctx.drawImage(g, tx + i * step + ox, ty + ox, g.width * PX, g.height * PX);
+    }
   }
   ctx.globalAlpha = 1;
 }
@@ -355,13 +383,13 @@ function wrap(str, maxW, scale = 1) {
 
 // Draw `str` wrapped to `maxW`, revealing only the first `n` characters.
 // Returns the number of wrapped lines the full string takes up.
-function drawTyped(str, n, x, y, maxW, lh, { align = "left", color = C.ink, scale = 1, alpha = 1 } = {}) {
+function drawTyped(str, n, x, y, maxW, lh, { align = "left", color = C.ink, scale = 1, alpha = 1, shadow = null } = {}) {
   const lines = wrap(str, maxW, scale);
   let left = n;
   lines.forEach((ln, i) => {
     if (left <= 0) return;
     const lx = align === "center" ? x - textWidth(ln, scale) / 2 : x;
-    text(ln.slice(0, left), lx, y + i * lh, { color, scale, alpha });
+    text(ln.slice(0, left), lx, y + i * lh, { color, scale, alpha, shadow });
     left -= ln.length + 1; // +1 for the space or newline the wrap swallowed
   });
   return lines.length;
@@ -626,47 +654,110 @@ function bakeFirefly(frame, lit, color, k) {
   return pen.canvas();
 }
 
-function bakeOwl(mood, color, k) {
+const DRAGON_LIFT = [1, 0.6, 0.25];
+const DRAGON_K = 0.6; // drawn a little larger than the others: it's the big one
+
+// A front-facing frost dragon perched on a carved runestone. `frame` raises
+// or lowers the wings; `mood` sets the eyes, from a glare at your light down
+// to asleep.
+function bakeDragon(frame, mood, color, k) {
+  const lift = DRAGON_LIFT[frame];
   const detail = k >= 0.4;
-  const ox = Math.ceil(64 * k) + 2;
-  const oy = Math.ceil(50 * k) + 2;
+  const ox = Math.ceil(72 * k) + 2;
+  const oy = Math.ceil(56 * k) + 2;
   const pen = new Pen(ox * 2, oy + Math.ceil(50 * k) + 2, ox, oy, k);
-  // the branch it sits on
-  pen.line([[-62, 46], [58, 44]], C.dim);
-  pen.line([[-60, 48], [56, 46]], C.faint);
-  pen.line([[36, 45], [48, 35]], C.dim);
-  for (const side of [-1, 1]) pen.shape(mirror([[12, -26], [26, -46], [28, -20]], side), C.night, color);
-  const body = oval(0, 4, 32, 38);
-  pen.fill(body, C.night);
-  pen.fill(oval(0, 17, 19, 21), C.faint);
+  const drop = 1 - lift;
+
+  // wings, behind everything
+  for (const side of [-1, 1]) {
+    const m = (pts) => mirror(pts, side);
+    const S = [8, -6];
+    const E = [30, -30 + drop * 14];
+    const tip = [68, -40 + drop * 34];
+    const fingers = [[58, -10 + drop * 22], [46, 4 + drop * 8], [32, 2], [18, 12]];
+    const edge = [];
+    let prev = tip;
+    for (const f of fingers) {
+      const mid = [(prev[0] + f[0]) / 2, (prev[1] + f[1]) / 2];
+      const ctrl = [lerp(mid[0], E[0], 0.3), lerp(mid[1], E[1], 0.3)];
+      edge.push(...qbez(prev, ctrl, f, 10));
+      prev = f;
+    }
+    const wing = m([S, ...qbez(S, [16, -26 + drop * 8], E, 10), ...qbez(E, [50, -44 + drop * 20], tip, 12), ...edge, [8, 8]]);
+    pen.fill(wing, C.night);
+    if (detail) for (const f of fingers) pen.line(m([E, f]), C.faint);
+    pen.line(wing, color, true);
+  }
+
+  // the runestone it's perched on, with carved runes
+  const stone = [[-26, 30], [26, 30], [30, 48], [-30, 48]];
+  pen.fill(stone, C.stone);
+  pen.line([[-25, 31], [25, 31]], C.stoneL);
   if (detail) {
-    for (const [u, v] of [[-8, 12], [8, 12], [0, 20], [-8, 28], [8, 28]]) pen.line([[u - 3, v], [u, v + 3], [u + 3, v]], C.dim);
-  }
-  for (const side of [-1, 1]) {
-    pen.line(mirror(qbez([30, -6], [38, 20], [20, 38]), side), color);
-    if (detail) pen.line(mirror(qbez([24, 2], [30, 20], [17, 31]), side), C.faint);
-  }
-  pen.line(body, color, true);
-  for (const fx of [-9, -5, 5, 9]) pen.line([[fx, 40], [fx, 45]], C.ember);
-  // eyes: squinting at your light, wide open, drowsy, then shut
-  for (const side of [-1, 1]) {
-    const ex = side * 13;
-    pen.shape(oval(ex, -12, 10, 10), C.bg, color);
-    if (mood === "open") {
-      pen.disc(ex, -12, 5, C.core);
-      pen.disc(ex, -12, 2.5, C.bg);
-    } else if (mood === "drowsy") {
-      pen.disc(ex, -9, 4, C.core);
-      pen.disc(ex, -9, 2, C.bg);
-      pen.fill(oval(ex, -16, 9, 6), C.night);
-      pen.line([[ex - 8, -11], [ex + 8, -11]], color);
-    } else if (mood === "squint") {
-      pen.line([[ex - 6, -12 + side * 2], [ex + 6, -12 - side * 2]], color);
-    } else {
-      pen.line(qbez([ex - 6, -13], [ex, -7], [ex + 6, -13]), color);
+    for (const u of [-16, -4, 8]) {
+      pen.line([[u, 34], [u, 44]], C.rune);
+      pen.line([[u, 36], [u + 4, 38]], C.rune);
     }
   }
-  pen.shape([[-3, -5], [0, 3], [3, -5]], C.dim, color);
+  pen.line(stone, C.stoneD, true);
+
+  // tail curling around the front of the stone
+  const curve = qbez([12, 26], [46, 44], [34, 16], 22);
+  const tail = [];
+  curve.forEach(([u, v], i) => {
+    const w = 4 * (1 - i / curve.length);
+    const [nu, nv] = curve[Math.min(i + 1, curve.length - 1)];
+    const len = Math.hypot(nu - u, nv - v) || 1;
+    tail.push([u - ((nv - v) / len) * w, v + ((nu - u) / len) * w]);
+  });
+  for (let i = curve.length - 1; i >= 0; i--) {
+    const [u, v] = curve[i];
+    const w = 4 * (1 - i / curve.length);
+    const [nu, nv] = curve[Math.min(i + 1, curve.length - 1)];
+    const len = Math.hypot(nu - u, nv - v) || 1;
+    tail.push([u + ((nv - v) / len) * w, v - ((nu - u) / len) * w]);
+  }
+  pen.shape(tail, C.night, color);
+
+  // body, belly plates, legs
+  const body = oval(0, 10, 17, 22);
+  pen.fill(body, C.night);
+  pen.fill(oval(0, 14, 9, 16), C.stone);
+  if (detail) for (const v of [4, 10, 16, 22]) pen.line([[-7, v], [7, v]], C.stoneD);
+  pen.line(body, color, true);
+  for (const side of [-1, 1]) {
+    pen.shape(mirror([[10, 18], [17, 22], [16, 31], [8, 31]], side), C.night, color);
+    for (const u of [9, 12, 15]) pen.dot(side * u, 31, C.ink);
+  }
+
+  // neck, head, horns
+  pen.shape([[-7, -4], [-6, -22], [6, -22], [7, -4]], C.night, color);
+  for (const side of [-1, 1]) {
+    pen.shape(mirror([[6, -36], [20, -53], [12, -34]], side), C.dim, color);
+    pen.shape(mirror([[10, -30], [19, -28], [11, -25]], side), C.night, color);
+  }
+  pen.shape([[-2, -38], [0, -44], [2, -38]], C.night, color);
+  pen.shape(oval(0, -30, 11, 9), C.night, color);
+  pen.shape(oval(0, -23, 6.5, 5), C.night, color);
+  pen.dot(-2, -22, C.bg);
+  pen.dot(2, -22, C.bg);
+
+  // eyes
+  for (const side of [-1, 1]) {
+    const ex = side * 5;
+    if (mood === "glare") {
+      pen.line([[ex - side * 3, -34], [ex + side * 3, -31]], C.rune);
+      pen.line([[ex - side * 3, -33], [ex + side * 3, -30]], C.rune);
+    } else if (mood === "watch") {
+      pen.disc(ex, -32, 2.6, C.rune);
+      pen.dot(ex, -32, C.bg);
+    } else if (mood === "drowsy") {
+      pen.line([[ex - 3, -33], [ex + 3, -33]], color);
+      pen.disc(ex, -31, 1.6, C.rune);
+    } else {
+      pen.line(qbez([ex - 3, -32], [ex, -29], [ex + 3, -32]), color);
+    }
+  }
   return pen.canvas();
 }
 
@@ -903,7 +994,7 @@ function loadSave() {
     if (!raw) return newSave();
     const s = JSON.parse(raw);
     const base = newSave();
-    return { ...base, ...s, up: { ...base.up, ...(s.up || {}) }, friends: Array.isArray(s.friends) ? s.friends : [] };
+    return { ...base, ...s, up: { ...base.up, ...(s.up || {}) }, friends: Array.isArray(s.friends) ? s.friends.map((f) => (f.key === "owl" ? { ...f, key: "dragon" } : f)) : [] };
   } catch {
     return newSave();
   }
@@ -1030,50 +1121,50 @@ const SPECIES = {
     fall: ["the firefly's light goes out.", "the grass is very dark without it."],
     patterns: ["zigzag", "burst", "dustfall", "ring"],
   },
-  owl: {
-    names: ["hush", "quill", "sorrel", "fen"],
-    plural: "owls",
-    hp: 80, rate: 4, burst: 110, y: 92, bullet: "dust",
-    jitter: 0.1, bob: 0.3, flap: [0.05, 0.02],
-    intro: "an owl sits on a low branch. it squints at your light and does not look happy.",
+  dragon: {
+    names: ["rime", "cairn", "sleet", "flint"],
+    plural: "dragons",
+    hp: 90, rate: 4, burst: 120, y: 84, bullet: "shard",
+    jitter: 0, bob: 0, flap: [0.12, 0.04],
+    intro: "an old dragon is curled on a runestone, frost on its horns. it turns toward your light.",
     acts: [
-      { label: "check", lines: [["{name}. an owl, up far too late.", "your light is right in its eyes."]] },
+      { label: "check", lines: [["{name}. an old dragon whose fire went out long ago.", "it has been cold for a very long time."]] },
       {
-        label: "dim", dims: true, max: 2, gain: 20,
-        lines: [["you dim your glow.", "{name} stops squinting quite so hard."], ["you dim yourself even further.", "{name}'s eyes open a little wider."]],
-        spent: "any dimmer and you'd go out.",
-        say: ["...better.", "...much better."],
+        label: "warm", max: 2, gain: 20,
+        lines: [["you hold your glow out toward {name}.", "the frost on its snout starts to melt."], ["you burn a little brighter, just for {name}.", "it breathes in your warmth, slowly."]],
+        spent: "you don't have any more warmth to spare.",
+        say: ["...warm. i'd forgotten.", "...more."],
       },
       {
-        label: "look away", max: 2, gain: 20,
-        lines: [["you turn your light away from {name}.", "it ruffles its feathers."], ["you keep your light turned away.", "{name} settles on its branch."]],
-        spent: "you're already facing the other way.",
-        say: ["...hm.", "...hoo."],
+        label: "bow", max: 1, gain: 25,
+        lines: [["you bow low to the old dragon.", "{name} lowers its great head, just slightly."]],
+        spent: "you've already bowed. it noticed.",
+        say: ["...manners. how rare."],
       },
       {
-        label: "hoot", need: 45, gain: 40, failGain: 0,
-        lines: [["you try your best hoot.", "{name} stares at you for a long time. then it hoots back."]],
-        fail: ["you try your best hoot.", "{name} is not impressed."],
-        say: ["hoo. hoo."], failSay: "...",
+        label: "tell a saga", need: 45, gain: 40, failGain: 5,
+        lines: [["you tell {name} the saga of a small ember that crossed the snow.", "it listens to the very end."]],
+        fail: ["you start a saga.", "{name} isn't ready to listen yet."],
+        say: ["...tell it again sometime."], failSay: "...not now, spark.",
       },
     ],
-    talk: [["put that out.", "too bright. too bright.", "it's the middle of the night."], ["...hoo.", "...you're very small.", "...the moon was nicer."], ["...sleepy.", "...hoo... hoo..."]],
-    strikeSay: ["!", "rude.", "..."],
-    missSay: "...", partSay: "that light won't get far.", restSay: "...the dark is nice with you in it.",
+    talk: [["...a spark? out here?", "my fire... gone.", "leave my cairn."], ["...you're very warm.", "...i remember fire.", "...stay. no. go."], ["...sleepy...", "...the snow is soft tonight."]],
+    strikeSay: ["...!", "you dare.", "...that stung."],
+    missSay: "...", partSay: "no one leaves the cairn.", restSay: "...rest by me, little spark.",
     flavor: [
-      ["{name} glares at you, feathers puffed.", "the owl turns its head to keep you in view."],
-      ["{name} blinks slowly.", "the owl shifts on its branch."],
-      ["{name}'s eyes are half closed.", "the owl looks almost asleep."],
+      ["{name} watches you, its breath freezing in the air.", "frost creeps across the runestone."],
+      ["{name} shifts its wings, unsure.", "the old dragon leans a little closer to your warmth."],
+      ["{name}'s eyes are half closed.", "the dragon is curling up around its stone."],
     ],
-    hurt: "{name} has lost a lot of feathers.",
-    calmed: "{name} doesn't mind you anymore.",
-    resting: "{name} is dozing. it's ready to part ways.",
-    spare: ["you tip your light toward the path and go.", "a while later, soft wingbeats follow you."],
-    fall: ["the owl falls from its branch.", "a few feathers drift down after it."],
-    patterns: ["feathers", "swoop", "spiral", "ring"],
+    hurt: "{name}'s scales are cracked with frost.",
+    calmed: "{name} doesn't want to fight anymore.",
+    resting: "{name} is curled up, at peace. it's ready to part ways.",
+    spare: ["you leave a little of your warmth on the runestone.", "later, slow wingbeats follow you down the path."],
+    fall: ["the dragon slumps against its runestone.", "the frost on its scales goes dark."],
+    patterns: ["icicles", "breath", "swoop", "ring"],
   },
 };
-const ROSTER = ["moth", "firefly", "owl"];
+const ROSTER = ["moth", "firefly", "dragon"];
 
 function newFoe(index) {
   const key = ROSTER[index % ROSTER.length];
@@ -1093,7 +1184,7 @@ function newFoe(index) {
 /* ----------------------------------------------------------------------- */
 const MENU = ["strike", "talk", "mend", "part"];
 const HUB_OPTS = ["approach", "campfire", "friends"];
-const MENU_BOX = { x: 20, y: 186, w: 440, h: 118 };
+const MENU_BOX = { x: 20, y: 190, w: 440, h: 114 };
 const HUB_BOX = { x: 20, y: 252, w: 440, h: 100 };
 const PANEL_BOX = { x: 20, y: 92, w: 440, h: 262 };
 const ARENA_CY = 240;
@@ -1179,7 +1270,7 @@ function tweenBox() {
 }
 const boxSettled = () => ["x", "y", "w", "h"].every((k) => G.box[k] === G.boxTarget[k]);
 
-const optionRect = (i, n) => ({ x: 20 + (i * 440) / n, y: OPT_Y - 20, w: 440 / n, h: 40 });
+const optionRect = (i, n) => ({ x: 20 + (i * 440) / n, y: OPT_Y - 28, w: 440 / n, h: 56 });
 function optionAt(p, n) {
   for (let i = 0; i < n; i++) if (inRect(p, optionRect(i, n))) return i;
   return -1;
@@ -1784,8 +1875,8 @@ function updateDodge() {
     my *= Math.SQRT1_2;
   }
   const speed = held.has("cancel") ? 1.2 : 2.4; // hold x / shift to move carefully
-  pl.x = clamp(pl.x + mx * speed + drag.dx, a.x + 8, a.x + a.w - 8);
-  pl.y = clamp(pl.y + my * speed + drag.dy, a.y + 8, a.y + a.h - 8);
+  pl.x = clamp(pl.x + mx * speed + drag.dx, a.x + 14, a.x + a.w - 14);
+  pl.y = clamp(pl.y + my * speed + drag.dy, a.y + 14, a.y + a.h - 14);
   drag.dx = 0;
   drag.dy = 0;
   if (pl.inv > 0) pl.inv--;
@@ -1904,6 +1995,14 @@ function flashStep(b) {
   b.dead = true;
 }
 
+// Icicles hang and glint for a moment, then drop.
+function icicleStep(b) {
+  if (b.age < 26) return;
+  b.harmless = false;
+  b.vy = Math.min(4.5, (b.vy || 0.4) + 0.12 * (0.8 + 0.4 * b.k));
+  b.y += b.vy;
+}
+
 // Walls of dust crossing the arena from alternating sides, each with one gap.
 function wall(t, a, k, every, gapH, speed) {
   if (t % every) return;
@@ -2012,6 +2111,28 @@ const PATTERNS = {
       spawn(rand(a.x + 6, a.x + a.w - 6), a.y - 8, 0, rand(0.8, 1.3) * (0.7 + 0.3 * k), 4, {
         kind: "feather", sway: rand(0.1, TAU), swayAmp: rand(0.6, 1.2),
       });
+    },
+  },
+  // Frost drips from the dragon's horns.
+  icicles: {
+    w: 220, h: 140, dur: 330,
+    update(t, a, k) {
+      if (t % Math.max(8, Math.round(18 / k))) return;
+      spawn(rand(a.x + 18, a.x + a.w - 18), a.y + 16, 0, 0, 4, { kind: "icicle", harmless: true, step: icicleStep, k });
+    },
+  },
+  // Frost breath sweeps one side of the arena, then the other.
+  breath: {
+    w: 220, h: 150, dur: 360,
+    update(t, a, k) {
+      const phase = t % 100;
+      if (phase > 60 || t % 3) return;
+      G.ps.flip = G.ps.flip ?? (Math.random() < 0.5 ? 0 : 1);
+      const side = (Math.floor(t / 100) + G.ps.flip) % 2 ? 1 : -1;
+      const ang = Math.PI / 2 + side * 0.55 + Math.sin(phase * 0.08) * 0.35;
+      const sp = 2 + 0.6 * k;
+      const cx = a.x + a.w / 2;
+      spawn(cx + Math.cos(ang) * 10, a.y + 12, Math.cos(ang) * sp, Math.sin(ang) * sp, 3.5, { kind: "shard" });
     },
   },
   // A tired creature barely tries.
@@ -2147,21 +2268,21 @@ function drawEmber(x, y, { scale = 1, alpha = 1 } = {}) {
 }
 
 const flapFrame = (phase) => [0, 1, 2, 1][Math.floor(phase / (Math.PI / 2)) & 3];
-const owlMood = (calm, blink) => (blink || calm >= 100 ? "shut" : calm >= 70 ? "drowsy" : calm >= 30 ? "open" : "squint");
+const dragonMood = (calm, blink) => (blink || calm >= 100 ? "asleep" : calm >= 70 ? "drowsy" : calm >= 30 ? "watch" : "glare");
 
-function foeSprite(key, { frame = 0, lit = 1, mood = "open", color = C.ink, k = 0.5 } = {}) {
+function foeSprite(key, { frame = 0, lit = 1, mood = "watch", color = C.ink, k = 0.5 } = {}) {
   if (key === "moth") return baked(`moth|${frame}|${color}|${k}`, () => bakeMoth(frame, color, k));
   if (key === "firefly") return baked(`firefly|${frame}|${lit}|${color}|${k}`, () => bakeFirefly(frame, lit, color, k));
-  return baked(`owl|${mood}|${color}|${k}`, () => bakeOwl(mood, color, k));
+  return baked(`dragon|${frame}|${mood}|${color}|${k}`, () => bakeDragon(frame, mood, color, k));
 }
 
 function drawFoe(f) {
   const pose = foePose(f);
   const flashing = f.flash > 0 && (f.flash >> 1) % 2 === 0;
   const color = flashing ? C.ember : C.ink;
-  const k = f.key === "firefly" ? 0.75 : 0.5;
+  const k = f.key === "firefly" ? 0.75 : f.key === "dragon" ? DRAGON_K : 0.5;
   if (f.key === "firefly" && pose.lit && f.alpha > 0.5) drawGlow(pose.x, pose.y + 21, 16, [C.moss]);
-  const spr = foeSprite(f.key, { frame: flapFrame(f.phase), lit: pose.lit, mood: owlMood(f.calm, pose.blink), color, k });
+  const spr = foeSprite(f.key, { frame: flapFrame(f.phase), lit: pose.lit, mood: dragonMood(f.calm, pose.blink), color, k });
   drawSprite(spr, pose.x, pose.y, f.alpha);
   return pose;
 }
@@ -2178,7 +2299,7 @@ function drawAhead(key, x, color) {
     if (lit) drawGlow(x, y + 12, 8, [C.moss]);
     drawSprite(foeSprite("firefly", { frame, lit, color, k: 0.4 }), x, y);
   } else {
-    drawSprite(foeSprite("owl", { mood: G.t % 190 < 7 ? "shut" : "squint", color, k: 0.25 }), x, GROUND - 22);
+    drawSprite(foeSprite("dragon", { frame, mood: G.t % 190 < 7 ? "asleep" : "watch", color, k: 0.25 }), x, GROUND - 24);
   }
 }
 
@@ -2186,7 +2307,7 @@ function drawMini(key, x, y, frame) {
   const rows = SPR[`${key}${frame ? "B" : "A"}`];
   if (key === "moth") drawBitmap(rows, x, y, { color: C.ink, color3: C.dim, center: true });
   else if (key === "firefly") drawBitmap(rows, x, y, { color: C.ink, color2: frame ? C.moss : C.glim, center: true });
-  else drawBitmap(rows, x, y, { color: C.ink, color2: C.core, color3: C.dim, color4: C.ember, center: true });
+  else drawBitmap(rows, x, y, { color: C.ink, color2: C.rune, color3: C.stone, center: true });
 }
 
 function drawBullets() {
@@ -2195,6 +2316,11 @@ function drawBullets() {
     const o = { center: true, alpha };
     if (b.kind === "moth") {
       drawBitmap(Math.floor(b.age / 6) % 2 ? SPR.bugB : SPR.bugA, b.x, b.y, { ...o, color3: C.dim });
+    } else if (b.kind === "shard") {
+      drawBitmap(SPR.shard, b.x, b.y, { ...o, color: C.ink, color2: C.rune });
+    } else if (b.kind === "icicle") {
+      const glint = b.harmless && (b.age >> 2) % 2 === 0;
+      drawBitmap(SPR.icicle, b.x, b.y, { ...o, color: glint ? C.rune : C.ink, color2: C.rune });
     } else if (b.kind === "spark") {
       drawBitmap(SPR.spark, b.x, b.y, { ...o, color: C.ink, color2: C.core });
     } else if (b.kind === "fly") {
@@ -2255,28 +2381,351 @@ function drawStars() {
 /* ----------------------------------------------------------------------- */
 const pulse = (speed = 0.06) => (REDUCED ? 1 : 0.55 + 0.45 * Math.sin(G.t * speed));
 
-// A box with notched corners and a faint inner rule, like an old RPG window.
-function drawFrame(b, { inner = true } = {}) {
+// --- Runestone UI: carved stone panels, tablets, runes ----------------------
+const fillPx = (x, y, w, h, c) => {
+  ctx.fillStyle = c;
+  ctx.fillRect(x, y, w, h);
+};
+
+// A few chips and scratches so no two stones look exactly alike.
+function chips(x, y, w, h) {
+  const seed = x * 0.37 + y * 0.11 + w * 0.05;
+  for (let i = 0; i < Math.max(2, Math.floor(w / 60)); i++) {
+    const cx = snap(x + 6 * PX + hash(seed + i) * (w - 14 * PX));
+    fillPx(cx, y + 2 * PX, PX, PX, C.stoneD);
+    fillPx(cx + PX, y + 3 * PX, PX, PX, C.stoneD);
+    const cy = snap(y + 4 * PX + hash(seed + i + 9) * (h - 9 * PX));
+    fillPx(x + w - 3 * PX, cy, PX, PX, C.stoneL);
+  }
+}
+
+// A slab of carved stone: dark outline with the corners knocked off, a lit
+// top-left bevel and a shadowed bottom-right. `window` cuts a dark opening
+// into it, for the arena you dodge in.
+function drawFrame(b, { window = false } = {}) {
   const x = snap(b.x);
   const y = snap(b.y);
   const w = snap(b.w);
   const h = snap(b.h);
-  ctx.fillStyle = C.bg;
-  ctx.fillRect(x + PX, y + PX, w - 2 * PX, h - 2 * PX);
-  ctx.fillStyle = C.ink;
-  ctx.fillRect(x + PX, y, w - 2 * PX, PX);
-  ctx.fillRect(x + PX, y + h - PX, w - 2 * PX, PX);
-  ctx.fillRect(x, y + PX, PX, h - 2 * PX);
-  ctx.fillRect(x + w - PX, y + PX, PX, h - 2 * PX);
-  if (inner && w > 10 * PX && h > 10 * PX) {
-    const i = 2 * PX;
-    ctx.fillStyle = C.faint;
-    ctx.fillRect(x + i, y + i, w - 2 * i, PX);
-    ctx.fillRect(x + i, y + h - i - PX, w - 2 * i, PX);
-    ctx.fillRect(x + i, y + i, PX, h - 2 * i);
-    ctx.fillRect(x + w - i - PX, y + i, PX, h - 2 * i);
+  fillPx(x + PX, y, w - 2 * PX, PX, C.bg);
+  fillPx(x + PX, y + h - PX, w - 2 * PX, PX, C.bg);
+  fillPx(x, y + PX, PX, h - 2 * PX, C.bg);
+  fillPx(x + w - PX, y + PX, PX, h - 2 * PX, C.bg);
+  fillPx(x + PX, y + PX, w - 2 * PX, h - 2 * PX, C.stone);
+  fillPx(x + PX, y + PX, w - 2 * PX, PX, C.stoneL);
+  fillPx(x + PX, y + PX, PX, h - 2 * PX, C.stoneL);
+  fillPx(x + PX, y + h - 2 * PX, w - 2 * PX, PX, C.stoneD);
+  fillPx(x + w - 2 * PX, y + PX, PX, h - 2 * PX, C.stoneD);
+  if (w > 20 * PX && h > 12 * PX) chips(x, y, w, h);
+  if (window) {
+    fillPx(x + 3 * PX, y + 3 * PX, w - 6 * PX, h - 6 * PX, C.stoneD);
+    fillPx(x + 4 * PX, y + 4 * PX, w - 8 * PX, h - 8 * PX, C.bg);
+    fillPx(x + 3 * PX, y + h - 4 * PX, w - 6 * PX, PX, C.stoneL);
+    fillPx(x + w - 4 * PX, y + 3 * PX, PX, h - 6 * PX, C.stoneL);
   }
-  return { x, y, w, h, inset: inner ? 3 * PX : PX };
+  return { x, y, w, h, inset: window ? 4 * PX : 2 * PX };
+}
+
+function outline(b, color) {
+  fillPx(b.x + PX, b.y, b.w - 2 * PX, PX, color);
+  fillPx(b.x + PX, b.y + b.h - PX, b.w - 2 * PX, PX, color);
+  fillPx(b.x, b.y + PX, PX, b.h - 2 * PX, color);
+  fillPx(b.x + b.w - PX, b.y + PX, PX, b.h - 2 * PX, color);
+}
+
+// Stone tablets with an icon and a carved label.
+function drawOptionRow(labels, sel, active, { ready = [], off = [] } = {}) {
+  labels.forEach((label, i) => {
+    const r = optionRect(i, labels.length);
+    const b = drawFrame({ x: r.x + 6, y: r.y, w: r.w - 12, h: r.h });
+    const cx = b.x + b.w / 2;
+    const isSel = active && sel === i;
+    if (isSel) outline(b, C.rune);
+    const dimmed = !active || (off[i] && !isSel);
+    const iconColor = ready[i] || isSel ? C.ember : dimmed ? C.stoneL : C.dim;
+    const labelColor = ready[i] ? C.ember : isSel ? C.ink : dimmed ? C.stoneL : C.dim;
+    drawBitmap(ICON[label], cx, b.y + 19, { color: iconColor, center: true });
+    text(label, cx, b.y + 34, { color: labelColor, align: "center", shadow: C.stoneD });
+  });
+}
+
+// Snowy mountains standing behind whatever is at `ground`.
+function drawMountains(ground, { scroll = 0, color = C.night } = {}) {
+  const gp = ground / PX;
+  for (let xp = 0; xp < BW; xp++) {
+    const wx = xp + Math.floor(scroll);
+    const tri = Math.abs((((wx + 17) % 64) + 64) % 64 - 32);
+    const top = Math.round(gp - 30 + tri * 0.75 + Math.sin(wx * 0.11) * 2);
+    fillPx(xp * PX, top * PX, PX, (gp - top) * PX, color);
+    if (top < gp - 20) fillPx(xp * PX, top * PX, PX, Math.max(1, Math.round((gp - 20 - top) * 0.35)) * PX, C.ink);
+  }
+}
+
+function drawSnowLine(y) {
+  fillPx(0, y, W, 3 * PX, C.ink);
+  for (let xp = 0; xp < BW; xp++) if (hash(xp + 300) > 0.72) fillPx(xp * PX, y - PX, PX, PX, C.ink);
+}
+
+// The creature's name and the calm meter: five runes that light up as it
+// calms, and turn amber once it's ready to part ways.
+function drawNameplate(f) {
+  const ready = f.calm >= 100;
+  if (f.barT > 0) {
+    fillPx(190, 156, 100, 4, C.faint);
+    fillPx(190, 156, snap(100 * (f.shown / f.max)), 4, C.ink);
+  } else {
+    text(f.name, 240, 152, { color: ready ? C.ember : C.ink, align: "center", spacing: 1 });
+  }
+  const lit = ready ? 5 : Math.floor(f.calm / 20);
+  RUNES.forEach((rows, i) => drawBitmap(rows, 203 + i * 16, 170, { color: i < lit ? (ready ? C.ember : C.rune) : C.stone }));
+}
+
+/* --- the path ------------------------------------------------------------ */
+function drawHub() {
+  if (G.box.y > 200) drawPath(); // the campfire and friends panels cover the path
+
+  // header: warmth on the left, distance on the right
+  text("warmth", 20, 18, { color: C.dim });
+  text(fmt(S.warmth), 20, 34, { scale: 2, color: C.ember });
+  text(`+${fmtRate(warmthRate())} / s`, 20, 72, { color: C.dim });
+  text(`${fmt(S.dist)} m`, 430, 18, { align: "right" });
+  text(`night ${night()}`, 430, 36, { color: C.dim, align: "right" });
+  text(arrived() ? "something ahead" : `next in ${Math.ceil(S.nextAt - S.dist)} m`, 430, 54, { color: arrived() ? C.ember : C.dim, align: "right" });
+
+  const b = drawFrame(G.box);
+  withClip(b, () => {
+    if (G.hubPhase === "camp") drawCamp(b);
+    else if (G.hubPhase === "friends") drawFriends(b);
+    else if (G.dialog) drawTyped(G.dialog.text, G.dialog.n, b.x + 22, b.y + 20, HUB_BOX.w - 44, 24, { shadow: C.stoneD });
+  });
+
+  drawOptionRow(HUB_OPTS, G.hubPhase === "camp" ? 1 : G.hubPhase === "friends" ? 2 : G.hubSel, true, {
+    ready: [arrived()],
+    off: [!arrived()],
+  });
+}
+
+const ridgeY = (wx) => snap(176 + Math.sin(wx * 0.013) * 7 + Math.sin(wx * 0.041) * 3);
+
+function drawPath() {
+  const off = S.dist * PX_PER_M;
+  const far = off * 0.3;
+
+  drawGlow(338, 100, 12, [C.night]);
+  drawSprite(baked("moon", bakeMoon), 338, 100);
+  drawMountains(196, { scroll: (off * 0.12) / PX, color: C.faint });
+
+  // near hills with snowy pines, scrolling slower than the ground
+  for (let x = 0; x < W; x += PX) {
+    const y = ridgeY(x + far);
+    fillPx(x, y, PX, GROUND - y, C.night);
+    if (hash(Math.floor((x + far) / PX)) > 0.55) fillPx(x, y, PX, PX, C.dim);
+  }
+  const tcell = 40;
+  for (let c = Math.floor(far / tcell) - 1; c <= Math.floor((far + W) / tcell) + 1; c++) {
+    if (hash(c + 7.7) > 0.55) continue;
+    const x = snap(c * tcell - far + hash(c + 3.1) * 26);
+    drawBitmap(SPR.pine, x, ridgeY(x + far) - 10, { color: C.moss, color2: C.ink });
+  }
+
+  const walking = !arrived() && !REDUCED;
+  const bob = walking ? -Math.round(Math.abs(Math.sin(G.walkT * 0.18)) * 2) * PX : 0;
+  const ey = GROUND - 14 + bob;
+  emberGlow(WALK_X, ey);
+
+  // the path: packed snow, with stones and drifts placed by distance
+  fillPx(0, GROUND, W, 2 * PX, C.ink);
+  const cell = 34;
+  for (let c = Math.floor(off / cell) - 1; c <= Math.floor((off + W) / cell) + 1; c++) {
+    const h = hash(c);
+    const x = snap(c * cell - off + hash(c + 0.5) * 20);
+    if (h < 0.3) {
+      fillPx(x, GROUND + 8, 6, 2, C.stoneL);
+      fillPx(x + 2, GROUND + 6, 2, 2, C.stoneL);
+    } else if (h < 0.55) {
+      fillPx(x, GROUND - 2, 10, 2, C.ink);
+      fillPx(x + 2, GROUND - 4, 4, 2, C.ink);
+    } else if (h < 0.65) {
+      fillPx(x, GROUND + 14, 8, 2, C.faint);
+    }
+  }
+
+  const remaining = S.nextAt - S.dist;
+  if (remaining < 26) {
+    drawAhead(ROSTER[S.met % ROSTER.length], WALK_X + 72 + remaining * PX_PER_M, remaining <= 0 ? C.ink : C.dim);
+  }
+
+  // friends trail behind you
+  const shown = S.friends.slice(-8).reverse();
+  shown.forEach((f, i) => {
+    const x = WALK_X - 32 - i * 30;
+    const y = GROUND - 24 + Math.round(Math.sin(G.t * 0.06 + i * 1.7) * 2) * PX;
+    drawMini(f.key, x, y, Math.floor(G.t / 9 + i) % 2);
+  });
+  if (S.friends.length > 8) text(`+${S.friends.length - 8}`, WALK_X - 32 - 8 * 30, GROUND - 30, { color: C.dim, align: "center" });
+
+  drawEmber(WALK_X, ey);
+}
+
+function drawCamp(b) {
+  UPGRADES.forEach((u, i) => {
+    const r = campRow(i);
+    const y = r.y + 6;
+    const level = lvl(u.id);
+    const maxed = level >= u.max;
+    const cost = upgradeCost(u);
+    const sel = G.campSel === i;
+    const flash = G.campFlash?.i === i && (G.campFlash.t >> 2) % 2 === 0;
+    const sh = { shadow: C.stoneD };
+    if (sel) drawBitmap(SPR.pick, b.x + 20, y + 7, { color: C.ember, center: true });
+    text(u.label, b.x + 34, y, { color: sel ? C.ink : C.dim, ...sh });
+    text(u.desc, b.x + 34, y + 18, { color: C.dim, ...sh });
+    let costColor = maxed ? C.dim : S.warmth >= cost ? C.ember : C.dim;
+    if (flash) costColor = G.campFlash.ok ? C.core : C.stoneD;
+    text(maxed ? "max" : fmt(cost), b.x + b.w - 20, y, { color: costColor, align: "right", ...sh });
+    text(`lv ${level}`, b.x + b.w - 20, y + 18, { color: C.dim, align: "right", ...sh });
+  });
+}
+
+function drawFriends(b) {
+  const sh = { shadow: C.stoneD };
+  let y = b.y + 18;
+  text("following you", b.x + 20, y, { color: C.dim, ...sh });
+  y += 26;
+  if (!S.friends.length) {
+    drawTyped("no one yet. spare someone on the path and they'll follow your light.", 999, b.x + 20, y, b.w - 40, 22, sh);
+    return;
+  }
+  for (const key of ROSTER) {
+    const list = S.friends.filter((f) => f.key === key);
+    if (!list.length) continue;
+    drawMini(key, b.x + 28, y + 6, Math.floor(G.t / 9) % 2);
+    text(`${SPECIES[key].plural} ${list.length}`, b.x + 48, y, sh);
+    text(`+${fmtRate(list.reduce((s, f) => s + f.rate, 0))} / s`, b.x + b.w - 20, y, { color: C.ember, align: "right", ...sh });
+    y += 18;
+    const names = list.length > 6 ? `${list.slice(-6).map((f) => f.name).join(", ")} and ${list.length - 6} more` : list.map((f) => f.name).join(", ");
+    y += drawTyped(names, 999, b.x + 48, y, b.w - 68, 18, { color: C.dim, ...sh }) * 18 + 12;
+  }
+  text("your own glow", b.x + 48, y, sh);
+  text(`+${fmtRate(ownGlow())} / s`, b.x + b.w - 20, y, { color: C.ember, align: "right", ...sh });
+}
+
+/* --- battle -------------------------------------------------------------- */
+const BATTLE_GROUND = 142;
+
+function drawBattle() {
+  const f = G.foe;
+  drawMountains(BATTLE_GROUND);
+  drawSnowLine(BATTLE_GROUND);
+  const pose = drawFoe(f);
+
+  if (G.slash) {
+    const t = G.slash.t;
+    const grow = clamp(t / 8, 0, 1);
+    ctx.globalAlpha = t < 10 ? 1 : 1 - (t - 10) / 16;
+    pixelLine(pose.x + 56, pose.y - 50, pose.x + 56 - 112 * grow, pose.y - 50 + 100 * grow, C.ember, 2);
+    ctx.globalAlpha = 1;
+  }
+
+  const inArena = G.phase === "enemy" || G.phase === "dodge";
+  if (!inArena && !f.dead) drawNameplate(f);
+
+  const b = drawFrame(G.box, { window: inArena });
+  withClip(b, () => {
+    if (G.phase === "menu" || G.phase === "result") {
+      const d = G.dialog;
+      if (d) {
+        drawTyped(d.text, d.n, b.x + 22, b.y + 20, MENU_BOX.w - 44, 24, { shadow: C.stoneD });
+        if (G.phase === "result" && d.full) drawNext(b.x + b.w - 22, b.y + b.h - 16);
+      }
+    } else if (G.phase === "talk") {
+      drawActs(b);
+    } else if (G.phase === "strike") {
+      drawStrike(b);
+    } else {
+      drawArena();
+    }
+  });
+
+  drawHud();
+  drawOptionRow(MENU, G.menu, G.phase === "menu" || G.phase === "talk", {
+    ready: [false, false, false, f.calm >= 100],
+  });
+  drawBubble();
+}
+
+function drawActs(b) {
+  G.foe.sp.acts.forEach((a, i) => {
+    const r = actRect(i);
+    const sel = G.act === i;
+    if (sel) drawBitmap(SPR.pick, r.x - 16, r.y + 7, { color: C.ember, center: true });
+    text(a.label, r.x, r.y, { color: actSpent(i) ? C.stoneL : sel ? C.ink : C.dim, shadow: C.stoneD });
+  });
+  text("x back", b.x + b.w - 18, b.y + b.h - 24, { color: C.dim, align: "right", shadow: C.stoneD });
+}
+
+function drawStrike(b) {
+  const s = G.strike;
+  if (!s) return;
+  const x0 = b.x + 40;
+  const x1 = b.x + b.w - 40;
+  const cy = snap(b.y + b.h / 2 + 10);
+  text("stop the line at the center", b.x + b.w / 2, b.y + 18, { color: C.dim, align: "center", shadow: C.stoneD });
+  // a groove carved into the stone, with notches
+  fillPx(x0, cy - PX, x1 - x0, PX, C.stoneD);
+  fillPx(x0, cy, x1 - x0, PX, C.stoneL);
+  for (let i = 0; i <= 10; i++) {
+    const x = snap(lerp(x0, x1, i / 10));
+    const h = i === 5 ? 24 : 8;
+    fillPx(x, cy - h / 2, PX, h, i === 5 ? C.ember : C.stoneD);
+  }
+  const cx = snap(lerp(x0, x1, s.x));
+  fillPx(cx - 4, cy - 22, 8, 44, C.bg);
+  fillPx(cx - 2, cy - 20, 4, 40, s.stopped && (s.hold >> 2) % 2 === 0 ? C.ember : C.ink);
+}
+
+function drawArena() {
+  const p = G.player;
+  emberGlow(p.x, p.y, 0.8 - G.dimmed * 0.2);
+  if (G.phase === "dodge" && G.pattern === "spiral" && G.patT >= 0) {
+    const a = G.boxTarget;
+    drawSprite(baked("ring|4", () => bakeRing(4, C.dim)), a.x + a.w / 2, a.y + a.h / 2);
+  }
+  drawBullets();
+  const blink = p.inv > 0 && (p.inv >> 2) % 2 === 0;
+  if (!blink) drawEmber(p.x, p.y);
+}
+
+// hp as ten carved segments; mends as little flames on the right
+function drawHud() {
+  text("ember", 20, HUD_Y, { base: "middle" });
+  const segs = 10;
+  const filled = G.hp > 0 ? Math.max(1, Math.round((G.hp / G.maxHp) * segs)) : 0;
+  const low = G.hp <= G.maxHp * 0.3 && !REDUCED && (G.t >> 4) % 2 === 0;
+  for (let i = 0; i < segs; i++) fillPx(92 + i * 14, HUD_Y - 5, 12, 10, i < filled ? (low ? C.warm : C.ember) : C.stoneD);
+  text(`${G.hp}/${G.maxHp}`, 92 + segs * 14 + 8, HUD_Y, { color: C.dim, base: "middle" });
+  const total = 3 + lvl("mend");
+  for (let i = 0; i < total; i++) {
+    const has = i < G.mends;
+    drawBitmap(SPR.flame, 452 - (total - 1 - i) * 14, HUD_Y, { color: has ? C.ember : C.stoneD, color2: has ? C.core : C.stoneD, center: true });
+  }
+}
+
+function drawBubble() {
+  const d = G.bubble;
+  if (!d) return;
+  const lines = wrap(d.text, 120);
+  const bx = 330;
+  const by = 40;
+  const bw = 140;
+  const bh = 24 + lines.length * 20;
+  // a little stone wedge pointing at the creature
+  [1, 2, 3, 2, 1].forEach((len, i) => {
+    fillPx(bx - len * PX, by + 14 + i * PX, len * PX + PX, PX, C.stone);
+    fillPx(bx - len * PX - PX, by + 14 + i * PX, PX, PX, C.bg);
+  });
+  drawFrame({ x: bx, y: by, w: bw, h: bh });
+  drawTyped(d.text, d.n, bx + 12, by + 13, 120, 20, { shadow: C.stoneD });
 }
 
 function withClip(b, fn) {
@@ -2291,20 +2740,6 @@ function withClip(b, fn) {
 function drawNext(x, y) {
   const bob = REDUCED ? 0 : Math.round(Math.sin(G.t * 0.12)) * PX;
   drawBitmap(SPR.next, x, y + bob, { color: C.dim, center: true });
-}
-
-function drawOptionRow(labels, sel, active, { ready = [], off = [], counts = {} } = {}) {
-  labels.forEach((label, i) => {
-    const r = optionRect(i, labels.length);
-    const cx = r.x + r.w / 2;
-    const isSel = active && sel === i;
-    const color = ready[i] ? C.ember : isSel ? C.ink : C.dim;
-    const alpha = active ? (off[i] && !isSel ? 0.5 : 1) : 0.4;
-    const tw = textWidth(label);
-    text(label, cx, OPT_Y, { color, align: "center", base: "middle", alpha });
-    if (counts[i] != null) text(String(counts[i]), cx + tw / 2 + 6, OPT_Y - 8, { color: C.dim, base: "middle", alpha });
-    if (isSel) drawBitmap(SPR.pick, cx - tw / 2 - 12, OPT_Y, { color: C.ember, center: true, alpha });
-  });
 }
 
 // Centered lines that pile up as they're read: earlier ones fade to grey.
@@ -2353,259 +2788,6 @@ function drawIntro() {
   drawEmber(W / 2, 200);
   drawStack(G.dialog, 250);
   if (G.dialog?.full) drawNext(W - 28, H - 28);
-}
-
-/* --- the path ------------------------------------------------------------ */
-function drawHub() {
-  if (G.box.y > 200) drawPath(); // the campfire and friends panels cover the path
-
-  // header: warmth on the left, distance on the right
-  text("warmth", 20, 18, { color: C.dim });
-  text(fmt(S.warmth), 20, 34, { scale: 2, color: C.ember });
-  text(`+${fmtRate(warmthRate())} / s`, 20, 72, { color: C.dim });
-  text(`${fmt(S.dist)} m`, 430, 18, { align: "right" });
-  text(`night ${night()}`, 430, 36, { color: C.dim, align: "right" });
-  text(arrived() ? "something ahead" : `next in ${Math.ceil(S.nextAt - S.dist)} m`, 430, 54, { color: arrived() ? C.ember : C.dim, align: "right" });
-
-  const b = drawFrame(G.box);
-  withClip(b, () => {
-    if (G.hubPhase === "camp") drawCamp(b);
-    else if (G.hubPhase === "friends") drawFriends(b);
-    else if (G.dialog) drawTyped(G.dialog.text, G.dialog.n, b.x + 22, b.y + 20, HUB_BOX.w - 44, 24);
-  });
-
-  drawOptionRow(HUB_OPTS, G.hubPhase === "camp" ? 1 : G.hubPhase === "friends" ? 2 : G.hubSel, true, {
-    ready: [arrived()],
-    off: [!arrived()],
-  });
-}
-
-const ridgeY = (wx) => snap(172 + Math.sin(wx * 0.013) * 7 + Math.sin(wx * 0.041) * 3);
-
-function drawPath() {
-  const off = S.dist * PX_PER_M;
-  const far = off * 0.3;
-
-  drawGlow(338, 104, 12, [C.night]);
-  drawSprite(baked("moon", bakeMoon), 338, 104);
-
-  // far hills with pines, scrolling slower than the ground
-  for (let x = 0; x < W; x += PX) {
-    const y = ridgeY(x + far);
-    ctx.fillStyle = C.night;
-    ctx.fillRect(x, y, PX, GROUND - y);
-    ctx.fillStyle = C.faint;
-    ctx.fillRect(x, y, PX, PX);
-  }
-  const tcell = 46;
-  for (let c = Math.floor(far / tcell) - 1; c <= Math.floor((far + W) / tcell) + 1; c++) {
-    if (hash(c + 7.7) > 0.5) continue;
-    const x = snap(c * tcell - far + hash(c + 3.1) * 30);
-    drawBitmap(SPR.pine, x, ridgeY(x + far) - 10, { color: C.faint });
-  }
-
-  const walking = !arrived() && !REDUCED;
-  const bob = walking ? -Math.round(Math.abs(Math.sin(G.walkT * 0.18)) * 2) * PX : 0;
-  const ey = GROUND - 14 + bob;
-  emberGlow(WALK_X, ey);
-
-  // the path itself, with pebbles and grass placed by distance
-  ctx.fillStyle = C.dim;
-  ctx.fillRect(0, GROUND, W, PX);
-  const cell = 34;
-  for (let c = Math.floor(off / cell) - 1; c <= Math.floor((off + W) / cell) + 1; c++) {
-    const h = hash(c);
-    const x = snap(c * cell - off + hash(c + 0.5) * 20);
-    if (h < 0.3) {
-      ctx.fillStyle = C.dim;
-      ctx.fillRect(x, GROUND + 6, 4, 2);
-    } else if (h < 0.55) {
-      ctx.fillStyle = C.dim;
-      ctx.fillRect(x, GROUND - 4, 2, 4);
-      ctx.fillRect(x + 4, GROUND - 6, 2, 6);
-      ctx.fillRect(x + 8, GROUND - 4, 2, 4);
-    } else if (h < 0.65) {
-      ctx.fillStyle = C.faint;
-      ctx.fillRect(x, GROUND + 12, 6, 2);
-    }
-  }
-
-  const remaining = S.nextAt - S.dist;
-  if (remaining < 26) {
-    drawAhead(ROSTER[S.met % ROSTER.length], WALK_X + 72 + remaining * PX_PER_M, remaining <= 0 ? C.ink : C.dim);
-  }
-
-  // friends trail behind you
-  const shown = S.friends.slice(-8).reverse();
-  shown.forEach((f, i) => {
-    const x = WALK_X - 32 - i * 30;
-    const y = GROUND - 24 + Math.round(Math.sin(G.t * 0.06 + i * 1.7) * 2) * PX;
-    drawMini(f.key, x, y, Math.floor(G.t / 9 + i) % 2);
-  });
-  if (S.friends.length > 8) text(`+${S.friends.length - 8}`, WALK_X - 32 - 8 * 30, GROUND - 30, { color: C.dim, align: "center" });
-
-  drawEmber(WALK_X, ey);
-}
-
-function drawCamp(b) {
-  UPGRADES.forEach((u, i) => {
-    const r = campRow(i);
-    const y = r.y + 6;
-    const level = lvl(u.id);
-    const maxed = level >= u.max;
-    const cost = upgradeCost(u);
-    const sel = G.campSel === i;
-    const flash = G.campFlash?.i === i && (G.campFlash.t >> 2) % 2 === 0;
-    if (sel) drawBitmap(SPR.pick, b.x + 20, y + 7, { color: C.ember, center: true });
-    text(u.label, b.x + 34, y, { color: sel ? C.ink : C.dim });
-    text(u.desc, b.x + 34, y + 18, { color: C.dim });
-    let costColor = maxed ? C.dim : S.warmth >= cost ? C.ember : C.dim;
-    if (flash) costColor = G.campFlash.ok ? C.core : C.faint;
-    text(maxed ? "max" : fmt(cost), b.x + b.w - 20, y, { color: costColor, align: "right" });
-    text(`lv ${level}`, b.x + b.w - 20, y + 18, { color: C.dim, align: "right" });
-  });
-}
-
-function drawFriends(b) {
-  let y = b.y + 18;
-  text("following you", b.x + 20, y, { color: C.dim });
-  y += 26;
-  if (!S.friends.length) {
-    drawTyped("no one yet. spare someone on the path and they'll follow your light.", 999, b.x + 20, y, b.w - 40, 22);
-    return;
-  }
-  for (const key of ROSTER) {
-    const list = S.friends.filter((f) => f.key === key);
-    if (!list.length) continue;
-    drawMini(key, b.x + 28, y + 6, Math.floor(G.t / 9) % 2);
-    text(`${SPECIES[key].plural} ${list.length}`, b.x + 48, y);
-    text(`+${fmtRate(list.reduce((s, f) => s + f.rate, 0))} / s`, b.x + b.w - 20, y, { color: C.ember, align: "right" });
-    y += 18;
-    const names = list.length > 6 ? `${list.slice(-6).map((f) => f.name).join(", ")} and ${list.length - 6} more` : list.map((f) => f.name).join(", ");
-    y += drawTyped(names, 999, b.x + 48, y, b.w - 68, 18, { color: C.dim }) * 18 + 12;
-  }
-  text("your own glow", b.x + 48, y);
-  text(`+${fmtRate(ownGlow())} / s`, b.x + b.w - 20, y, { color: C.ember, align: "right" });
-}
-
-/* --- battle -------------------------------------------------------------- */
-function drawBattle() {
-  const f = G.foe;
-  const pose = drawFoe(f);
-
-  if (G.slash) {
-    const t = G.slash.t;
-    const grow = clamp(t / 8, 0, 1);
-    ctx.globalAlpha = t < 10 ? 1 : 1 - (t - 10) / 16;
-    pixelLine(pose.x + 56, pose.y - 50, pose.x + 56 - 112 * grow, pose.y - 50 + 100 * grow, C.ember, 2);
-    ctx.globalAlpha = 1;
-  }
-
-  const inArena = G.phase === "enemy" || G.phase === "dodge";
-  if (f.barT > 0) {
-    ctx.globalAlpha = Math.min(1, f.barT / 20);
-    ctx.fillStyle = C.faint;
-    ctx.fillRect(190, 166, 100, 4);
-    ctx.fillStyle = C.ink;
-    ctx.fillRect(190, 166, snap(100 * (f.shown / f.max)), 4);
-    ctx.globalAlpha = 1;
-  } else if (!inArena && !f.dead) {
-    text(f.name, 240, 158, { color: f.calm >= 100 ? C.ember : C.dim, align: "center", spacing: 1 });
-  }
-
-  const b = drawFrame(G.box, { inner: !inArena });
-  withClip(b, () => {
-    if (G.phase === "menu" || G.phase === "result") {
-      const d = G.dialog;
-      if (d) {
-        drawTyped(d.text, d.n, b.x + 22, b.y + 20, MENU_BOX.w - 44, 24);
-        if (G.phase === "result" && d.full) drawNext(b.x + b.w - 22, b.y + b.h - 16);
-      }
-    } else if (G.phase === "talk") {
-      drawActs(b);
-    } else if (G.phase === "strike") {
-      drawStrike(b);
-    } else {
-      drawArena();
-    }
-  });
-
-  drawHud();
-  drawOptionRow(MENU, G.menu, G.phase === "menu" || G.phase === "talk", {
-    ready: [false, false, false, f.calm >= 100],
-    counts: { 2: G.mends },
-  });
-  drawBubble();
-}
-
-function drawActs(b) {
-  G.foe.sp.acts.forEach((a, i) => {
-    const r = actRect(i);
-    const sel = G.act === i;
-    if (sel) drawBitmap(SPR.pick, r.x - 16, r.y + 7, { color: C.ember, center: true });
-    text(a.label, r.x, r.y, { color: sel ? C.ink : C.dim, alpha: actSpent(i) ? 0.45 : 1 });
-  });
-  text("x back", b.x + b.w - 18, b.y + b.h - 24, { color: C.dim, align: "right" });
-}
-
-function drawStrike(b) {
-  const s = G.strike;
-  if (!s) return;
-  const x0 = b.x + 40;
-  const x1 = b.x + b.w - 40;
-  const cy = snap(b.y + b.h / 2 + 10);
-  text("stop the line at the center", b.x + b.w / 2, b.y + 18, { color: C.dim, align: "center" });
-  ctx.fillStyle = C.faint;
-  ctx.fillRect(x0, cy, x1 - x0, PX);
-  for (let i = 0; i <= 10; i++) {
-    const x = snap(lerp(x0, x1, i / 10));
-    const h = i === 5 ? 24 : 8;
-    ctx.fillStyle = i === 5 ? C.ember : C.dim;
-    ctx.fillRect(x, cy - h / 2 + 1, PX, h);
-  }
-  const cx = snap(lerp(x0, x1, s.x));
-  ctx.fillStyle = s.stopped && (s.hold >> 2) % 2 === 0 ? C.ember : C.ink;
-  ctx.fillRect(cx - 2, cy - 20, 4, 42);
-}
-
-function drawArena() {
-  const p = G.player;
-  emberGlow(p.x, p.y, 0.8 - G.dimmed * 0.2);
-  if (G.phase === "dodge" && G.pattern === "spiral" && G.patT >= 0) {
-    const a = G.boxTarget;
-    drawSprite(baked("ring|4", () => bakeRing(4, C.dim)), a.x + a.w / 2, a.y + a.h / 2);
-  }
-  drawBullets();
-  const blink = p.inv > 0 && (p.inv >> 2) % 2 === 0;
-  if (!blink) drawEmber(p.x, p.y);
-}
-
-function drawHud() {
-  text("ember", 20, HUD_Y, { base: "middle" });
-  text("hp", 94, HUD_Y, { color: C.dim, base: "middle" });
-  const bx = 128;
-  const bw = 96;
-  ctx.fillStyle = C.faint;
-  ctx.fillRect(bx, HUD_Y - 4, bw, 8);
-  ctx.fillStyle = G.hp <= G.maxHp * 0.3 ? C.ember : C.ink;
-  ctx.fillRect(bx, HUD_Y - 4, snap((bw * G.hp) / G.maxHp), 8);
-  text(`${G.hp} / ${G.maxHp}`, bx + bw + 12, HUD_Y, { base: "middle" });
-}
-
-function drawBubble() {
-  const d = G.bubble;
-  if (!d) return;
-  const lines = wrap(d.text, 120);
-  const bx = 330;
-  const by = 40;
-  const bw = 140;
-  const bh = 22 + lines.length * 20;
-  drawFrame({ x: bx, y: by, w: bw, h: bh }, { inner: false });
-  // a little tail pointing at the creature
-  ctx.fillStyle = C.ink;
-  for (let i = 0; i < 5; i++) ctx.fillRect(bx - 2 - i * 2, by + 14 + i * 2, 2, 2);
-  for (let i = 0; i < 5; i++) ctx.fillRect(bx - 2 - i * 2, by + 30 - i * 2, 2, 2);
-  drawTyped(d.text, d.n, bx + 12, by + 12, 120, 20);
 }
 
 /* --- losing -------------------------------------------------------------- */
@@ -2669,7 +2851,8 @@ function draw() {
 /* run export-sprites.mjs to save it as files                              */
 /* ----------------------------------------------------------------------- */
 const WINGS = ["wings-open", "wings-mid", "wings-up"];
-const OWL_MOODS = [["squint", "squint"], ["open", "awake"], ["drowsy", "drowsy"], ["shut", "asleep"]];
+const DRAGON_MOODS = ["glare", "watch", "drowsy", "asleep"];
+const DRAGON_WINGS = ["wings-up", "wings-mid", "wings-down"];
 const GLYPH_NAMES = {
   ".": "period", ",": "comma", "'": "apostrophe", "?": "question", "!": "exclamation", "-": "hyphen",
   "—": "dash", "/": "slash", ":": "colon", "+": "plus", "·": "dot", "(": "paren-left", ")": "paren-right",
@@ -2716,16 +2899,18 @@ function spriteGroups() {
     for (const lit of [1, 0]) WINGS.forEach((w, f) => fly(`${w}-${lit ? "lit" : "dark"}${hit(color)}`, foeSprite("firefly", { frame: f, lit, color, k: 0.75 })));
   }
 
-  const owl = group("owl", "squinting at your light, awake, drowsy, asleep · then the hit flash");
-  for (const color of [C.ink, C.ember]) OWL_MOODS.forEach(([mood, label]) => owl(label + hit(color), foeSprite("owl", { mood, color })));
+  const dragon = group("dragon", "wings up, mid, down · glaring at your light, watching, drowsy, asleep · then the hit flash");
+  for (const color of [C.ink, C.ember]) {
+    for (const mood of DRAGON_MOODS) DRAGON_WINGS.forEach((w, f) => dragon(`${w}-${mood}${hit(color)}`, foeSprite("dragon", { frame: f, mood, color, k: DRAGON_K })));
+  }
 
   const path = group("path", "waiting up ahead: still far off (grey), then close");
   for (const color of [C.dim, C.ink]) {
     const far = color === C.dim ? "-far" : "";
     WINGS.forEach((w, f) => path(`moth-${w}${far}`, foeSprite("moth", { frame: f, color, k: 0.25 })));
     for (const lit of [1, 0]) WINGS.forEach((w, f) => path(`firefly-${w}-${lit ? "lit" : "dark"}${far}`, foeSprite("firefly", { frame: f, lit, color, k: 0.4 })));
-    path(`owl-squint${far}`, foeSprite("owl", { mood: "squint", color, k: 0.25 }));
-    path(`owl-blink${far}`, foeSprite("owl", { mood: "shut", color, k: 0.25 }));
+    DRAGON_WINGS.forEach((w, f) => path(`dragon-${w}${far}`, foeSprite("dragon", { frame: f, mood: "watch", color, k: 0.25 })));
+    path(`dragon-asleep${far}`, foeSprite("dragon", { frame: 1, mood: "asleep", color, k: 0.25 }));
   }
 
   const friends = group("friends", "following you, two frames each");
@@ -2733,14 +2918,14 @@ function spriteGroups() {
   friends("moth-b", bmp(SPR.mothB, [C.ink, C.ink, C.dim]));
   friends("firefly-a", bmp(SPR.fireflyA, [C.ink, C.glim]));
   friends("firefly-b", bmp(SPR.fireflyB, [C.ink, C.moss]));
-  friends("owl-a", bmp(SPR.owlA, [C.ink, C.core, C.dim, C.ember]));
-  friends("owl-blink", bmp(SPR.owlB, [C.ink, C.core, C.dim, C.ember]));
+  friends("dragon-a", bmp(SPR.dragonA, [C.ink, C.rune, C.stone]));
+  friends("dragon-b", bmp(SPR.dragonB, [C.ink, C.rune, C.stone]));
 
   const you = group("ember", "you: three flicker frames, then twice the size for the title");
   SPR.ember.forEach((rows, i) => you(`flicker-${i + 1}`, bmp(rows, [C.ember, C.core])));
   SPR.ember.forEach((rows, i) => you(`title-${i + 1}`, bmp(rows, [C.ember, C.core], 2)));
 
-  const atk = group("attacks", "dust, spark, firefly, feathers, little moth, warning flash");
+  const atk = group("attacks", "dust, spark, firefly, feathers, ice shard, icicle, little moth, warning flash");
   atk("dust-small", bmp(SPR.dustS, [C.ink]));
   atk("dust-large", bmp(SPR.dustL, [C.ink]));
   atk("spark", bmp(SPR.spark, [C.ink, C.core]));
@@ -2749,6 +2934,9 @@ function spriteGroups() {
   atk("feather-left", bmp(SPR.featherL, [C.ink]));
   atk("feather-flat", bmp(SPR.featherF, [C.ink]));
   atk("feather-right", bmp(SPR.featherR, [C.ink]));
+  atk("shard", bmp(SPR.shard, [C.ink, C.rune]));
+  atk("icicle", bmp(SPR.icicle, [C.ink, C.rune]));
+  atk("icicle-glint", bmp(SPR.icicle, [C.rune, C.rune]));
   atk("moth-a", bmp(SPR.bugA, [C.ink, C.ink, C.dim]));
   atk("moth-b", bmp(SPR.bugB, [C.ink, C.ink, C.dim]));
   for (const r of [6, 5, 4]) atk(`warning-${r}`, baked(`ring|${r}`, () => bakeRing(r, C.dim)));
@@ -2762,13 +2950,20 @@ function spriteGroups() {
 
   const scenery = group("scenery", "moon, pine");
   scenery("moon", baked("moon", bakeMoon));
-  scenery("pine", bmp(SPR.pine, [C.faint]));
+  scenery("pine", bmp(SPR.pine, [C.moss, C.ink]));
 
-  const ui = group("ui", "menu pick, next, sound on, sound off");
+  const icons = group("icons", "tablet icons: strike, talk, mend, part, approach, campfire, friends");
+  for (const [name, rows] of Object.entries(ICON)) icons(name, bmp(rows, [C.dim]));
+  icons("strike-selected", bmp(ICON.strike, [C.ember]));
+  const runes = group("runes", "the calm meter: unlit, lit, ready to part");
+  for (const color of [C.stone, C.rune, C.ember]) RUNES.forEach((rows, i) => runes(`${i + 1}-${color === C.stone ? "unlit" : color === C.rune ? "lit" : "ready"}`, bmp(rows, [color])));
+  const ui = group("ui", "menu pick, next, sound on, sound off, mend flame full and spent");
   ui("pick", bmp(SPR.pick, [C.ember]));
   ui("next", bmp(SPR.next, [C.dim]));
   ui("sound-on", bmp(SPR.soundOn, [C.dim]));
   ui("sound-off", bmp(SPR.soundOff, [C.dim]));
+  ui("mend-full", bmp(SPR.flame, [C.ember, C.core]));
+  ui("mend-spent", bmp(SPR.flame, [C.stoneD, C.stoneD]));
 
   const font = group("font", "the 5x7 font in 5x9 cells, then the big numbers at 2x");
   for (const ch of Object.keys(FONT)) font(glyphName(ch), bmp(glyphCell(ch), [C.ink]));
