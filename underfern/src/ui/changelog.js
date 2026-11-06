@@ -1,0 +1,213 @@
+// The game's changelog, newest first — shown from the title screen's
+// Changelog link. Player-facing words, one short line per change.
+
+/** @type {{ v: string, date: string, title: string, notes: string[] }[]} */
+export const CHANGELOG = [
+  {
+    v: "0.18",
+    date: "2026-11-06",
+    title: "The island in rings",
+    notes: [
+      "The island climbs from the sea to its heart: the Shore, the Lowlands, the Highlands and the Mountains.",
+      "The mountains now stand at the centre as one compact massif.",
+      "The Highlands ring them: open upland meadow stepped into terraces and escarpments, with most of the mesas.",
+      "The Lowlands hold the lakes, the forests and the rivers, which rise at the highlands' edge.",
+      "The HUD names each region as you cross into it, and the map shows where you are.",
+    ],
+  },
+  {
+    v: "0.17",
+    date: "2026-11-06",
+    title: "Higher ground",
+    notes: [
+      "Mesas rise out of the lowlands: flat-topped tablelands with sheer 25–35 m walls, each with one rubble ramp up to its top.",
+      "Buttes: rock pillars 40–60 m tall that nothing climbs.",
+      "The rocky headlands are now sea cliffs, rising about 25 m from a strip of shingle.",
+      "The rolling country between them has more rise and fall.",
+      "Step off a cliff and you fall: take the ramp.",
+      "The map hachures every mesa and butte like a cliff, with its height and its ramp.",
+    ],
+  },
+  {
+    v: "0.16",
+    date: "2026-11-06",
+    title: "Fights with weight",
+    notes: [
+      "Hold Bite (or right-click) to wind up a heavy attack. It lands when you let go: harder and slower, and it costs more stamina.",
+      "Dodge with Space or the new Dodge button: a quick hop that can't be hit mid-way. Animals over 2.5 t brace instead, and a brace at the last moment parries.",
+      "Every hit wears down poise. Break it and the animal staggers, open to a critical bite.",
+      "Bites fill a bleed meter and heavy blows a crush meter. Full, they burst into a haemorrhage or a broken leg.",
+      "Lock on with T, middle-click or the Lock button: the camera and your attacks stay on one animal, with its health and poise on the reticle.",
+      "Wild animals crouch and growl before a heavy, and they dodge and brace too.",
+      "Blows land with a beat of hit-stop, a shake, a spray of blood and a heavier crunch.",
+    ],
+  },
+  {
+    v: "0.15",
+    date: "2026-11-06",
+    title: "The golden Underfern",
+    notes: [
+      "The Underfern is now an Erdtree of a fern: some 200 m to the top of its crown, seen from every shore.",
+      "Its trunk is braided from twisting trunks, with golden light showing through the gaps and running up its bark in veins.",
+      "Golden fronds 90–110 m long glow softly by day and blaze at night, inside a halo of light.",
+      "Golden leaves drift down from the crown, and the haze barely dims it.",
+    ],
+  },
+  {
+    v: "0.14",
+    date: "2026-11-06",
+    title: "Retro SD, retuned",
+    notes: [
+      "Clearer skies: a lighter bloom, sun shafts that stay close to the sun, and distance blur that starts further out.",
+      "5-bit colour, like the PS2's 16-bit frame buffers: the dither shows on smooth skies, with a little banding on purpose.",
+      "Scanlines swell with brightness, so bright lines all but close the gaps, as on a tube.",
+      "A faint phosphor mask on screens dense enough to show it.",
+    ],
+  },
+  {
+    v: "0.13",
+    date: "2026-11-06",
+    title: "The Underfern",
+    notes: [
+      "The island's namesake has grown: one colossal tree fern, some 100 m tall, in a forest valley near the island's heart.",
+      "Buttress roots arch over the ground — some high enough to walk beneath — and a crown of fronds 55–70 m long nods in the wind, with fiddleheads still curled at the top.",
+      "Sunlight glows green-gold through the fronds; after dark their veins and the lichen on its bark glow blue-green, and motes drift up around it.",
+      "It's on the map, and you'll know when you've found it.",
+    ],
+  },
+  {
+    v: "0.12",
+    date: "2026-11-06",
+    title: "Made for iPhone",
+    notes: [
+      "Dynamic resolution: on Auto and Low, the island draws fewer pixels while frames are dropping and steps back up when there's headroom.",
+      "Battery saver in Settings holds the game at 30 frames a second, for a cooler phone and a longer charge.",
+      "While paused, the island stops redrawing, so the phone gets a rest.",
+      "The game's sound mixes with your music and follows the silent switch.",
+      "If iOS drops the graphics while the game sits in the background, it saves and reloads into Continue instead of a black screen.",
+      "The glow and blur passes run at half precision, which iPhone graphics do twice as fast.",
+    ],
+  },
+  {
+    v: "0.11",
+    date: "2026-11-03",
+    title: "Retro SD",
+    notes: [
+      "A fourth look in Settings: the island as a GameCube or PS2 game on a CRT.",
+      "448 lines, a Kawase-blurred bloom, distance blur, and sun shafts through the trees.",
+      "6-bit colour with an ordered dither, and the GameCube's deflicker softening every line.",
+      "Colour bleeds sideways like a composite cable, with scanlines on top.",
+    ],
+  },
+  {
+    v: "0.10",
+    date: "2026-10-21",
+    title: "Retro HD",
+    notes: [
+      "A new default look, straight out of a late-2000s console: a 720p frame, soft anti-aliasing and a smooth upscale.",
+      "Bright skies, snow and water bloom; fireflies and glowing fungi glow.",
+      "A bronzed, slightly drained grade, deeper blacks, film grain and a touch of lens fringing at the edges.",
+      "Detailed and Pixel are still in Settings.",
+    ],
+  },
+  {
+    v: "0.9",
+    date: "2026-10-14",
+    title: "A wilder light",
+    notes: [
+      "A new look: soft painted light, valley mist, and blue-green haze that layers the far ridges.",
+      "Three living lands — coast, plains and forest. The beach grows dunes, palms and driftwood; the swamps become wet woods.",
+      "Weather changes day to day: clear, fair, overcast or misty. Some clear nights bring an aurora.",
+      "Painted rock, snow on the high peaks, and grass that ripples in the wind.",
+      "Fossil giants and stone wonders to find — a ribcage you can walk through, a half-buried skull, a stone arch, sea stacks and basalt columns.",
+      "Fireflies at dusk, sunbeams under the canopy, light falling into caves, and glowing fungi underground.",
+    ],
+  },
+  {
+    v: "0.8",
+    date: "2026-10-14",
+    title: "Creative mode",
+    notes: [
+      "A second way in from the title screen: spawn any playable species full grown.",
+      "No hunger, no thirst, no injuries and no death — explore and watch the island.",
+      "Creative runs never touch your Survival save.",
+      "A quieter, simpler title screen, and this changelog.",
+    ],
+  },
+  {
+    v: "0.7",
+    date: "2026-10-14",
+    title: "Herds and packs",
+    notes: [
+      "Herd and pack species hatch among their own kind, led by an adult.",
+      "The herd waits for you, and its Stegosaurus and sauropod adults charge whatever bites you.",
+      "A raptor pack piles onto whatever you bite.",
+      "Call to bring your group back; call near another group of your kind to join it.",
+      "Full grown, you lead: the group follows you, drinks when you drink and rests when you rest.",
+      "Herds keep a daily round — water at dawn, open plains by day, the forest edge at evening.",
+      "Mates warn you when they spot a predator, and pin it on your compass.",
+      "Defenders form a ring round their young, tails out.",
+    ],
+  },
+  {
+    v: "0.6",
+    date: "2026-10-14",
+    title: "The high country",
+    notes: [
+      "A mountain range in the island's heart: horn peaks, cliffs, passes and trails up to lookouts.",
+      "Five caves — a cavern under a skylight, a through-tunnel and raptor-sized dens.",
+      "Caves are dark, echo, and keep out anything too big for the opening.",
+      "The map marks summits, trails and caves.",
+    ],
+  },
+  {
+    v: "0.5",
+    date: "2026-10-08",
+    title: "Dinosaurs only",
+    notes: [
+      "Tyrannosaurus rex and Spinosaurus join — playable, and rare top predators in the wild.",
+      "Spinosaurus hunts the riverbanks and swims with its sail above the water.",
+      "Gastonia leaves the island.",
+      "An island out of time: animals from 150 to 66 million years ago share one coast.",
+      "No more humans: the Hunter mode is retired.",
+      "Touch: hold Bite and slide the same thumb to turn.",
+    ],
+  },
+  {
+    v: "0.4",
+    date: "2026-10-07",
+    title: "Underfern",
+    notes: ["The game has its name.", "Old saves carry over."],
+  },
+  {
+    v: "0.3",
+    date: "2026-10-06",
+    title: "In your pocket",
+    notes: [
+      "Phones always play in landscape — even held upright, with rotation lock on.",
+      "Touch controls fixed and reworked for thumbs.",
+      "Faster drawing, steadier frame rates.",
+    ],
+  },
+  {
+    v: "0.2",
+    date: "2026-10-06",
+    title: "A look of its own",
+    notes: [
+      "The pixel look becomes the default, with a pixel size you can set.",
+      "Brontosaurus joins the playable species.",
+      "A Hunter mode in the spirit of Carnivores (retired in 0.5).",
+    ],
+  },
+  {
+    v: "0.1",
+    date: "2026-10-05",
+    title: "First light",
+    notes: [
+      "A misty island with forests, plains, swamps, lakes and rivers, and a day and night.",
+      "Six playable dinosaurs and two wild ones, each with their own body, skin and behaviour.",
+      "Hatch small, eat, drink, hide, fight and grow up.",
+      "Every sound made on the fly — no recordings.",
+    ],
+  },
+];
