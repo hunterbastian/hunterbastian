@@ -95,7 +95,28 @@ follows a few rules:
   firefly has its own green. Anything left over, such as fades, is snapped to
   the palette with 4 × 4 ordered dithering.
 
-Open `index.html#sprites` to see every sprite and frame on one screen.
+### Sprite sheet
+
+`sprites/` holds the complete sprite sheet, 147 sprites, exported from the
+game's own drawing code:
+
+| file | what it is |
+| --- | --- |
+| `ember-sprites.png` | every sprite and frame packed together, 1 px = 1 game pixel, on transparency |
+| `ember-sprites.json` | each frame's name, position and pivot (the point the game positions it by), in TexturePacker's JSON hash format |
+| `ember-sprites-preview.png` | the same sprites labeled, with the palette, at 4× |
+| `ember-palette.gpl` | the 11 colors, for Aseprite or GIMP |
+
+Frames are named by group, like `moth/wings-open`, `firefly/wings-up-lit-hit`,
+`owl/drowsy`, `friends/owl-blink`, `attacks/feather-left` and `font/a`. Open
+`index.html#sprites` to see the sheet in the browser. After changing any
+sprite, re-export it with:
+
+```bash
+cd ember
+node export-sprites.mjs
+```
+
 
 - `ember.js` — the font, sprites and pixel pen, the save and offline-warmth
   logic, the creatures and their attack patterns, a fixed-timestep loop

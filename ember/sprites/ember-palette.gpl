@@ -1,0 +1,15 @@
+GIMP Palette
+Name: ember
+Columns: 11
+#
+ 12  11  16	bg
+ 23  21  31	night
+ 45  42  56	faint
+127 122 140	dim
+239 233 220	ink
+ 46  26  18	deep
+107  58  28	warm
+255 174  87	ember
+255 240 214	core
+ 52  67  31	moss
+219 232 154	glim

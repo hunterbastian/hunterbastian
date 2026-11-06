@@ -523,8 +523,8 @@ function drawSprite(c, x, y, alpha = 1) {
 
 // Light in stepped bands, with a little dither only where two bands meet.
 // `ramp` runs from the outermost color to the innermost.
-function drawGlow(x, y, r, ramp) {
-  const c = baked(`glow|${r}|${ramp.join(",")}`, () => {
+function glowCanvas(r, ramp) {
+  return baked(`glow|${r}|${ramp.join(",")}`, () => {
     const cv = document.createElement("canvas");
     cv.width = cv.height = r * 2 + 1;
     const g = cv.getContext("2d");
@@ -542,7 +542,10 @@ function drawGlow(x, y, r, ramp) {
     cv.oy = r;
     return cv;
   });
-  drawSprite(c, x, y);
+}
+
+function drawGlow(x, y, r, ramp) {
+  drawSprite(glowCanvas(r, ramp), x, y);
 }
 
 const MOTH_FLAP = [1, 0.62, 0.28];
@@ -2615,34 +2618,6 @@ function drawOver() {
   if (G.overReady) text("z to keep going", W / 2, y + 34, { color: C.ember, align: "center", alpha: pulse() });
 }
 
-/* --- every sprite at once: open the page with #sprites ------------------- */
-function drawSheet() {
-  const lbl = (s, x, y) => text(s, x, y, { color: C.dim, align: "center" });
-  const t = G.t;
-  drawSprite(foeSprite("moth", { frame: 0 }), 90, 64);
-  drawSprite(foeSprite("moth", { frame: 2 }), 250, 64);
-  drawGlow(400, 85, 16, [C.moss]);
-  drawSprite(foeSprite("firefly", { frame: flapFrame(t * 0.4), k: 0.75 }), 400, 64);
-  lbl("moth", 170, 120);
-  lbl("firefly", 400, 120);
-  ["squint", "open", "drowsy"].forEach((mood, i) => drawSprite(foeSprite("owl", { mood }), 90 + i * 150, 190));
-  lbl("owl", 240, 248);
-  drawSprite(foeSprite("moth", { frame: flapFrame(t * 0.25), k: 0.25 }), 40, 290);
-  drawSprite(foeSprite("firefly", { frame: flapFrame(t * 0.25), k: 0.4 }), 100, 290);
-  drawSprite(foeSprite("owl", { mood: "squint", k: 0.25 }), 160, 300);
-  ["moth", "firefly", "owl"].forEach((key, i) => {
-    drawMini(key, 230 + i * 50, 290, 0);
-    drawMini(key, 230 + i * 50, 318, 1);
-  });
-  drawSprite(baked("moon", bakeMoon), 420, 300);
-  SPR.ember.forEach((fr, i) => {
-    emberGlow(40 + i * 40, 372, 0.8);
-    drawBitmap(fr, 40 + i * 40, 372, { color: C.ember, color2: C.core, center: true });
-  });
-  ["dustS", "dustL", "spark", "fly", "featherL", "featherF", "featherR", "pine"].forEach((k, i) =>
-    drawBitmap(SPR[k], 180 + i * 30, 372, { color: k === "pine" ? C.faint : C.ink, color2: k === "fly" ? C.glim : C.core, center: true }));
-}
-
 function drawParticles() {
   for (const p of G.particles) {
     ctx.globalAlpha = 1 - p.age / p.life;
@@ -2674,7 +2649,6 @@ function draw() {
     case "hub": drawHub(); break;
     case "battle": drawBattle(); break;
     case "over": drawOver(); break;
-    case "sheet": drawSheet(); break;
   }
   drawParticles();
   drawFloaters();
@@ -2688,6 +2662,256 @@ function draw() {
   }
   drawSoundIcon();
   present();
+}
+
+/* ----------------------------------------------------------------------- */
+/* The complete sprite sheet: open the page with #sprites to see it, or    */
+/* run export-sprites.mjs to save it as files                              */
+/* ----------------------------------------------------------------------- */
+const WINGS = ["wings-open", "wings-mid", "wings-up"];
+const OWL_MOODS = [["squint", "squint"], ["open", "awake"], ["drowsy", "drowsy"], ["shut", "asleep"]];
+const GLYPH_NAMES = {
+  ".": "period", ",": "comma", "'": "apostrophe", "?": "question", "!": "exclamation", "-": "hyphen",
+  "—": "dash", "/": "slash", ":": "colon", "+": "plus", "·": "dot", "(": "paren-left", ")": "paren-right",
+};
+const glyphName = (ch) => GLYPH_NAMES[ch] ?? ch;
+// every glyph in a 5 × 9 cell, baseline under row 7, so a font atlas lines up
+const glyphCell = (ch) => [...FONT[ch], ".....", ".....", "....."].slice(0, 9).map((r) => r.padEnd(5, "."));
+
+// A copy with its anchor (the point the game positions it by) attached.
+function anchored(c) {
+  const o = document.createElement("canvas");
+  o.width = c.width;
+  o.height = c.height;
+  o.getContext("2d").drawImage(c, 0, 0);
+  o.ox = c.ox ?? Math.floor(c.width / 2);
+  o.oy = c.oy ?? Math.floor(c.height / 2);
+  return o;
+}
+
+function wordmark(str, scale) {
+  const c = document.createElement("canvas");
+  c.width = textWidth(str, scale, 1) / PX;
+  c.height = 7 * scale;
+  const g = c.getContext("2d");
+  [...str].forEach((ch, i) => g.drawImage(bitmap(epx(FONT[ch], scale), [C.ink]), i * (ADV + 1) * scale, 0));
+  return c;
+}
+
+function spriteGroups() {
+  const groups = [];
+  const group = (name, caption) => {
+    const g = { name, caption, items: [] };
+    groups.push(g);
+    return (id, canvas) => g.items.push({ name: `${name}/${id}`, canvas: anchored(canvas) });
+  };
+  const bmp = (rows, colors, scale = 1) => bitmap(epx(rows, scale), colors);
+  const hit = (color) => (color === C.ember ? "-hit" : "");
+
+  const moth = group("moth", "wings open, mid, up · then the hit flash");
+  for (const color of [C.ink, C.ember]) WINGS.forEach((w, f) => moth(w + hit(color), foeSprite("moth", { frame: f, color })));
+
+  const fly = group("firefly", "wings open, mid, up · lantern lit, then dark · then the hit flash");
+  for (const color of [C.ink, C.ember]) {
+    for (const lit of [1, 0]) WINGS.forEach((w, f) => fly(`${w}-${lit ? "lit" : "dark"}${hit(color)}`, foeSprite("firefly", { frame: f, lit, color, k: 0.75 })));
+  }
+
+  const owl = group("owl", "squinting at your light, awake, drowsy, asleep · then the hit flash");
+  for (const color of [C.ink, C.ember]) OWL_MOODS.forEach(([mood, label]) => owl(label + hit(color), foeSprite("owl", { mood, color })));
+
+  const path = group("path", "waiting up ahead: still far off (grey), then close");
+  for (const color of [C.dim, C.ink]) {
+    const far = color === C.dim ? "-far" : "";
+    WINGS.forEach((w, f) => path(`moth-${w}${far}`, foeSprite("moth", { frame: f, color, k: 0.25 })));
+    for (const lit of [1, 0]) WINGS.forEach((w, f) => path(`firefly-${w}-${lit ? "lit" : "dark"}${far}`, foeSprite("firefly", { frame: f, lit, color, k: 0.4 })));
+    path(`owl-squint${far}`, foeSprite("owl", { mood: "squint", color, k: 0.25 }));
+    path(`owl-blink${far}`, foeSprite("owl", { mood: "shut", color, k: 0.25 }));
+  }
+
+  const friends = group("friends", "following you, two frames each");
+  friends("moth-a", bmp(SPR.mothA, [C.ink, C.ink, C.dim]));
+  friends("moth-b", bmp(SPR.mothB, [C.ink, C.ink, C.dim]));
+  friends("firefly-a", bmp(SPR.fireflyA, [C.ink, C.glim]));
+  friends("firefly-b", bmp(SPR.fireflyB, [C.ink, C.moss]));
+  friends("owl-a", bmp(SPR.owlA, [C.ink, C.core, C.dim, C.ember]));
+  friends("owl-blink", bmp(SPR.owlB, [C.ink, C.core, C.dim, C.ember]));
+
+  const you = group("ember", "you: three flicker frames, then twice the size for the title");
+  SPR.ember.forEach((rows, i) => you(`flicker-${i + 1}`, bmp(rows, [C.ember, C.core])));
+  SPR.ember.forEach((rows, i) => you(`title-${i + 1}`, bmp(rows, [C.ember, C.core], 2)));
+
+  const atk = group("attacks", "dust, spark, firefly, feathers, little moth, warning flash");
+  atk("dust-small", bmp(SPR.dustS, [C.ink]));
+  atk("dust-large", bmp(SPR.dustL, [C.ink]));
+  atk("spark", bmp(SPR.spark, [C.ink, C.core]));
+  atk("firefly-lit", bmp(SPR.fly, [C.ink, C.glim]));
+  atk("firefly-dark", bmp(SPR.fly, [C.ink, C.dim]));
+  atk("feather-left", bmp(SPR.featherL, [C.ink]));
+  atk("feather-flat", bmp(SPR.featherF, [C.ink]));
+  atk("feather-right", bmp(SPR.featherR, [C.ink]));
+  atk("moth-a", bmp(SPR.bugA, [C.ink, C.ink, C.dim]));
+  atk("moth-b", bmp(SPR.bugB, [C.ink, C.ink, C.dim]));
+  for (const r of [6, 5, 4]) atk(`warning-${r}`, baked(`ring|${r}`, () => bakeRing(r, C.dim)));
+
+  const light = group("light", "glows: your ember, the title, a firefly up close and far off, the moon");
+  light("ember", glowCanvas(12, [C.deep, C.warm]));
+  light("title", glowCanvas(20, [C.deep, C.warm]));
+  light("firefly", glowCanvas(16, [C.moss]));
+  light("firefly-far", glowCanvas(8, [C.moss]));
+  light("moon", glowCanvas(12, [C.night]));
+
+  const scenery = group("scenery", "moon, pine");
+  scenery("moon", baked("moon", bakeMoon));
+  scenery("pine", bmp(SPR.pine, [C.faint]));
+
+  const ui = group("ui", "menu pick, next, sound on, sound off");
+  ui("pick", bmp(SPR.pick, [C.ember]));
+  ui("next", bmp(SPR.next, [C.dim]));
+  ui("sound-on", bmp(SPR.soundOn, [C.dim]));
+  ui("sound-off", bmp(SPR.soundOff, [C.dim]));
+
+  const font = group("font", "the 5x7 font in 5x9 cells, then the big numbers at 2x");
+  for (const ch of Object.keys(FONT)) font(glyphName(ch), bmp(glyphCell(ch), [C.ink]));
+  for (const ch of "0123456789,+!") font(`${glyphName(ch)}-2x`, bmp(glyphCell(ch), [C.ink], 2));
+
+  const title = group("title", "the wordmark, 4x");
+  title("ember", wordmark("ember", 4));
+  return groups;
+}
+
+function buildSpriteSheet() {
+  const groups = spriteGroups();
+
+  // 1. the atlas: every frame packed in rows, 2px apart, on transparency
+  const PAD = 2;
+  const MAXW = 512;
+  const frames = [];
+  let x = PAD;
+  let y = PAD;
+  let rowH = 0;
+  let usedW = 0;
+  for (const g of groups) {
+    if (x > PAD) {
+      x = PAD;
+      y += rowH + PAD;
+      rowH = 0;
+    }
+    for (const it of g.items) {
+      const c = it.canvas;
+      if (x + c.width + PAD > MAXW) {
+        x = PAD;
+        y += rowH + PAD;
+        rowH = 0;
+      }
+      frames.push({ ...it, x, y });
+      x += c.width + PAD;
+      usedW = Math.max(usedW, x);
+      rowH = Math.max(rowH, c.height);
+    }
+  }
+  const atlas = document.createElement("canvas");
+  atlas.width = usedW;
+  atlas.height = y + rowH + PAD;
+  const ag = atlas.getContext("2d");
+  for (const f of frames) ag.drawImage(f.canvas, f.x, f.y);
+
+  const json = {
+    frames: Object.fromEntries(frames.map((f) => {
+      const { width: w, height: h, ox, oy } = f.canvas;
+      return [f.name, {
+        frame: { x: f.x, y: f.y, w, h },
+        rotated: false,
+        trimmed: false,
+        spriteSourceSize: { x: 0, y: 0, w, h },
+        sourceSize: { w, h },
+        pivot: { x: +(ox / w).toFixed(4), y: +(oy / h).toFixed(4) },
+      }];
+    })),
+    meta: {
+      app: "ember",
+      image: "ember-sprites.png",
+      format: "RGBA8888",
+      size: { w: atlas.width, h: atlas.height },
+      scale: "1",
+      note: "1 px = 1 game pixel. The game draws at 240 × 210 and scales up with nearest-neighbor. pivot is the point the game positions each sprite by.",
+      palette: C,
+    },
+  };
+
+  // 2. the preview: the same sprites, labeled, on the night background
+  const PW = 432;
+  const M = 12;
+  const plan = [];
+  let py = M + 60;
+  for (const g of groups) {
+    const caption = wrap(g.caption, (PW - M * 2 - textWidth(g.name) / PX - 8) * PX);
+    plan.push({ kind: "label", g, y: py, caption });
+    py += caption.length * 11 + 6;
+    let px = M;
+    let rh = 0;
+    for (const it of g.items) {
+      const c = it.canvas;
+      if (px + c.width > PW - M) {
+        px = M;
+        py += rh + 6;
+        rh = 0;
+      }
+      plan.push({ kind: "sprite", c, x: px, y: py });
+      px += c.width + 6;
+      rh = Math.max(rh, c.height);
+    }
+    py += rh + 14;
+  }
+  const preview = document.createElement("canvas");
+  preview.width = PW;
+  preview.height = py;
+  const pg = preview.getContext("2d");
+  pg.imageSmoothingEnabled = false;
+  pg.fillStyle = C.bg;
+  pg.fillRect(0, 0, PW, py);
+  const say2 = (str, x0, y0, color, scale = 1) => {
+    [...str.toLowerCase()].forEach((ch, i) => {
+      if (FONT[ch]) pg.drawImage(bitmap(epx(FONT[ch], scale), [color]), x0 + i * ADV * scale, y0);
+    });
+  };
+  say2("ember sprite sheet", M, M, C.ink, 2);
+  const names = Object.keys(C);
+  names.forEach((name, i) => {
+    const sx = M + i * 37;
+    pg.fillStyle = C.faint;
+    pg.fillRect(sx, M + 22, 16, 12);
+    pg.fillStyle = C[name];
+    pg.fillRect(sx + 1, M + 23, 14, 10);
+    say2(name, sx, M + 37, C.dim);
+  });
+  for (const p of plan) {
+    if (p.kind === "sprite") {
+      pg.drawImage(p.c, p.x, p.y);
+    } else {
+      say2(p.g.name, M, p.y, C.ember);
+      const cx = M + textWidth(p.g.name) / PX + 8;
+      p.caption.forEach((ln, i) => say2(ln, cx, p.y + i * 11, C.dim));
+    }
+  }
+
+  return { atlas, preview, json, palette: C, count: frames.length };
+}
+G.debug.spriteSheet = buildSpriteSheet;
+
+function showSpriteSheet() {
+  const { preview, count } = buildSpriteSheet();
+  canvas.style.display = "none";
+  for (const el of [document.documentElement, document.body]) {
+    el.style.overflow = "auto";
+    el.style.height = "auto";
+  }
+  stage.style.height = "auto";
+  stage.style.padding = "16px 0";
+  const s = Math.max(1, Math.min(4, Math.floor((window.innerWidth - 32) / preview.width)));
+  Object.assign(preview.style, { width: `${preview.width * s}px`, maxWidth: "100%", height: "auto", imageRendering: "pixelated" });
+  preview.setAttribute("role", "img");
+  preview.setAttribute("aria-label", `ember's complete sprite sheet: ${count} sprites, including every creature frame, attack, glow, icon and font glyph`);
+  stage.appendChild(preview);
 }
 
 /* ----------------------------------------------------------------------- */
@@ -2758,6 +2982,10 @@ const gathered = catchUp(away, true);
 if (gathered >= 1 && away > 30) G.awayMsg = `while you were away, you gathered ${fmt(gathered)} warmth.`;
 if (S.started) persist();
 
-if (location.hash === "#sprites") setScene("sheet");
-else startTitle();
-requestAnimationFrame(frame);
+if (location.hash === "#sprites") {
+  showSpriteSheet();
+} else {
+  startTitle();
+  requestAnimationFrame(frame);
+}
+window.addEventListener("hashchange", () => location.reload());
