@@ -1,8 +1,9 @@
 // ember — a very small game about a small light on a dark path.
 //
 // No build step and no dependencies. The game is laid out in 480 × 420
-// logical units, drawn into a 240 × 210 pixel buffer, snapped to a small
-// palette with ordered dithering, and scaled up with hard pixel edges.
+// logical units and drawn straight onto a 240 × 210 pixel grid: creatures are
+// rasterized without anti-aliasing and baked into sprites, light falls off in
+// stepped bands, and anything left over is snapped to an 11-color palette.
 //
 // The loop: your ember walks on its own and gathers warmth, even while the
 // page is closed. Every so often something is waiting on the path. Strike it
@@ -21,18 +22,21 @@ const TAU = Math.PI * 2;
 const STEP = 1000 / 60;
 const MAX_AWAY = 8 * 3600; // offline warmth is capped at 8 hours
 
+// The whole game uses these eleven colors and nothing else. Shadows lean cool
+// (night), light leans warm (your ember), and fireflies get their own green.
 const C = {
-  bg: "#0b0b0c",
-  faint: "#2c2b29",
-  dim: "#7a7872",
-  ink: "#ecebe6",
-  ember: "#ffb35c",
-  core: "#fff1dc",
-  warm: "#5a3a1c",
-  deep: "#2a1b0f",
+  bg: "#0c0b10",
+  night: "#17151f",
+  faint: "#2d2a38",
+  dim: "#7f7a8c",
+  ink: "#efe9dc",
+  deep: "#2e1a12",
+  warm: "#6b3a1c",
+  ember: "#ffae57",
+  core: "#fff0d6",
+  moss: "#34431f",
+  glim: "#dbe89a",
 };
-const EMBER_RGB = "255, 179, 92";
-const CORE_RGB = "255, 241, 220";
 const REDUCED = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -206,35 +210,89 @@ const FONT = {
 };
 const ADV = 6; // buffer pixels per character, including the gap
 
-// '#' is the main color, 'o' the second color, anything else is clear.
+// Hand-placed sprites. '#' is the main color, 'o' the second, '*' the third,
+// '+' the fourth; anything else is clear.
 const SPR = {
   pick: ["..#..", ".###.", "#####", ".###.", "..#.."],
   next: ["#####", ".###.", "..#.."],
-  emberA: ["..#..", ".###.", ".#o#.", "##o##", ".#o#.", ".###.", "..#.."],
-  emberB: ["..#..", "..#..", ".#o#.", "#ooo#", ".#o#.", ".###.", "..#.."],
-  mothA: ["#.......#", "##..#..##", "###.#.###", ".##.#.##.", "..#...#.."],
-  mothB: ["...#.#...", "..#.#.#..", "..#####..", "...###...", "...#.#..."],
-  fireflyA: ["#...#", ".#.#.", "..#..", ".###.", ".ooo.", "..o.."],
-  fireflyB: [".....", "##.##", "..#..", ".###.", ".ooo.", "..o.."],
-  owlA: ["#.....#", "#######", "#o###o#", "#######", ".#####.", ".#####.", "..#.#.."],
-  owlB: ["#.....#", "#######", "#######", "#######", ".#####.", ".#####.", "..#.#.."],
+  // you: an ember with a flickering tip
+  ember: [
+    ["...#...", "...#...", "..###..", ".##o##.", "##ooo##", ".##o##.", "..###..", "...#..."],
+    ["....#..", "...#...", "..###..", ".##o##.", "##ooo##", ".##o##.", "..###..", "...#..."],
+    ["..#....", "...#...", "..###..", ".#ooo#.", "##ooo##", ".#ooo#.", "..###..", "...#..."],
+  ],
+  // friends who follow you: two frames each
+  mothA: [".....#.#.....", ".##...#...##.", "#**#..#..#**#", "#***#.#.#***#", ".#**#####**#.", "..#*#.#.#*#..", "..#**#.#**#..", "...##...##..."],
+  mothB: ["....#...#....", "...#*###*#...", "...#**#**#...", "...#**#**#...", "....#*#*#....", "....#*#*#....", ".....#.#.....", "............."],
+  fireflyA: ["#.....#", ".#...#.", "..#.#..", "..###..", "..###..", ".#ooo#.", "..ooo..", "...o..."],
+  fireflyB: [".......", "##...##", "..#.#..", "..###..", "..###..", ".#ooo#.", "..ooo..", "...o..."],
+  owlA: ["#.......#", ".#.....#.", ".#######.", "#ooo#ooo#", "#o.o#o.o#", "#ooo+ooo#", "#*******#", "#**#*#**#", ".#*****#.", "..#####..", "...+.+..."],
+  owlB: ["#.......#", ".#.....#.", ".#######.", "#########", "#ooo#ooo#", "####+####", "#*******#", "#**#*#**#", ".#*****#.", "..#####..", "...+.+..."],
+  bugA: ["#.....#", "##.#.##", "#*###*#", ".#*#*#.", "...#..."],
+  bugB: ["..#.#..", "..###..", ".#*#*#.", "..###..", "...#..."],
+  // what gets thrown at you
+  dustS: [".#.", "###", ".#."],
+  dustL: [".##.", "####", "####", ".##."],
+  spark: ["..#..", "..#..", "##o##", "..#..", "..#.."],
+  fly: [".o.", "ooo", ".o."],
+  featherL: ["#....", ".##..", "..##.", "...##"],
+  featherF: [".#.#.", "#####"],
+  featherR: ["...##", "..##.", ".##..", "#...."],
+  // scenery
+  pine: ["..#..", ".###.", "..#..", ".###.", "#####", "..#.."],
   soundOn: ["...#.....", "..##..#..", "####...#.", "####.#.#.", "####...#.", "..##..#..", "...#....."],
   soundOff: ["...#.....", "..##.....", "####.#.#.", "####..#..", "####.#.#.", "..##.....", "...#....."],
 };
 
+// Scale2x (EPX): doubles a sprite and rounds off its diagonals, so big text
+// and big sprites keep one-pixel detail instead of turning into blocks.
+const epxCache = new Map();
+function epx(rows, scale) {
+  if (scale <= 1) return rows;
+  const key = `${scale}|${rows.join("/")}`;
+  let out = epxCache.get(key);
+  if (out) return out;
+  out = rows;
+  for (let s = 1; s < scale; s *= 2) {
+    const h = out.length;
+    const w = Math.max(...out.map((r) => r.length));
+    const src = out;
+    const at = (x, y) => (y < 0 || y >= h || x < 0 || x >= w ? "." : src[y][x] ?? ".");
+    const next = Array.from({ length: h * 2 }, () => new Array(w * 2));
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const P = at(x, y);
+        const A = at(x, y - 1);
+        const B = at(x + 1, y);
+        const L = at(x - 1, y);
+        const D = at(x, y + 1);
+        next[2 * y][2 * x] = L === A && L !== D && A !== B ? A : P;
+        next[2 * y][2 * x + 1] = A === B && A !== L && B !== D ? B : P;
+        next[2 * y + 1][2 * x] = D === L && D !== B && L !== A ? L : P;
+        next[2 * y + 1][2 * x + 1] = B === D && B !== A && D !== L ? D : P;
+      }
+    }
+    out = next.map((r) => r.join(""));
+  }
+  epxCache.set(key, out);
+  return out;
+}
+
 const bmpCache = new Map();
-function bitmap(rows, color, color2 = color) {
-  const key = `${rows.join("/")}|${color}|${color2}`;
+function bitmap(rows, colors) {
+  const key = `${rows.join("/")}|${colors.join(",")}`;
   let c = bmpCache.get(key);
   if (c) return c;
+  const map = { "#": colors[0], o: colors[1], "*": colors[2], "+": colors[3] };
   c = document.createElement("canvas");
   c.width = Math.max(1, ...rows.map((r) => r.length));
   c.height = Math.max(1, rows.length);
   const g = c.getContext("2d");
   rows.forEach((row, y) => {
     for (let x = 0; x < row.length; x++) {
-      if (row[x] !== "#" && row[x] !== "o") continue;
-      g.fillStyle = row[x] === "#" ? color : color2;
+      const col = map[row[x]];
+      if (!col) continue;
+      g.fillStyle = col;
       g.fillRect(x, y, 1, 1);
     }
   });
@@ -242,10 +300,10 @@ function bitmap(rows, color, color2 = color) {
   return c;
 }
 
-function drawBitmap(rows, x, y, { color = C.ink, color2 = color, scale = 1, alpha = 1, center = false } = {}) {
-  const c = bitmap(rows, color, color2);
-  const w = c.width * PX * scale;
-  const h = c.height * PX * scale;
+function drawBitmap(rows, x, y, { color = C.ink, color2, color3, color4, scale = 1, alpha = 1, center = false } = {}) {
+  const c = bitmap(epx(rows, scale), [color, color2 ?? color, color3 ?? color, color4 ?? color]);
+  const w = c.width * PX;
+  const h = c.height * PX;
   ctx.globalAlpha = alpha;
   ctx.drawImage(c, snap(center ? x - w / 2 : x), snap(center ? y - h / 2 : y), w, h);
   ctx.globalAlpha = 1;
@@ -264,8 +322,8 @@ function text(str, x, y, { scale = 1, color = C.ink, align = "left", alpha = 1, 
   for (let i = 0; i < str.length; i++) {
     const rows = FONT[str[i]];
     if (!rows) continue;
-    const g = bitmap(rows, color);
-    ctx.drawImage(g, tx + i * step, ty, g.width * scale * PX, g.height * scale * PX);
+    const g = bitmap(epx(rows, scale), [color]);
+    ctx.drawImage(g, tx + i * step, ty, g.width * PX, g.height * PX);
   }
   ctx.globalAlpha = 1;
 }
@@ -307,6 +365,321 @@ function drawTyped(str, n, x, y, maxW, lh, { align = "left", color = C.ink, scal
     left -= ln.length + 1; // +1 for the space or newline the wrap swallowed
   });
   return lines.length;
+}
+
+/* ----------------------------------------------------------------------- */
+/* Pixel pen: draws shapes straight onto the pixel grid, with no           */
+/* anti-aliasing, then bakes them into sprites                             */
+/* ----------------------------------------------------------------------- */
+// Shapes are described in design units around the sprite's center; `k` is
+// pixels per unit. Outlines are one pixel wide with the corner pixels that
+// would make them look doubled ("elbows") removed. Mirrored halves meet on a
+// pixel boundary, so left and right sides come out exactly symmetric.
+function rasterLine(pts, closed) {
+  const P = pts.map(([x, y]) => [Math.floor(x), Math.floor(y)]);
+  if (closed) P.push(P[0]);
+  let [x0, y0] = P[0];
+  const raw = [[x0, y0]];
+  for (let i = 1; i < P.length; i++) {
+    const [x1, y1] = P[i];
+    const dx = Math.abs(x1 - x0);
+    const dy = -Math.abs(y1 - y0);
+    const sx = x0 < x1 ? 1 : -1;
+    const sy = y0 < y1 ? 1 : -1;
+    let err = dx + dy;
+    while (x0 !== x1 || y0 !== y1) {
+      const e2 = 2 * err;
+      if (e2 >= dy) {
+        err += dy;
+        x0 += sx;
+      }
+      if (e2 <= dx) {
+        err += dx;
+        y0 += sy;
+      }
+      raw.push([x0, y0]);
+    }
+  }
+  const out = [];
+  for (let i = 0; i < raw.length; i++) {
+    const b = raw[i];
+    const a = out[out.length - 1];
+    const c = raw[i + 1];
+    if (a && c) {
+      const step1 = a[0] === b[0] || a[1] === b[1];
+      const step2 = c[0] === b[0] || c[1] === b[1];
+      const diagonal = Math.abs(a[0] - c[0]) === 1 && Math.abs(a[1] - c[1]) === 1;
+      if (step1 && step2 && diagonal) continue;
+    }
+    out.push(b);
+  }
+  return out;
+}
+
+class Pen {
+  constructor(w, h, ox, oy, k) {
+    Object.assign(this, { w, h, ox, oy, k });
+    this.px = new Array(w * h).fill(null);
+  }
+  T([u, v]) {
+    return [this.ox + u * this.k, this.oy + v * this.k];
+  }
+  set(x, y, c) {
+    if (x >= 0 && y >= 0 && x < this.w && y < this.h) this.px[y * this.w + x] = c;
+  }
+  line(pts, c, closed = false) {
+    for (const [x, y] of rasterLine(pts.map((p) => this.T(p)), closed)) this.set(x, y, c);
+  }
+  fill(pts, c) {
+    const P = pts.map((p) => this.T(p));
+    const ys = P.map((p) => p[1]);
+    for (let y = Math.floor(Math.min(...ys)); y <= Math.ceil(Math.max(...ys)); y++) {
+      const sy = y + 0.5;
+      const xs = [];
+      for (let i = 0, j = P.length - 1; i < P.length; j = i++) {
+        const [x1, y1] = P[i];
+        const [x2, y2] = P[j];
+        if (y1 > sy !== y2 > sy) xs.push(x1 + ((sy - y1) * (x2 - x1)) / (y2 - y1));
+      }
+      xs.sort((a, b) => a - b);
+      for (let n = 0; n + 1 < xs.length; n += 2) {
+        for (let x = Math.ceil(xs[n] - 0.5); x <= Math.floor(xs[n + 1] - 0.5); x++) this.set(x, y, c);
+      }
+    }
+  }
+  shape(pts, fill, stroke) {
+    if (fill) this.fill(pts, fill);
+    if (stroke) this.line(pts, stroke, true);
+  }
+  disc(u, v, r, c) {
+    const [cx, cy] = this.T([u, v]);
+    const rr = r * this.k;
+    for (let y = Math.floor(cy - rr - 1); y <= Math.ceil(cy + rr + 1); y++) {
+      for (let x = Math.floor(cx - rr - 1); x <= Math.ceil(cx + rr + 1); x++) {
+        if ((x + 0.5 - cx) ** 2 + (y + 0.5 - cy) ** 2 <= rr * rr) this.set(x, y, c);
+      }
+    }
+  }
+  dot(u, v, c) {
+    const [x, y] = this.T([u, v]);
+    this.set(Math.floor(x), Math.floor(y), c);
+  }
+  canvas() {
+    const c = document.createElement("canvas");
+    c.width = this.w;
+    c.height = this.h;
+    const g = c.getContext("2d");
+    for (let y = 0; y < this.h; y++) {
+      for (let x = 0; x < this.w; x++) {
+        const col = this.px[y * this.w + x];
+        if (!col) continue;
+        g.fillStyle = col;
+        g.fillRect(x, y, 1, 1);
+      }
+    }
+    c.ox = this.ox;
+    c.oy = this.oy;
+    return c;
+  }
+}
+
+// Curve helpers, all in design units.
+function bez(p0, p1, p2, p3, n = 24) {
+  return Array.from({ length: n + 1 }, (_, i) => {
+    const t = i / n;
+    const u = 1 - t;
+    return [0, 1].map((a) => u * u * u * p0[a] + 3 * u * u * t * p1[a] + 3 * u * t * t * p2[a] + t * t * t * p3[a]);
+  });
+}
+function qbez(p0, p1, p2, n = 16) {
+  return Array.from({ length: n + 1 }, (_, i) => {
+    const t = i / n;
+    const u = 1 - t;
+    return [0, 1].map((a) => u * u * p0[a] + 2 * u * t * p1[a] + t * t * p2[a]);
+  });
+}
+function oval(cx, cy, rx, ry, n = 40) {
+  return Array.from({ length: n }, (_, i) => [cx + Math.cos((i / n) * TAU) * rx, cy + Math.sin((i / n) * TAU) * ry]);
+}
+const path = (...segs) => segs.flat();
+const mirror = (pts, side, squash = 1) => pts.map(([u, v]) => [u * side * squash, v]);
+
+const bakeCache = new Map();
+function baked(key, make) {
+  let c = bakeCache.get(key);
+  if (!c) {
+    c = make();
+    bakeCache.set(key, c);
+  }
+  return c;
+}
+
+function drawSprite(c, x, y, alpha = 1) {
+  if (alpha <= 0) return;
+  ctx.globalAlpha = alpha;
+  ctx.drawImage(c, snap(x) - c.ox * PX, snap(y) - c.oy * PX, c.width * PX, c.height * PX);
+  ctx.globalAlpha = 1;
+}
+
+// Light in stepped bands, with a little dither only where two bands meet.
+// `ramp` runs from the outermost color to the innermost.
+function drawGlow(x, y, r, ramp) {
+  const c = baked(`glow|${r}|${ramp.join(",")}`, () => {
+    const cv = document.createElement("canvas");
+    cv.width = cv.height = r * 2 + 1;
+    const g = cv.getContext("2d");
+    for (let py = 0; py <= r * 2; py++) {
+      for (let px = 0; px <= r * 2; px++) {
+        const d = Math.hypot(px - r, py - r) / r;
+        if (d > 1) continue;
+        const level = Math.ceil((1 - d) * ramp.length + BAYER[((py & 3) << 2) | (px & 3)] * 0.7);
+        if (level < 1) continue;
+        g.fillStyle = ramp[Math.min(level, ramp.length) - 1];
+        g.fillRect(px, py, 1, 1);
+      }
+    }
+    cv.ox = r;
+    cv.oy = r;
+    return cv;
+  });
+  drawSprite(c, x, y);
+}
+
+const MOTH_FLAP = [1, 0.62, 0.28];
+const FLY_FLAP = [1, 0.55, 0.15];
+
+function bakeMoth(frame, color, k) {
+  const flap = MOTH_FLAP[frame];
+  const detail = k >= 0.4;
+  const ox = Math.ceil(76 * k) + 2;
+  const oy = Math.ceil(52 * k) + 2;
+  const pen = new Pen(ox * 2, oy + Math.ceil(50 * k) + 2, ox, oy, k);
+  for (const side of [-1, 1]) {
+    const m = (pts) => mirror(pts, side, flap);
+    const hind = m(path(bez([3, 0], [24, 0], [46, 8], [44, 26]), bez([44, 26], [42, 40], [22, 46], [12, 36]), bez([12, 36], [6, 28], [3, 14], [3, 4])));
+    pen.fill(hind, C.night);
+    if (detail) pen.line(m(bez([6, 6], [18, 10], [28, 18], [32, 30])), C.faint);
+    pen.line(hind, color, true);
+    const fore = m(path(bez([3, -9], [18, -40], [52, -48], [66, -32]), bez([66, -32], [74, -22], [64, -4], [50, -2]), bez([50, -2], [32, 0], [14, 2], [3, 1])));
+    pen.fill(fore, C.night);
+    if (detail) {
+      pen.line(m(bez([6, -5], [20, -16], [34, -26], [56, -32])), C.faint);
+      pen.line(m(oval(42, -20, 7, 7, 28)), C.dim, true);
+    }
+    pen.disc(42 * side * flap, -20, detail ? 3 : 4, color);
+    pen.line(fore, color, true);
+  }
+  const body = oval(0, 4, 5, 20);
+  pen.fill(body, C.faint);
+  if (detail) {
+    pen.line([[-3, 9], [3, 9]], C.dim);
+    pen.line([[-3, 15], [3, 15]], C.dim);
+  }
+  pen.line(body, color, true);
+  pen.shape(oval(0, -21, 6, 6), C.night, color);
+  if (detail) {
+    pen.dot(-2.4, -21, C.core);
+    pen.dot(2.4, -21, C.core);
+  }
+  for (const side of [-1, 1]) {
+    const ant = mirror(qbez([2, -26], [4, -42], [16, -48]), side);
+    pen.line(ant, color);
+    if (detail) {
+      for (const t of [6, 10, 14]) {
+        const [u, v] = ant[t];
+        pen.line([[u, v], [u + side * 4, v + 2]], color);
+      }
+    }
+  }
+  return pen.canvas();
+}
+
+function bakeFirefly(frame, lit, color, k) {
+  const flap = FLY_FLAP[frame];
+  const ox = Math.ceil(36 * k) + 2;
+  const oy = Math.ceil(34 * k) + 2;
+  const pen = new Pen(ox * 2, oy + Math.ceil(30 * k) + 2, ox, oy, k);
+  for (const side of [-1, 1]) {
+    const rot = side * (-0.2 - 0.8 * flap);
+    const cs = Math.cos(rot);
+    const sn = Math.sin(rot);
+    const wing = oval(side * 13, 0, 13, 5, 32).map(([u, v]) => [side * 3 + u * cs - v * sn, -5 + u * sn + v * cs]);
+    pen.shape(wing, C.night, C.dim);
+  }
+  const lantern = oval(0, 14, 9, 13);
+  pen.fill(lantern, lit ? C.glim : C.moss);
+  if (lit) pen.disc(-3, 9, 2.5, C.core);
+  pen.line([[-8, 7], [8, 7]], color);
+  pen.line(lantern, color, true);
+  pen.shape(oval(0, -3, 6.5, 6), C.faint, color);
+  pen.shape(oval(0, -13, 5, 5), C.night, color);
+  pen.dot(-2, -14, C.core);
+  pen.dot(2, -14, C.core);
+  for (const side of [-1, 1]) {
+    pen.line(mirror(qbez([2, -17], [3, -26], [10, -30]), side), color);
+    pen.line(mirror([[5, 1], [11, 7]], side), color);
+    pen.line(mirror([[5, -4], [12, -2]], side), color);
+  }
+  return pen.canvas();
+}
+
+function bakeOwl(mood, color, k) {
+  const detail = k >= 0.4;
+  const ox = Math.ceil(64 * k) + 2;
+  const oy = Math.ceil(50 * k) + 2;
+  const pen = new Pen(ox * 2, oy + Math.ceil(50 * k) + 2, ox, oy, k);
+  // the branch it sits on
+  pen.line([[-62, 46], [58, 44]], C.dim);
+  pen.line([[-60, 48], [56, 46]], C.faint);
+  pen.line([[36, 45], [48, 35]], C.dim);
+  for (const side of [-1, 1]) pen.shape(mirror([[12, -26], [26, -46], [28, -20]], side), C.night, color);
+  const body = oval(0, 4, 32, 38);
+  pen.fill(body, C.night);
+  pen.fill(oval(0, 17, 19, 21), C.faint);
+  if (detail) {
+    for (const [u, v] of [[-8, 12], [8, 12], [0, 20], [-8, 28], [8, 28]]) pen.line([[u - 3, v], [u, v + 3], [u + 3, v]], C.dim);
+  }
+  for (const side of [-1, 1]) {
+    pen.line(mirror(qbez([30, -6], [38, 20], [20, 38]), side), color);
+    if (detail) pen.line(mirror(qbez([24, 2], [30, 20], [17, 31]), side), C.faint);
+  }
+  pen.line(body, color, true);
+  for (const fx of [-9, -5, 5, 9]) pen.line([[fx, 40], [fx, 45]], C.ember);
+  // eyes: squinting at your light, wide open, drowsy, then shut
+  for (const side of [-1, 1]) {
+    const ex = side * 13;
+    pen.shape(oval(ex, -12, 10, 10), C.bg, color);
+    if (mood === "open") {
+      pen.disc(ex, -12, 5, C.core);
+      pen.disc(ex, -12, 2.5, C.bg);
+    } else if (mood === "drowsy") {
+      pen.disc(ex, -9, 4, C.core);
+      pen.disc(ex, -9, 2, C.bg);
+      pen.fill(oval(ex, -16, 9, 6), C.night);
+      pen.line([[ex - 8, -11], [ex + 8, -11]], color);
+    } else if (mood === "squint") {
+      pen.line([[ex - 6, -12 + side * 2], [ex + 6, -12 - side * 2]], color);
+    } else {
+      pen.line(qbez([ex - 6, -13], [ex, -7], [ex + 6, -13]), color);
+    }
+  }
+  pen.shape([[-3, -5], [0, 3], [3, -5]], C.dim, color);
+  return pen.canvas();
+}
+
+function bakeRing(r, color) {
+  const pen = new Pen(r * 2 + 4, r * 2 + 4, r + 2, r + 2, 1);
+  pen.line(oval(0, 0, r, r, 32), color, true);
+  return pen.canvas();
+}
+
+function bakeMoon() {
+  const pen = new Pen(18, 18, 9, 9, 1);
+  pen.disc(0, 0, 7, C.ink);
+  pen.disc(3.5, -2.5, 6.5, null);
+  pen.dot(-4, 1, C.dim);
+  pen.dot(-2, 4, C.dim);
+  return pen.canvas();
 }
 
 /* ----------------------------------------------------------------------- */
@@ -771,7 +1144,7 @@ const G = {
   slash: null,
   floaters: [],
   particles: [],
-  motes: [],
+  stars: [],
   overReady: false,
   overAt: null,
 };
@@ -784,8 +1157,13 @@ function setScene(name) {
   G.sceneT = 0;
 }
 
-for (let i = 0; i < 26; i++) {
-  G.motes.push({ x: rand(0, W), y: rand(0, H), v: rand(0.04, 0.18), ph: rand(0, TAU), bright: Math.random() < 0.2 });
+// Stars stay above the creature's name and out of the header corners, so
+// none of them sit next to a word and read as punctuation.
+while (G.stars.length < 40) {
+  const x = snap(rand(0, W));
+  const y = snap(rand(0, 148));
+  if ((x < 180 && y < 90) || (x > 290 && y < 72)) continue;
+  G.stars.push({ x, y, tw: rand(0, TAU), bright: Math.random() < 0.25 });
 }
 
 function tweenBox() {
@@ -1728,14 +2106,6 @@ function dissolveFoe() {
 }
 
 function updateAmbient() {
-  for (const m of G.motes) {
-    m.y -= m.v;
-    m.x += Math.sin(G.t * 0.01 + m.ph) * 0.08;
-    if (m.y < -4) {
-      m.y = H + 4;
-      m.x = rand(0, W);
-    }
-  }
   for (const p of G.particles) {
     p.age++;
     p.vy += p.g;
@@ -1755,313 +2125,126 @@ function updateAmbient() {
 /* ----------------------------------------------------------------------- */
 /* Drawing: characters                                                     */
 /* ----------------------------------------------------------------------- */
-// You: a small, flickering ember with a dithered glow.
-function drawEmber(x, y, glow = 1, alpha = 1, scale = 1) {
-  const flicker = REDUCED ? 1 : 0.86 + 0.14 * Math.sin(G.t * 0.23) * Math.sin(G.t * 0.071 + 1.3);
-  const R = 36 * scale * glow * flicker;
-  if (R > 1) {
-    const g = ctx.createRadialGradient(x, y, 0, x, y, R);
-    g.addColorStop(0, `rgba(${EMBER_RGB}, ${0.34 * alpha})`);
-    g.addColorStop(1, `rgba(${EMBER_RGB}, 0)`);
-    ctx.fillStyle = g;
-    ctx.fillRect(x - R, y - R, R * 2, R * 2);
-  }
-  const frame = !REDUCED && Math.sin(G.t * 0.31) * Math.sin(G.t * 0.13) > 0.55 ? SPR.emberB : SPR.emberA;
-  drawBitmap(frame, x, y, { color: C.ember, color2: C.core, scale, alpha, center: true });
+const emberFrame = () => {
+  if (REDUCED) return 0;
+  const h = hash(Math.floor(G.t / 7));
+  return h < 0.6 ? 0 : h < 0.8 ? 1 : 2;
+};
+
+// Your warm light, drawn under everything near you. It wavers by a pixel.
+function emberGlow(x, y, glow = 1, scale = 1) {
+  const r0 = Math.round(12 * glow * scale);
+  if (r0 < 3) return;
+  const r = REDUCED ? r0 : r0 + Math.round(hash(Math.floor(G.t / 6) + 0.3) * 2 - 1);
+  drawGlow(x, y, r, [C.deep, C.warm]);
 }
 
-function drawMoth(x, y, { s = 1, flap = 1, alpha = 1, color = C.ink } = {}) {
-  if (alpha <= 0) return;
-  ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.translate(x, y);
-  ctx.scale(s, s);
-  ctx.lineWidth = 2 / s;
-  ctx.strokeStyle = color;
-
-  for (const side of [-1, 1]) {
-    ctx.save();
-    ctx.scale(side * flap, 1);
-    ctx.fillStyle = C.bg;
-    ctx.beginPath();
-    ctx.moveTo(3, 0);
-    ctx.bezierCurveTo(24, 0, 46, 8, 44, 26);
-    ctx.bezierCurveTo(42, 40, 22, 46, 12, 36);
-    ctx.bezierCurveTo(6, 28, 3, 14, 3, 4);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(3, -9);
-    ctx.bezierCurveTo(18, -40, 52, -48, 66, -32);
-    ctx.bezierCurveTo(74, -22, 64, -4, 50, -2);
-    ctx.bezierCurveTo(32, 0, 14, 2, 3, 1);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(42, -22, 6, 0, TAU);
-    ctx.stroke();
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.arc(42, -22, 2.5, 0, TAU);
-    ctx.fill();
-    ctx.restore();
-  }
-
-  ctx.fillStyle = C.bg;
-  ctx.beginPath();
-  ctx.ellipse(0, 4, 5, 20, 0, 0, TAU);
-  ctx.fill();
-  ctx.stroke();
-  ctx.beginPath();
-  for (const yy of [8, 16]) {
-    ctx.moveTo(-3, yy);
-    ctx.lineTo(3, yy);
-  }
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(0, -21, 6, 0, TAU);
-  ctx.fill();
-  ctx.stroke();
-  ctx.beginPath();
-  for (const side of [-1, 1]) {
-    ctx.moveTo(side * 2, -26);
-    ctx.quadraticCurveTo(side * 4, -42, side * 16, -48);
-  }
-  ctx.stroke();
-  ctx.restore();
+function drawEmber(x, y, { scale = 1, alpha = 1 } = {}) {
+  drawBitmap(SPR.ember[emberFrame()], x, y, { color: C.ember, color2: C.core, scale, alpha, center: true });
 }
 
-function drawFirefly(x, y, { s = 1, flap = 1, alpha = 1, color = C.ink, lit = 1 } = {}) {
-  if (alpha <= 0) return;
-  ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.translate(x, y);
-  ctx.scale(s, s);
-  ctx.lineWidth = 2 / s;
-  ctx.strokeStyle = color;
-  if (lit) {
-    const g = ctx.createRadialGradient(0, 14, 0, 0, 14, 42);
-    g.addColorStop(0, `rgba(${CORE_RGB}, 0.3)`);
-    g.addColorStop(1, `rgba(${CORE_RGB}, 0)`);
-    ctx.fillStyle = g;
-    ctx.fillRect(-42, -28, 84, 84);
-  }
-  for (const side of [-1, 1]) {
-    ctx.save();
-    ctx.translate(side * 3, -5);
-    ctx.rotate(side * (-0.2 - 0.8 * flap));
-    ctx.fillStyle = C.bg;
-    ctx.beginPath();
-    ctx.ellipse(side * 13, 0, 13, 5, 0, 0, TAU);
-    ctx.fill();
-    ctx.stroke();
-    ctx.restore();
-  }
-  ctx.fillStyle = lit ? C.core : C.bg;
-  ctx.beginPath();
-  ctx.ellipse(0, 14, 9, 13, 0, 0, TAU);
-  ctx.fill();
-  ctx.stroke();
-  ctx.fillStyle = C.bg;
-  ctx.beginPath();
-  ctx.ellipse(0, -3, 6.5, 6, 0, 0, TAU);
-  ctx.fill();
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(0, -13, 5, 0, TAU);
-  ctx.fill();
-  ctx.stroke();
-  ctx.beginPath();
-  for (const side of [-1, 1]) {
-    ctx.moveTo(side * 2, -17);
-    ctx.quadraticCurveTo(side * 3, -26, side * 10, -30);
-    ctx.moveTo(side * 5, 0);
-    ctx.lineTo(side * 11, 6);
-  }
-  ctx.stroke();
-  ctx.restore();
-}
+const flapFrame = (phase) => [0, 1, 2, 1][Math.floor(phase / (Math.PI / 2)) & 3];
+const owlMood = (calm, blink) => (blink || calm >= 100 ? "shut" : calm >= 70 ? "drowsy" : calm >= 30 ? "open" : "squint");
 
-function drawOwl(x, y, { s = 1, alpha = 1, color = C.ink, calm = 0, blink = false } = {}) {
-  if (alpha <= 0) return;
-  ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.translate(x, y);
-  ctx.scale(s, s);
-  ctx.lineWidth = 2 / s;
-  ctx.strokeStyle = color;
-  ctx.fillStyle = C.bg;
-  // branch
-  ctx.beginPath();
-  ctx.moveTo(-62, 46);
-  ctx.lineTo(58, 44);
-  ctx.moveTo(36, 45);
-  ctx.lineTo(48, 35);
-  ctx.stroke();
-  // ear tufts, behind the body
-  for (const side of [-1, 1]) {
-    ctx.beginPath();
-    ctx.moveTo(side * 12, -26);
-    ctx.lineTo(side * 26, -46);
-    ctx.lineTo(side * 28, -20);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-  }
-  ctx.beginPath();
-  ctx.ellipse(0, 4, 32, 38, 0, 0, TAU);
-  ctx.fill();
-  ctx.stroke();
-  ctx.beginPath();
-  for (const side of [-1, 1]) {
-    ctx.moveTo(side * 30, -6);
-    ctx.quadraticCurveTo(side * 38, 20, side * 20, 38);
-  }
-  for (const [mx, my] of [[-8, 14], [8, 14], [0, 22], [-8, 30], [8, 30]]) {
-    ctx.moveTo(mx - 3, my);
-    ctx.lineTo(mx, my + 3);
-    ctx.lineTo(mx + 3, my);
-  }
-  for (const fx of [-10, -6, 6, 10]) {
-    ctx.moveTo(fx, 40);
-    ctx.lineTo(fx, 45);
-  }
-  ctx.stroke();
-  // eyes: squinting at your light, wide, drowsy, then asleep
-  const mood = blink ? "shut" : calm >= 100 ? "shut" : calm >= 70 ? "drowsy" : calm >= 30 ? "open" : "squint";
-  for (const side of [-1, 1]) {
-    const ex = side * 13;
-    const ey = -12;
-    ctx.fillStyle = C.bg;
-    ctx.beginPath();
-    ctx.arc(ex, ey, 10, 0, TAU);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    if (mood === "open") {
-      ctx.arc(ex, ey, 4, 0, TAU);
-      ctx.fill();
-    } else if (mood === "drowsy") {
-      ctx.moveTo(ex - 8, ey - 1);
-      ctx.lineTo(ex + 8, ey - 1);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(ex, ey, 3.5, 0, Math.PI);
-      ctx.fill();
-    } else if (mood === "squint") {
-      ctx.moveTo(ex - 6, ey + side * 1);
-      ctx.lineTo(ex + 6, ey - side * 1);
-      ctx.stroke();
-    } else {
-      ctx.arc(ex, ey - 2, 5, 0.25, Math.PI - 0.25);
-      ctx.stroke();
-    }
-  }
-  ctx.beginPath();
-  ctx.moveTo(-3, -5);
-  ctx.lineTo(0, 2);
-  ctx.lineTo(3, -5);
-  ctx.closePath();
-  ctx.stroke();
-  ctx.restore();
+function foeSprite(key, { frame = 0, lit = 1, mood = "open", color = C.ink, k = 0.5 } = {}) {
+  if (key === "moth") return baked(`moth|${frame}|${color}|${k}`, () => bakeMoth(frame, color, k));
+  if (key === "firefly") return baked(`firefly|${frame}|${lit}|${color}|${k}`, () => bakeFirefly(frame, lit, color, k));
+  return baked(`owl|${mood}|${color}|${k}`, () => bakeOwl(mood, color, k));
 }
 
 function drawFoe(f) {
   const pose = foePose(f);
   const flashing = f.flash > 0 && (f.flash >> 1) % 2 === 0;
   const color = flashing ? C.ember : C.ink;
-  const o = { alpha: f.alpha, color };
-  if (f.key === "moth") drawMoth(pose.x, pose.y, { ...o, flap: pose.flap });
-  else if (f.key === "firefly") drawFirefly(pose.x, pose.y, { ...o, s: 1.5, flap: pose.flap, lit: pose.lit });
-  else drawOwl(pose.x, pose.y, { ...o, calm: f.calm, blink: pose.blink });
+  const k = f.key === "firefly" ? 0.75 : 0.5;
+  if (f.key === "firefly" && pose.lit && f.alpha > 0.5) drawGlow(pose.x, pose.y + 21, 16, [C.moss]);
+  const spr = foeSprite(f.key, { frame: flapFrame(f.phase), lit: pose.lit, mood: owlMood(f.calm, pose.blink), color, k });
+  drawSprite(spr, pose.x, pose.y, f.alpha);
   return pose;
 }
 
-// The next creature, small, standing on the path ahead.
+// The next creature, small, waiting on the path ahead.
 function drawAhead(key, x, color) {
-  const flap = 0.3 + 0.7 * Math.abs(Math.cos(G.t * 0.25));
-  if (key === "moth") drawMoth(x, GROUND - 52 + Math.sin(G.t * 0.05) * 3, { s: 0.5, flap, color });
-  else if (key === "firefly") drawFirefly(x, GROUND - 50 + Math.sin(G.t * 0.08) * 4, { s: 0.8, flap, color, lit: Math.sin(G.t * 0.2) > 0 ? 1 : 0 });
-  else drawOwl(x, GROUND - 23, { s: 0.5, color, blink: G.t % 190 < 7 });
+  const frame = flapFrame(G.t * 0.25);
+  const bob = Math.round(Math.sin(G.t * 0.05)) * PX;
+  if (key === "moth") {
+    drawSprite(foeSprite("moth", { frame, color, k: 0.25 }), x, GROUND - 46 + bob);
+  } else if (key === "firefly") {
+    const lit = Math.sin(G.t * 0.2) > 0 ? 1 : 0;
+    const y = GROUND - 44 + bob;
+    if (lit) drawGlow(x, y + 12, 8, [C.moss]);
+    drawSprite(foeSprite("firefly", { frame, lit, color, k: 0.4 }), x, y);
+  } else {
+    drawSprite(foeSprite("owl", { mood: G.t % 190 < 7 ? "shut" : "squint", color, k: 0.25 }), x, GROUND - 22);
+  }
 }
 
 function drawMini(key, x, y, frame) {
-  const A = SPR[`${key}A`];
-  const B = SPR[`${key}B`];
-  const rows = frame ? B : A;
-  const color2 = key === "firefly" ? (frame ? C.faint : C.core) : C.core;
-  drawBitmap(rows, x, y, { color: C.ink, color2, center: true });
-}
-
-function drawMiniMoth(b) {
-  const f = 0.45 + 0.55 * Math.abs(Math.sin(b.age * 0.35));
-  ctx.save();
-  ctx.translate(b.x, b.y);
-  ctx.rotate(Math.atan2(b.vy, b.vx) + Math.PI / 2);
-  ctx.fillStyle = C.ink;
-  for (const side of [-1, 1]) {
-    ctx.beginPath();
-    ctx.moveTo(0, -2);
-    ctx.lineTo(side * 8 * f, -6);
-    ctx.lineTo(side * 6 * f, 4);
-    ctx.lineTo(0, 1);
-    ctx.closePath();
-    ctx.fill();
-  }
-  ctx.restore();
+  const rows = SPR[`${key}${frame ? "B" : "A"}`];
+  if (key === "moth") drawBitmap(rows, x, y, { color: C.ink, color3: C.dim, center: true });
+  else if (key === "firefly") drawBitmap(rows, x, y, { color: C.ink, color2: frame ? C.moss : C.glim, center: true });
+  else drawBitmap(rows, x, y, { color: C.ink, color2: C.core, color3: C.dim, color4: C.ember, center: true });
 }
 
 function drawBullets() {
   for (const b of G.bullets) {
-    ctx.globalAlpha = b.fade ? 1 - b.fade / 20 : Math.min(1, b.age / 8);
-    ctx.fillStyle = C.ink;
-    ctx.strokeStyle = C.ink;
+    const alpha = b.fade ? 1 - b.fade / 20 : Math.min(1, b.age / 8);
+    const o = { center: true, alpha };
     if (b.kind === "moth") {
-      drawMiniMoth(b);
+      drawBitmap(Math.floor(b.age / 6) % 2 ? SPR.bugB : SPR.bugA, b.x, b.y, { ...o, color3: C.dim });
     } else if (b.kind === "spark") {
-      const x = snap(b.x);
-      const y = snap(b.y);
-      ctx.fillRect(x - 4, y - 1, 8, 2);
-      ctx.fillRect(x - 1, y - 4, 2, 8);
+      drawBitmap(SPR.spark, b.x, b.y, { ...o, color: C.ink, color2: C.core });
     } else if (b.kind === "fly") {
       const lit = Math.sin(b.age * 0.3) > -0.4;
-      ctx.fillStyle = lit ? C.core : C.dim;
-      ctx.fillRect(snap(b.x) - 3, snap(b.y) - 3, 6, 6);
-      ctx.fillStyle = C.dim;
-      ctx.fillRect(snap(b.x - b.vx * 4) - 1, snap(b.y) - 1, 2, 2);
+      drawBitmap(SPR.fly, b.x, b.y, { ...o, color2: lit ? C.glim : C.dim });
+      ctx.fillStyle = C.moss;
+      ctx.fillRect(snap(b.x - b.vx * 4), snap(b.y), PX, PX);
     } else if (b.kind === "feather") {
-      const tilt = Math.sin(b.age * 0.06 + b.sway) * 0.9;
-      ctx.save();
-      ctx.translate(b.x, b.y);
-      ctx.rotate(tilt);
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(-6, 0);
-      ctx.lineTo(6, 0);
-      ctx.moveTo(-2, 0);
-      ctx.lineTo(-4, -3);
-      ctx.moveTo(2, 0);
-      ctx.lineTo(0, -3);
-      ctx.stroke();
-      ctx.restore();
+      const tilt = Math.sin(b.age * 0.06 + b.sway);
+      drawBitmap(tilt < -0.35 ? SPR.featherL : tilt > 0.35 ? SPR.featherR : SPR.featherF, b.x, b.y, o);
     } else if (b.kind === "flash") {
-      if ((b.age >> 2) % 2 === 0) {
-        ctx.strokeStyle = C.dim;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(b.x, b.y, 12 - b.age * 0.2, 0, TAU);
-        ctx.stroke();
-      }
+      if ((b.age >> 2) % 2 === 0) drawSprite(baked(`ring|${6 - (b.age >> 4)}`, () => bakeRing(6 - (b.age >> 4), C.dim)), b.x, b.y);
     } else {
-      ctx.beginPath();
-      ctx.arc(b.x, b.y, b.r, 0, TAU);
-      ctx.fill();
+      drawBitmap(b.r >= 4 ? SPR.dustL : SPR.dustS, b.x, b.y, o);
     }
   }
   ctx.globalAlpha = 1;
+}
+
+// A hard-edged line on the pixel grid, for the strike slash.
+function pixelLine(x0, y0, x1, y1, color, thick = 1) {
+  let ax = Math.floor(x0 / PX);
+  let ay = Math.floor(y0 / PX);
+  const bx = Math.floor(x1 / PX);
+  const by = Math.floor(y1 / PX);
+  const dx = Math.abs(bx - ax);
+  const dy = -Math.abs(by - ay);
+  const sx = ax < bx ? 1 : -1;
+  const sy = ay < by ? 1 : -1;
+  let err = dx + dy;
+  ctx.fillStyle = color;
+  for (;;) {
+    ctx.fillRect(ax * PX, ay * PX, PX * thick, PX);
+    if (ax === bx && ay === by) break;
+    const e2 = 2 * err;
+    if (e2 >= dy) {
+      err += dy;
+      ax += sx;
+    }
+    if (e2 <= dx) {
+      err += dx;
+      ay += sy;
+    }
+  }
+}
+
+function drawStars() {
+  for (const s of G.stars) {
+    let color = s.bright ? C.dim : C.faint;
+    if (s.bright && !REDUCED && Math.sin(G.t * 0.03 + s.tw) > 0.94) color = C.ink;
+    ctx.fillStyle = color;
+    ctx.fillRect(s.x, s.y, PX, PX);
+  }
 }
 
 /* ----------------------------------------------------------------------- */
@@ -2069,25 +2252,34 @@ function drawBullets() {
 /* ----------------------------------------------------------------------- */
 const pulse = (speed = 0.06) => (REDUCED ? 1 : 0.55 + 0.45 * Math.sin(G.t * speed));
 
-function drawFrame(b) {
+// A box with notched corners and a faint inner rule, like an old RPG window.
+function drawFrame(b, { inner = true } = {}) {
   const x = snap(b.x);
   const y = snap(b.y);
   const w = snap(b.w);
   const h = snap(b.h);
   ctx.fillStyle = C.bg;
-  ctx.fillRect(x, y, w, h);
+  ctx.fillRect(x + PX, y + PX, w - 2 * PX, h - 2 * PX);
   ctx.fillStyle = C.ink;
-  ctx.fillRect(x, y, w, PX);
-  ctx.fillRect(x, y + h - PX, w, PX);
-  ctx.fillRect(x, y, PX, h);
-  ctx.fillRect(x + w - PX, y, PX, h);
-  return { x, y, w, h };
+  ctx.fillRect(x + PX, y, w - 2 * PX, PX);
+  ctx.fillRect(x + PX, y + h - PX, w - 2 * PX, PX);
+  ctx.fillRect(x, y + PX, PX, h - 2 * PX);
+  ctx.fillRect(x + w - PX, y + PX, PX, h - 2 * PX);
+  if (inner && w > 10 * PX && h > 10 * PX) {
+    const i = 2 * PX;
+    ctx.fillStyle = C.faint;
+    ctx.fillRect(x + i, y + i, w - 2 * i, PX);
+    ctx.fillRect(x + i, y + h - i - PX, w - 2 * i, PX);
+    ctx.fillRect(x + i, y + i, PX, h - 2 * i);
+    ctx.fillRect(x + w - i - PX, y + i, PX, h - 2 * i);
+  }
+  return { x, y, w, h, inset: inner ? 3 * PX : PX };
 }
 
 function withClip(b, fn) {
   ctx.save();
   ctx.beginPath();
-  ctx.rect(b.x + PX, b.y + PX, b.w - PX * 2, b.h - PX * 2);
+  ctx.rect(b.x + b.inset, b.y + b.inset, b.w - b.inset * 2, b.h - b.inset * 2);
   ctx.clip();
   fn();
   ctx.restore();
@@ -2130,9 +2322,10 @@ function drawSoundIcon() {
 
 /* --- title & intro ------------------------------------------------------- */
 function drawTitle() {
-  text("ember", W / 2, 92, { scale: 3, align: "center", spacing: 1 });
-  drawEmber(W / 2, 176, 1.4, 1, 2);
-  text("a very small game", W / 2, 220, { color: C.dim, align: "center" });
+  emberGlow(W / 2, 164, 1.7);
+  text("ember", W / 2, 66, { scale: 4, align: "center", spacing: 1 });
+  drawEmber(W / 2, 164, { scale: 2 });
+  text("a very small game", W / 2, 212, { color: C.dim, align: "center" });
 
   if (!S.started) {
     text("press z or tap to begin", W / 2, 290, { align: "center", alpha: pulse() });
@@ -2153,22 +2346,23 @@ function drawTitle() {
 }
 
 function drawIntro() {
-  drawEmber(W / 2, 200, 1.2);
+  emberGlow(W / 2, 200, 1.2);
+  drawEmber(W / 2, 200);
   drawStack(G.dialog, 250);
   if (G.dialog?.full) drawNext(W - 28, H - 28);
 }
 
 /* --- the path ------------------------------------------------------------ */
 function drawHub() {
+  if (G.box.y > 200) drawPath(); // the campfire and friends panels cover the path
+
   // header: warmth on the left, distance on the right
   text("warmth", 20, 18, { color: C.dim });
   text(fmt(S.warmth), 20, 34, { scale: 2, color: C.ember });
-  text(`+${fmtRate(warmthRate())} / s`, 20, 68, { color: C.dim });
+  text(`+${fmtRate(warmthRate())} / s`, 20, 72, { color: C.dim });
   text(`${fmt(S.dist)} m`, 430, 18, { align: "right" });
   text(`night ${night()}`, 430, 36, { color: C.dim, align: "right" });
   text(arrived() ? "something ahead" : `next in ${Math.ceil(S.nextAt - S.dist)} m`, 430, 54, { color: arrived() ? C.ember : C.dim, align: "right" });
-
-  if (G.box.y > 200) drawPath(); // the campfire and friends panels cover the path
 
   const b = drawFrame(G.box);
   withClip(b, () => {
@@ -2183,17 +2377,38 @@ function drawHub() {
   });
 }
 
+const ridgeY = (wx) => snap(172 + Math.sin(wx * 0.013) * 7 + Math.sin(wx * 0.041) * 3);
+
 function drawPath() {
   const off = S.dist * PX_PER_M;
-  // a far ridge that scrolls slower than the ground
-  ctx.fillStyle = C.faint;
+  const far = off * 0.3;
+
+  drawGlow(338, 104, 12, [C.night]);
+  drawSprite(baked("moon", bakeMoon), 338, 104);
+
+  // far hills with pines, scrolling slower than the ground
   for (let x = 0; x < W; x += PX) {
-    const wx = x + off * 0.3;
-    ctx.fillRect(x, snap(170 + Math.sin(wx * 0.013) * 7 + Math.sin(wx * 0.041) * 3), PX, PX);
+    const y = ridgeY(x + far);
+    ctx.fillStyle = C.night;
+    ctx.fillRect(x, y, PX, GROUND - y);
+    ctx.fillStyle = C.faint;
+    ctx.fillRect(x, y, PX, PX);
   }
+  const tcell = 46;
+  for (let c = Math.floor(far / tcell) - 1; c <= Math.floor((far + W) / tcell) + 1; c++) {
+    if (hash(c + 7.7) > 0.5) continue;
+    const x = snap(c * tcell - far + hash(c + 3.1) * 30);
+    drawBitmap(SPR.pine, x, ridgeY(x + far) - 10, { color: C.faint });
+  }
+
+  const walking = !arrived() && !REDUCED;
+  const bob = walking ? -Math.round(Math.abs(Math.sin(G.walkT * 0.18)) * 2) * PX : 0;
+  const ey = GROUND - 14 + bob;
+  emberGlow(WALK_X, ey);
+
+  // the path itself, with pebbles and grass placed by distance
   ctx.fillStyle = C.dim;
   ctx.fillRect(0, GROUND, W, PX);
-  // pebbles and grass, placed by distance so they scroll past
   const cell = 34;
   for (let c = Math.floor(off / cell) - 1; c <= Math.floor((off + W) / cell) + 1; c++) {
     const h = hash(c);
@@ -2212,7 +2427,6 @@ function drawPath() {
     }
   }
 
-  // what's waiting up ahead
   const remaining = S.nextAt - S.dist;
   if (remaining < 26) {
     drawAhead(ROSTER[S.met % ROSTER.length], WALK_X + 72 + remaining * PX_PER_M, remaining <= 0 ? C.ink : C.dim);
@@ -2221,15 +2435,13 @@ function drawPath() {
   // friends trail behind you
   const shown = S.friends.slice(-8).reverse();
   shown.forEach((f, i) => {
-    const x = WALK_X - 30 - i * 24;
-    const y = GROUND - 24 + Math.sin(G.t * 0.06 + i * 1.7) * 4;
+    const x = WALK_X - 32 - i * 30;
+    const y = GROUND - 24 + Math.round(Math.sin(G.t * 0.06 + i * 1.7) * 2) * PX;
     drawMini(f.key, x, y, Math.floor(G.t / 9 + i) % 2);
   });
-  if (S.friends.length > 8) text(`+${S.friends.length - 8}`, WALK_X - 30 - 8 * 24, GROUND - 30, { color: C.dim, align: "center" });
+  if (S.friends.length > 8) text(`+${S.friends.length - 8}`, WALK_X - 32 - 8 * 30, GROUND - 30, { color: C.dim, align: "center" });
 
-  const walking = !arrived() && !REDUCED;
-  const bob = walking ? -Math.abs(Math.sin(G.walkT * 0.18)) * 4 : 0;
-  drawEmber(WALK_X, GROUND - 14 + bob);
+  drawEmber(WALK_X, ey);
 }
 
 function drawCamp(b) {
@@ -2241,36 +2453,36 @@ function drawCamp(b) {
     const cost = upgradeCost(u);
     const sel = G.campSel === i;
     const flash = G.campFlash?.i === i && (G.campFlash.t >> 2) % 2 === 0;
-    if (sel) drawBitmap(SPR.pick, b.x + 18, y + 7, { color: C.ember, center: true });
+    if (sel) drawBitmap(SPR.pick, b.x + 20, y + 7, { color: C.ember, center: true });
     text(u.label, b.x + 34, y, { color: sel ? C.ink : C.dim });
     text(u.desc, b.x + 34, y + 18, { color: C.dim });
     let costColor = maxed ? C.dim : S.warmth >= cost ? C.ember : C.dim;
     if (flash) costColor = G.campFlash.ok ? C.core : C.faint;
-    text(maxed ? "max" : fmt(cost), b.x + b.w - 18, y, { color: costColor, align: "right" });
-    text(`lv ${level}`, b.x + b.w - 18, y + 18, { color: C.dim, align: "right" });
+    text(maxed ? "max" : fmt(cost), b.x + b.w - 20, y, { color: costColor, align: "right" });
+    text(`lv ${level}`, b.x + b.w - 20, y + 18, { color: C.dim, align: "right" });
   });
 }
 
 function drawFriends(b) {
-  let y = b.y + 16;
-  text("following you", b.x + 18, y, { color: C.dim });
+  let y = b.y + 18;
+  text("following you", b.x + 20, y, { color: C.dim });
   y += 26;
   if (!S.friends.length) {
-    drawTyped("no one yet. spare someone on the path and they'll follow your light.", 999, b.x + 18, y, b.w - 36, 22);
+    drawTyped("no one yet. spare someone on the path and they'll follow your light.", 999, b.x + 20, y, b.w - 40, 22);
     return;
   }
   for (const key of ROSTER) {
     const list = S.friends.filter((f) => f.key === key);
     if (!list.length) continue;
-    drawMini(key, b.x + 26, y + 6, Math.floor(G.t / 9) % 2);
-    text(`${SPECIES[key].plural} ${list.length}`, b.x + 46, y);
-    text(`+${fmtRate(list.reduce((s, f) => s + f.rate, 0))} / s`, b.x + b.w - 18, y, { color: C.ember, align: "right" });
+    drawMini(key, b.x + 28, y + 6, Math.floor(G.t / 9) % 2);
+    text(`${SPECIES[key].plural} ${list.length}`, b.x + 48, y);
+    text(`+${fmtRate(list.reduce((s, f) => s + f.rate, 0))} / s`, b.x + b.w - 20, y, { color: C.ember, align: "right" });
     y += 18;
     const names = list.length > 6 ? `${list.slice(-6).map((f) => f.name).join(", ")} and ${list.length - 6} more` : list.map((f) => f.name).join(", ");
-    y += drawTyped(names, 999, b.x + 46, y, b.w - 64, 18, { color: C.dim }) * 18 + 12;
+    y += drawTyped(names, 999, b.x + 48, y, b.w - 68, 18, { color: C.dim }) * 18 + 12;
   }
-  text("your own glow", b.x + 46, y);
-  text(`+${fmtRate(ownGlow())} / s`, b.x + b.w - 18, y, { color: C.ember, align: "right" });
+  text("your own glow", b.x + 48, y);
+  text(`+${fmtRate(ownGlow())} / s`, b.x + b.w - 20, y, { color: C.ember, align: "right" });
 }
 
 /* --- battle -------------------------------------------------------------- */
@@ -2282,12 +2494,7 @@ function drawBattle() {
     const t = G.slash.t;
     const grow = clamp(t / 8, 0, 1);
     ctx.globalAlpha = t < 10 ? 1 : 1 - (t - 10) / 16;
-    ctx.strokeStyle = C.ember;
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.moveTo(pose.x + 56, pose.y - 50);
-    ctx.lineTo(pose.x + 56 - 112 * grow, pose.y - 50 + 100 * grow);
-    ctx.stroke();
+    pixelLine(pose.x + 56, pose.y - 50, pose.x + 56 - 112 * grow, pose.y - 50 + 100 * grow, C.ember, 2);
     ctx.globalAlpha = 1;
   }
 
@@ -2303,7 +2510,7 @@ function drawBattle() {
     text(f.name, 240, 158, { color: f.calm >= 100 ? C.ember : C.dim, align: "center", spacing: 1 });
   }
 
-  const b = drawFrame(G.box);
+  const b = drawFrame(G.box, { inner: !inArena });
   withClip(b, () => {
     if (G.phase === "menu" || G.phase === "result") {
       const d = G.dialog;
@@ -2335,7 +2542,7 @@ function drawActs(b) {
     if (sel) drawBitmap(SPR.pick, r.x - 16, r.y + 7, { color: C.ember, center: true });
     text(a.label, r.x, r.y, { color: sel ? C.ink : C.dim, alpha: actSpent(i) ? 0.45 : 1 });
   });
-  text("x back", b.x + b.w - 16, b.y + b.h - 22, { color: C.dim, align: "right" });
+  text("x back", b.x + b.w - 18, b.y + b.h - 24, { color: C.dim, align: "right" });
 }
 
 function drawStrike(b) {
@@ -2344,7 +2551,7 @@ function drawStrike(b) {
   const x0 = b.x + 40;
   const x1 = b.x + b.w - 40;
   const cy = snap(b.y + b.h / 2 + 10);
-  text("stop the line at the center", b.x + b.w / 2, b.y + 16, { color: C.dim, align: "center" });
+  text("stop the line at the center", b.x + b.w / 2, b.y + 18, { color: C.dim, align: "center" });
   ctx.fillStyle = C.faint;
   ctx.fillRect(x0, cy, x1 - x0, PX);
   for (let i = 0; i <= 10; i++) {
@@ -2359,18 +2566,15 @@ function drawStrike(b) {
 }
 
 function drawArena() {
+  const p = G.player;
+  emberGlow(p.x, p.y, 0.8 - G.dimmed * 0.2);
   if (G.phase === "dodge" && G.pattern === "spiral" && G.patT >= 0) {
     const a = G.boxTarget;
-    ctx.strokeStyle = C.dim;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(a.x + a.w / 2, a.y + a.h / 2, 8, 0, TAU);
-    ctx.stroke();
+    drawSprite(baked("ring|4", () => bakeRing(4, C.dim)), a.x + a.w / 2, a.y + a.h / 2);
   }
   drawBullets();
-  const p = G.player;
   const blink = p.inv > 0 && (p.inv >> 2) % 2 === 0;
-  if (!blink) drawEmber(p.x, p.y, 0.9 - G.dimmed * 0.22);
+  if (!blink) drawEmber(p.x, p.y);
 }
 
 function drawHud() {
@@ -2392,8 +2596,8 @@ function drawBubble() {
   const bx = 330;
   const by = 40;
   const bw = 140;
-  const bh = 20 + lines.length * 20;
-  drawFrame({ x: bx, y: by, w: bw, h: bh });
+  const bh = 22 + lines.length * 20;
+  drawFrame({ x: bx, y: by, w: bw, h: bh }, { inner: false });
   // a little tail pointing at the creature
   ctx.fillStyle = C.ink;
   for (let i = 0; i < 5; i++) ctx.fillRect(bx - 2 - i * 2, by + 14 + i * 2, 2, 2);
@@ -2403,9 +2607,40 @@ function drawBubble() {
 
 /* --- losing -------------------------------------------------------------- */
 function drawOver() {
-  if (G.sceneT < 30 && G.overAt) drawEmber(G.overAt.x, G.overAt.y, 1, 1 - G.sceneT / 30);
+  if (G.sceneT < 30 && G.overAt) {
+    emberGlow(G.overAt.x, G.overAt.y, 1 - G.sceneT / 30);
+    drawEmber(G.overAt.x, G.overAt.y, { alpha: 1 - G.sceneT / 30 });
+  }
   const y = drawStack(G.dialog, 180);
   if (G.overReady) text("z to keep going", W / 2, y + 34, { color: C.ember, align: "center", alpha: pulse() });
+}
+
+/* --- every sprite at once: open the page with #sprites ------------------- */
+function drawSheet() {
+  const lbl = (s, x, y) => text(s, x, y, { color: C.dim, align: "center" });
+  const t = G.t;
+  drawSprite(foeSprite("moth", { frame: 0 }), 90, 64);
+  drawSprite(foeSprite("moth", { frame: 2 }), 250, 64);
+  drawGlow(400, 85, 16, [C.moss]);
+  drawSprite(foeSprite("firefly", { frame: flapFrame(t * 0.4), k: 0.75 }), 400, 64);
+  lbl("moth", 170, 120);
+  lbl("firefly", 400, 120);
+  ["squint", "open", "drowsy"].forEach((mood, i) => drawSprite(foeSprite("owl", { mood }), 90 + i * 150, 190));
+  lbl("owl", 240, 248);
+  drawSprite(foeSprite("moth", { frame: flapFrame(t * 0.25), k: 0.25 }), 40, 290);
+  drawSprite(foeSprite("firefly", { frame: flapFrame(t * 0.25), k: 0.4 }), 100, 290);
+  drawSprite(foeSprite("owl", { mood: "squint", k: 0.25 }), 160, 300);
+  ["moth", "firefly", "owl"].forEach((key, i) => {
+    drawMini(key, 230 + i * 50, 290, 0);
+    drawMini(key, 230 + i * 50, 318, 1);
+  });
+  drawSprite(baked("moon", bakeMoon), 420, 300);
+  SPR.ember.forEach((fr, i) => {
+    emberGlow(40 + i * 40, 372, 0.8);
+    drawBitmap(fr, 40 + i * 40, 372, { color: C.ember, color2: C.core, center: true });
+  });
+  ["dustS", "dustL", "spark", "fly", "featherL", "featherF", "featherR", "pine"].forEach((k, i) =>
+    drawBitmap(SPR[k], 180 + i * 30, 372, { color: k === "pine" ? C.faint : C.ink, color2: k === "fly" ? C.glim : C.core, center: true }));
 }
 
 function drawParticles() {
@@ -2429,23 +2664,17 @@ function draw() {
   ctx.imageSmoothingEnabled = false;
   ctx.fillStyle = C.bg;
   ctx.fillRect(0, 0, W, H);
-  ctx.lineJoin = "round";
-  ctx.lineCap = "round";
 
   ctx.save();
   if (G.shake > 0) ctx.translate(snap(rand(-1, 1) * G.shake), snap(rand(-1, 1) * G.shake));
-
-  for (const m of G.motes) {
-    ctx.fillStyle = m.bright ? C.dim : C.faint;
-    ctx.fillRect(snap(m.x), snap(m.y), PX, PX);
-  }
-
+  drawStars();
   switch (G.scene) {
     case "title": drawTitle(); break;
     case "intro": drawIntro(); break;
     case "hub": drawHub(); break;
     case "battle": drawBattle(); break;
     case "over": drawOver(); break;
+    case "sheet": drawSheet(); break;
   }
   drawParticles();
   drawFloaters();
@@ -2529,5 +2758,6 @@ const gathered = catchUp(away, true);
 if (gathered >= 1 && away > 30) G.awayMsg = `while you were away, you gathered ${fmt(gathered)} warmth.`;
 if (S.started) persist();
 
-startTitle();
+if (location.hash === "#sprites") setScene("sheet");
+else startTitle();
 requestAnimationFrame(frame);

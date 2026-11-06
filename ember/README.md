@@ -74,15 +74,32 @@ jitter.
 
 ## How it works
 
-Everything is laid out in 480 × 420 logical units, then drawn into a 240 × 210
-pixel buffer. Each frame, that buffer is snapped to an 8-color palette with
-4 × 4 ordered (Bayer) dithering, so glows and fades turn into dither patterns.
-Then it's scaled up with hard pixel edges. Text uses a hand-made 5 × 7
-lowercase bitmap font, and the small sprites are bitmaps in the code.
+Everything is laid out in 480 × 420 logical units and drawn straight onto a
+240 × 210 pixel grid, which is then scaled up with hard edges. The pixel art
+follows a few rules:
 
-- `ember.js` — the font and sprites, the save and offline-warmth logic, the
-  creatures and their attack patterns, a fixed-timestep loop (60 ticks/s), and
-  all the drawing. Sound is synthesized with the Web Audio API.
+- **No anti-aliasing.** The moth, firefly and owl are described as curves,
+  then rasterized onto the pixel grid by a small built-in "pixel pen":
+  one-pixel outlines with doubled corner pixels removed, flat fills, and
+  mirrored halves that come out exactly symmetric. Each animation frame is
+  baked once into a sprite (three wing frames, lantern on/off, four owl
+  moods) and reused.
+- **One pixel size.** Large text and the big title ember are enlarged with
+  Scale2x (EPX), which rounds off diagonals, so nothing turns into chunky
+  blocks next to finer detail. Small sprites, bullets and the 5 × 7 font are
+  hand-placed bitmaps in the code.
+- **Stepped light.** Glows fall off in flat bands with a little Bayer dither
+  only where two bands meet, and they move in whole pixels so they don't
+  shimmer.
+- **An 11-color palette.** Shadows lean cool, the ember is warm, and the
+  firefly has its own green. Anything left over, such as fades, is snapped to
+  the palette with 4 × 4 ordered dithering.
+
+Open `index.html#sprites` to see every sprite and frame on one screen.
+
+- `ember.js` — the font, sprites and pixel pen, the save and offline-warmth
+  logic, the creatures and their attack patterns, a fixed-timestep loop
+  (60 ticks/s), and all the drawing. Sound is synthesized with the Web Audio API.
 - `style.css` — centers the canvas, keeps its pixels sharp, and turns off page
   scrolling while you drag.
 - `index.html` — the canvas plus a screen-reader live region that mirrors the
