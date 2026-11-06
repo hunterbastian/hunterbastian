@@ -600,7 +600,25 @@ const SUITES = [
           await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
           await page.evaluate(() => __underfern.advance(0.1));
           expect((await page.evaluate(() => __underfern.state)) === "paused", "the pause button should pause the game");
+          // Paused, the island is left standing: no redraws until one is asked for.
+          const idle = await page.evaluate(async () => {
+            const drawn = () => __underfern.renderer.info.render.frame;
+            const wait = (n) => new Promise((res) => {
+              const tick = () => (--n <= 0 ? res() : requestAnimationFrame(tick));
+              requestAnimationFrame(tick);
+            });
+            await wait(4);
+            const a = drawn();
+            await wait(4);
+            const b = drawn();
+            __underfern.redraw();
+            await wait(2);
+            return { a, b, c: drawn() };
+          });
+          expect(idle.a === idle.b, `paused, the island shouldn't be redrawn (frame ${idle.a} → ${idle.b})`);
+          expect(idle.c > idle.b, `a redraw request should draw a frame (frame ${idle.b} → ${idle.c})`);
           await expectClean(page, errors);
+          return "no redraws while paused; one on request";
         },
       },
       {
@@ -625,12 +643,26 @@ const SUITES = [
             const t = __underfern.retro.tuning;
             const was = t.threshold;
             t.threshold = 0;
+            __underfern.redraw(); // paused: ask for the frame
             await new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)));
             const s = __underfern.retro.stats();
             t.threshold = was;
             return s;
           });
           expect(lum(open.bloom) > lum(open.scene) * 0.25, `with no threshold the bloom should carry the frame, got ${open.bloom} for a scene of ${open.scene}`);
+          // Dynamic resolution: a lower render scale draws fewer rows, and the post pass follows.
+          const scaled = await page.evaluate(async () => {
+            const u = __underfern;
+            const before = u.renderer.domElement.height;
+            u.setRenderScale(0.6);
+            await new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)));
+            const after = u.renderer.domElement.height;
+            const post = u.retro.stats();
+            u.setRenderScale(null);
+            return { before, after, post: [post.width, post.height], restored: u.renderer.domElement.height };
+          });
+          expect(Math.abs(scaled.after - scaled.before * 0.6) <= 2, `at scale 0.6 the frame should be ~60% of the rows, got ${JSON.stringify(scaled)}`);
+          expect(scaled.post[1] === scaled.after && scaled.restored === scaled.before, `the post pass should follow the scale, and unpinning restore it, got ${JSON.stringify(scaled)}`);
           await expectClean(page, errors);
           return `${r.buf[0]}×${r.buf[1]}; scene mean ${r.post.scene}, bloom mean ${r.post.bloom} (${open.bloom} wide open)`;
         },
@@ -656,6 +688,13 @@ const SUITES = [
           const lum = (c) => 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2];
           expect(lum(st.frame) > 25, `the SD frame should hold the picture, got mean ${st.frame}`);
           await shot(page, "touch-retro-sd");
+          // Battery saver: a switch, saved on the device.
+          await page.locator(".switch[data-act='battery']").click({ timeout: 60_000 });
+          const bat = await page.evaluate(() => ({
+            on: document.querySelector(".switch[data-act='battery']").getAttribute("aria-checked"),
+            saved: JSON.parse(localStorage.getItem("underfern.settings.v1") || "{}").batterySaver,
+          }));
+          expect(bat.on === "true" && bat.saved === true, `Battery saver should switch on and be saved, got ${JSON.stringify(bat)}`);
           await page.locator(".style-opt:has(input[value='pixel'])").click({ timeout: 60_000 });
           const after = await page.evaluate(() => ({ style: __underfern.style, post: !!__underfern.retro }));
           expect(after.style === "pixel" && !after.post, `picking Pixel should switch styles and drop the post pass, got ${JSON.stringify(after)}`);

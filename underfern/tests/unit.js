@@ -17,6 +17,7 @@ import { Wind } from "../src/world/wind.js";
 import { World } from "../src/world/world.js";
 import { planLandmarks, LANDMARK_KINDS } from "../src/world/landmarks.js";
 import { migrateSettings } from "../src/core/migrate.js";
+import { DynamicResolution } from "../src/core/dynres.js";
 import { weatherForDay, WEATHER_KINDS } from "../src/world/sky.js";
 import { isRotated, appSize, toApp, onAppResize } from "../src/core/screen.js";
 import { Input } from "../src/player/input.js";
@@ -125,6 +126,43 @@ test("settings: Retro HD becomes the default once; a Pixel choice made since sti
   assert(migrateSettings({ style: "detailed" }).style === "detailed", "a Detailed player stays Detailed");
   assert(migrateSettings({ style: "pixel", styleVersion: 2 }) === null, "Pixel picked after the change is left alone");
   assert(migrateSettings(null) === null && migrateSettings("pixel") === null, "junk is ignored");
+});
+
+test("dynamic resolution: steps down while frames drop, holds at a 30 Hz cap, steps back up with headroom", () => {
+  const feed = (d, seconds, pattern) => {
+    let t = 0;
+    let i = 0;
+    while (t < seconds) {
+      const dt = pattern[i++ % pattern.length];
+      d.frame(dt);
+      t += dt;
+    }
+  };
+  const smooth = [1 / 60];
+  const choppy = [1 / 60, 1 / 30]; // 40 fps on a 60 Hz screen: a frame missed every other frame
+  const d = new DynamicResolution({ min: 0.6, step: 0.1 });
+  feed(d, 10, smooth);
+  assert(d.scale === 1, `a steady 60 should stay at full resolution, got ${d.scale}`);
+  feed(d, 3.2, choppy);
+  assert(d.scale < 1, `missed frames should step the resolution down, got ${d.scale}`);
+  feed(d, 30, choppy);
+  assert(d.scale === 0.6, `it should stop at the minimum, got ${d.scale}`);
+  feed(d, 30, smooth);
+  assert(d.scale > 0.6, `headroom should earn steps back up, got ${d.scale}`);
+
+  const capped = new DynamicResolution();
+  feed(capped, 20, [1 / 30]); // iOS Low Power Mode / Battery saver: on time at 30
+  assert(capped.scale === 1 && Math.abs(capped.refresh - 1 / 30) < 1e-3, `a steady 30 Hz cap isn't slowness, got ${capped.scale} at ${capped.refresh}`);
+
+  const hitch = new DynamicResolution();
+  for (let i = 0; i < 20; i++) hitch.frame(0.6); // tab switches, resizes, GC pauses
+  assert(hitch.scale === 1, "hitches alone shouldn't change the resolution");
+
+  let changes = 0;
+  const pinned = new DynamicResolution({ onChange: () => changes++ });
+  assert(pinned.setScale(0.75) && pinned.scale === 0.75 && changes === 1, "setScale moves the scale and reports it");
+  assert(!pinned.setScale(0.75) && changes === 1, "setting the same scale is a no-op");
+  assert(pinned.setScale(0.1) && pinned.scale === 0.6, "the scale is clamped to the minimum");
 });
 
 test("input: Bite doubles as a look pad past the slop; Sprint latches", () => {

@@ -4,6 +4,19 @@
 /** @type {{ v: string, date: string, title: string, notes: string[] }[]} */
 export const CHANGELOG = [
   {
+    v: "0.12",
+    date: "2026-11-06",
+    title: "Made for iPhone",
+    notes: [
+      "Dynamic resolution: on Auto and Low, the island draws fewer pixels while frames are dropping and steps back up when there's headroom.",
+      "Battery saver in Settings holds the game at 30 frames a second, for a cooler phone and a longer charge.",
+      "While paused, the island stops redrawing, so the phone gets a rest.",
+      "The game's sound mixes with your music and follows the silent switch.",
+      "If iOS drops the graphics while the game sits in the background, it saves and reloads into Continue instead of a black screen.",
+      "The glow and blur passes run at half precision, which iPhone graphics do twice as fast.",
+    ],
+  },
+  {
     v: "0.11",
     date: "2026-11-03",
     title: "Retro SD",

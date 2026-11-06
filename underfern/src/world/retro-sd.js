@@ -214,8 +214,10 @@ export class RetroSDPass {
       { tSrc: { value: this.sceneRT.texture }, tDepth: { value: this.sceneRT.depthTexture }, uSrcTexel: { value: new THREE.Vector2() }, uBright: { value: new THREE.Vector3() }, uClip: clip },
       DOWN_FRAG,
     );
-    this.kawase = postMaterial("underfern-sd-kawase", { tSrc: { value: null }, uTexel: { value: new THREE.Vector2() }, uIter: { value: 0 } }, KAWASE_FRAG);
-    this.shaft = postMaterial("underfern-sd-shafts", { tSrc: { value: this.bloomA.texture }, uSun: { value: new THREE.Vector2(0.5, 0.5) }, uShaft: { value: 0 } }, SHAFT_FRAG);
+    // The blurs run at half precision; the passes that read depth or address
+    // single pixels (down, composite, output) keep full precision.
+    this.kawase = postMaterial("underfern-sd-kawase", { tSrc: { value: null }, uTexel: { value: new THREE.Vector2() }, uIter: { value: 0 } }, KAWASE_FRAG, "mediump");
+    this.shaft = postMaterial("underfern-sd-shafts", { tSrc: { value: this.bloomA.texture }, uSun: { value: new THREE.Vector2(0.5, 0.5) }, uShaft: { value: 0 } }, SHAFT_FRAG, "mediump");
     this.composite = postMaterial(
       "underfern-sd-composite",
       {

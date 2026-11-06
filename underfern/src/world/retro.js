@@ -169,6 +169,7 @@ export class RetroPass {
 
     this.down = new THREE.ShaderMaterial({
       name: "underfern-retro-down",
+      precision: "mediump",
       uniforms: { tSrc: { value: null }, uSrcTexel: { value: new THREE.Vector2() }, uBright: { value: new THREE.Vector3() } },
       vertexShader: VERT,
       fragmentShader: DOWN_FRAG,
@@ -178,6 +179,7 @@ export class RetroPass {
     });
     this.blur = new THREE.ShaderMaterial({
       name: "underfern-retro-blur",
+      precision: "mediump",
       uniforms: { tSrc: { value: null }, uStep: { value: new THREE.Vector2() } },
       vertexShader: VERT,
       fragmentShader: BLUR_FRAG,
@@ -319,7 +321,10 @@ export function fullScreenQuad(material) {
   return quad;
 }
 
-/** A post-pass material: no depth, no tone mapping (the inputs are display-referred). */
-export function postMaterial(name, uniforms, fragmentShader) {
-  return new THREE.ShaderMaterial({ name, uniforms, vertexShader: VERT, fragmentShader, depthTest: false, depthWrite: false, toneMapped: false });
+/**
+ * A post-pass material: no depth, no tone mapping (the inputs are display-referred).
+ * `precision` "mediump" suits plain blurs: Apple GPUs run half floats at twice the rate.
+ */
+export function postMaterial(name, uniforms, fragmentShader, precision = null) {
+  return new THREE.ShaderMaterial({ name, uniforms, vertexShader: VERT, fragmentShader, precision, depthTest: false, depthWrite: false, toneMapped: false });
 }

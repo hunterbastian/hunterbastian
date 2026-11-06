@@ -259,7 +259,16 @@ device.
     terrain, sparser vegetation, no grass or shadows, fewer dinosaurs) and *High*
     elsewhere.
   - Quality changes apply the next time the game loads.
-- **Sound** on/off, and **Look sensitivity**.
+  - On *Auto* and *Low* the resolution is dynamic (`src/core/dynres.js`). When
+    frames drop below the display's rate, the frame draws fewer rows, one step at
+    a time down to 60%. A run of clean seconds steps it back up.
+    - The display rate is held between 30 and 60 Hz, so a 30 fps cap (iOS Low
+      Power Mode, Battery saver) isn't mistaken for slowness.
+    - *High* always draws at full resolution.
+    - Pixel keeps its own size.
+- **Sound** on/off, **Battery saver** (holds the game at 30 fps), and **Look
+  sensitivity**.
+- While paused, the island stops redrawing after a couple of frames.
 
 ### Deep links
 
@@ -274,6 +283,7 @@ URL parameters, handy for sharing a moment or testing:
 | `?t=0..1` | time of day (0 midnight, 0.25 sunrise, 0.5 noon, 0.75 sunset); pauses the clock |
 | `?style=retro\|sd\|detailed\|pixel` · `?pixel=0..1` | render style · pixel size |
 | `?quality=low\|high` | force a quality profile |
+| `?adaptive=0\|1` · `?scale=0.4..1` | dynamic resolution off / on (it is off under automation) · pin the render scale |
 | `?seed=N` | a different island |
 | `?weather=clear\|fair\|overcast\|misty` | hold one weather instead of the day's own |
 | `?aurora=0\|1` | force tonight's aurora off or on |

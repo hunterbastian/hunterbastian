@@ -11,6 +11,7 @@ import { appSize, onAppResize, tryLockLandscape } from "./core/screen.js";
 import * as THREE from "three";
 import { WORLD, TIME, GAME, QUALITY, STYLE } from "./config.js";
 import { clamp } from "./core/math.js";
+import { DynamicResolution } from "./core/dynres.js";
 import { makeRng, hash } from "./core/rng.js";
 import { World } from "./world/world.js";
 import { setLookScreen } from "./world/look.js";
@@ -111,6 +112,24 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 2000);
 camera.position.set(0, 120, 0);
 
+// Dynamic resolution (core/dynres.js): on Auto or Low quality the drawn
+// resolution steps down when frames drop and back up when there's headroom —
+// not on High (asked for), and not under automation (headless tests run at a
+// few frames a second). `?adaptive=0|1` forces it; `?scale=0.4..1` pins it.
+const dynres = new DynamicResolution({ onChange: () => resize() });
+let pinnedScale = num("scale") !== null ? clamp(num("scale"), 0.4, 1) : null;
+function adaptiveOn() {
+  const forced = params.get("adaptive");
+  if (forced === "0" || forced === "1") return forced === "1";
+  return settings.quality !== "high" && !navigator.webdriver;
+}
+/** Share of the style's full resolution to draw at (rows). */
+function renderScale() {
+  return pinnedScale ?? (adaptiveOn() ? dynres.scale : 1);
+}
+// Set when the canvas must be drawn even though nothing moves (see frame()).
+let redraw = true;
+
 // The post pass of the style drawn through one (Retro HD, Retro SD), made the
 // first time that style is drawn and dropped when another is picked.
 const POST = { retro: RetroPass, sd: RetroSDPass };
@@ -131,6 +150,7 @@ function resize() {
   appSize(appBox);
   const w = Math.max(1, Math.round(appBox.w));
   const h = Math.max(1, Math.round(appBox.h));
+  const scale = renderScale();
   if (style === "pixel") {
     // Pixel size slider: 0 = full render resolution, 1 = chunkiest. Blend the
     // row count geometrically, then snap to a whole number of device pixels per
@@ -154,7 +174,7 @@ function resize() {
   } else if (style === "retro") {
     const dpr = window.devicePixelRatio || 1;
     const nativeRows = h * Math.min(dpr, quality.pixelRatioCap);
-    const rows = Math.min(nativeRows, STYLE.retroRows[qualityName] || 540);
+    const rows = Math.max(120, Math.min(nativeRows, STYLE.retroRows[qualityName] || 540) * scale);
     const k = (h * dpr) / rows;
     renderer.setPixelRatio(1);
     renderer.setSize(Math.max(1, Math.round((w * dpr) / k)), Math.max(1, Math.round(rows)), false);
@@ -165,7 +185,7 @@ function resize() {
     // stretches it the last pixel or two to the window.
     const dpr = window.devicePixelRatio || 1;
     const deviceH = h * dpr;
-    const k = Math.max(1, Math.round(deviceH / STYLE.sdRows));
+    const k = Math.max(1, Math.round(deviceH / (STYLE.sdRows * scale)));
     const rows = Math.max(1, Math.floor(deviceH / k));
     const cols = Math.max(1, Math.round((w * dpr) / k));
     sdSize = { w: cols, h: rows, k };
@@ -173,7 +193,7 @@ function resize() {
     renderer.setSize(cols * k, rows * k, false);
     canvas.style.imageRendering = "";
   } else {
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, quality.pixelRatioCap));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, quality.pixelRatioCap) * scale);
     renderer.setSize(w, h, false);
     canvas.style.imageRendering = "";
   }
@@ -195,6 +215,8 @@ function resize() {
   }
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+  dynres.reset();
+  redraw = true;
 }
 resize();
 window.addEventListener("resize", resize); // also catches devicePixelRatio changes
@@ -460,6 +482,7 @@ menu.onSettingsChange = (next) => {
   } else if (style === "pixel" && settings.pixelSize !== prev.pixelSize) {
     resize();
   }
+  if (settings.quality !== prev.quality) resize(); // dynamic resolution follows the quality setting
   if (settings.quality !== prev.quality && params.get("quality") === null) {
     const next = resolveQuality();
     if (next !== qualityName) {
@@ -492,9 +515,13 @@ menu.onContinue = () => {
 let last = performance.now();
 let fpsAcc = 0;
 let fpsFrames = 0;
+let stillFrames = 0;
 
 function frame(now) {
   requestAnimationFrame(frame);
+  // Battery saver: 30 frames a second at most (a few ms early still counts, or
+  // a 60 Hz display would land on 20). Skipped frames don't touch the input.
+  if (settings.batterySaver && now - last < 1000 / 30 - 4) return;
   const raw = Math.max(0, (now - last) / 1000);
   const dt = Math.min(raw, 0.05);
   last = now;
@@ -513,8 +540,15 @@ function frame(now) {
 
   step(dt);
 
-  if (retro) retro.render(scene, camera);
-  else renderer.render(scene, camera);
+  // Paused, nothing moves: after a couple of frames the pause screen stops
+  // redrawing the island (a phone stays cool), until something asks for a frame.
+  stillFrames = game.state === "paused" ? stillFrames + 1 : 0;
+  if (stillFrames <= 2 || redraw) {
+    if (retro) retro.render(scene, camera);
+    else renderer.render(scene, camera);
+    redraw = false;
+  }
+  if ((game.state === "playing" || game.state === "menu") && adaptiveOn() && pinnedScale === null) dynres.frame(raw);
 
   if (DEBUG) updateDebug();
   input.endFrame();
@@ -658,6 +692,8 @@ document.addEventListener("visibilitychange", () => {
     if (game.state === "playing") pauseGame();
   }
   last = performance.now();
+  dynres.reset();
+  redraw = true;
 });
 window.addEventListener("pagehide", saveGame);
 window.addEventListener("beforeunload", (e) => {
@@ -669,11 +705,27 @@ window.addEventListener("beforeunload", (e) => {
   }
 });
 
+// iOS drops the WebGL context under memory pressure or after a long spell in
+// the background, and often never gives it back. Save straight away; reload
+// once restored — or, if it isn't back a few seconds after the page is in view
+// again, reload anyway: the save just written puts Continue on the title.
+let glLost = false;
 canvas.addEventListener("webglcontextlost", (e) => {
   e.preventDefault();
+  saveGame();
   game.state = game.state === "playing" ? "paused" : game.state;
+  glLost = true;
+  const check = () => {
+    if (!glLost) return;
+    if (document.hidden) setTimeout(check, 1000);
+    else location.reload();
+  };
+  setTimeout(check, 3000);
 });
-canvas.addEventListener("webglcontextrestored", () => location.reload());
+canvas.addEventListener("webglcontextrestored", () => {
+  glLost = false;
+  location.reload();
+});
 
 function recordError(msg) {
   game.errors.push(String(msg));
@@ -703,7 +755,7 @@ function updateDebug() {
   const p = game.world?.player;
   const w = game.world;
   debugEl.textContent = [
-    `${game.fps} fps · ${game.state} · ${qualityName}/${style}`,
+    `${game.fps} fps · ${game.state} · ${qualityName}/${style} · ×${renderScale().toFixed(2)}${settings.batterySaver ? " · 30 cap" : ""}`,
     `draws ${info.calls} · tris ${(info.triangles / 1000).toFixed(0)}k`,
     w ? `npc ${w.ecosystem.creatures.length} · carcass ${w.ecosystem.carcasses.length} · ${w.sky.clockString()} day ${w.sky.day}` : "",
     p ? `${p.species.id} g${(p.growth * 100).toFixed(0)}% hp${Math.round(p.health)} f${Math.round(p.food)} w${Math.round(p.water)} @${p.position.x.toFixed(0)},${p.position.z.toFixed(0)}` : "",
@@ -737,6 +789,19 @@ window.__underfern = {
   },
   get style() {
     return style;
+  },
+  /** Dynamic resolution: the controller, the scale drawn at, and a pin for tests (null unpins). */
+  dynres,
+  get renderScale() {
+    return renderScale();
+  },
+  setRenderScale: (s) => {
+    pinnedScale = s == null ? null : clamp(s, 0.4, 1);
+    resize();
+  },
+  /** Draw the next frame even while paused. */
+  redraw: () => {
+    redraw = true;
   },
   /** The Retro HD / Retro SD post pass (null in the other styles). */
   get retro() {

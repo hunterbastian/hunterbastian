@@ -517,7 +517,7 @@ export function speciesSilhouette(species, { scale = true } = {}) {
 /* --- Settings ------------------------------------------------------------------------ */
 
 /** Default player settings (see Menu#settings). */
-export const DEFAULT_SETTINGS = Object.freeze({ style: "retro", pixelSize: 0.5, quality: "auto", muted: false, sensitivity: 1, styleVersion: 2 });
+export const DEFAULT_SETTINGS = Object.freeze({ style: "retro", pixelSize: 0.5, quality: "auto", muted: false, batterySaver: false, sensitivity: 1, styleVersion: 2 });
 
 /** The render styles, in the order Settings lists them. */
 export const STYLES = ["retro", "sd", "detailed", "pixel"];
@@ -535,6 +535,7 @@ export function normalizeSettings(s = {}) {
     pixelSize: Number.isFinite(pix) ? clamp(Math.round(pix * 100) / 100, 0, 1) : 0.5,
     quality: ["auto", "high", "low"].includes(src.quality) ? src.quality : "auto",
     muted: Boolean(src.muted),
+    batterySaver: Boolean(src.batterySaver),
     sensitivity: Number.isFinite(sens) ? clamp(Math.round(sens * 100) / 100, 0.5, 2) : 1,
     // Bumped when the default style changes (core/migrate.js moves older settings over once).
     styleVersion: 2,
@@ -1267,6 +1268,13 @@ export class Menu {
               <span class="switch__state">On</span>
             </button>
           </div>
+          <div class="field field--row">
+            <div><span class="field__label" id="${id}-bat">Battery saver</span><p class="field__hint">30 frames a second — a cooler phone and a longer charge.</p></div>
+            <button type="button" class="switch" role="switch" aria-checked="false" aria-labelledby="${id}-bat" data-act="battery">
+              <span class="switch__track"><span class="switch__thumb"></span></span>
+              <span class="switch__state">Off</span>
+            </button>
+          </div>
           <div class="field">
             <div class="field__row"><label class="field__label" for="${id}-sens">Look sensitivity</label><output class="field__value" for="${id}-sens">1.00×</output></div>
             <input class="range" id="${id}-sens" type="range" min="0.5" max="2" step="0.05" value="1" />
@@ -1286,7 +1294,8 @@ export class Menu {
     this._pixField = layer.querySelector('[data-field="pixel-size"]');
     this._pixInput = layer.querySelector(`#${id}-pix`);
     this._pixOut = layer.querySelector(`output[for="${id}-pix"]`);
-    this._soundBtn = layer.querySelector(".switch");
+    this._soundBtn = layer.querySelector('[data-act="sound"]');
+    this._batteryBtn = layer.querySelector('[data-act="battery"]');
     this._qualityHint = layer.querySelector('[data-hint="quality"]');
     const [retro, sd, detailed, pixel] = layer.querySelectorAll(".style-opt canvas");
     paintVista(retro, "retro");
@@ -1389,6 +1398,9 @@ export class Menu {
           break;
         case "sound":
           this._change({ muted: !this._settings.muted });
+          break;
+        case "battery":
+          this._change({ batterySaver: !this._settings.batterySaver });
           break;
       }
     };
@@ -1698,12 +1710,14 @@ export class Menu {
     for (const r of layer.querySelectorAll(`input[name="${this._id}-quality"]`)) r.checked = r.value === s.quality;
     this._qualityHint.textContent =
       s.quality === "auto"
-        ? "Auto picks High on desktops, Low on phones and small screens."
+        ? "Auto picks High on desktops and Low on phones and small screens, and lowers the resolution while frames are dropping."
         : s.quality === "high"
-          ? "Shadows, grass and denser forests. Best on a laptop or desktop."
-          : "Lighter forests, no shadows — smooth on phones.";
+          ? "Shadows, grass and denser forests, always at full resolution. Best on a laptop or desktop."
+          : "Lighter forests, no shadows — smooth on phones. Lowers the resolution while frames are dropping.";
     this._soundBtn.setAttribute("aria-checked", s.muted ? "false" : "true");
     this._soundBtn.querySelector(".switch__state").textContent = s.muted ? "Off" : "On";
+    this._batteryBtn.setAttribute("aria-checked", s.batterySaver ? "true" : "false");
+    this._batteryBtn.querySelector(".switch__state").textContent = s.batterySaver ? "On" : "Off";
     if (Number(this._sensInput.value) !== s.sensitivity) this._sensInput.value = String(s.sensitivity);
     this._sensOut.textContent = `${s.sensitivity.toFixed(2)}×`;
     this._sensInput.style.setProperty("--fill", `${((s.sensitivity - 0.5) / 1.5) * 100}%`);

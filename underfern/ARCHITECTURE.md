@@ -106,6 +106,7 @@ underfern/
   src/core/math.js      (shared, done)
   src/core/events.js    (shared, done)
   src/core/screen.js    (shared)   the app frame: forced landscape on phones held upright (see below)
+  src/core/dynres.js    (shared)   dynamic resolution: render scale from frame intervals (no GPU timers on iOS)
   src/core/noise.js     TERRAIN
   src/world/terrain.js  TERRAIN
   src/world/caves.js    TERRAIN     caves: planning, carving, rock vault meshes, the clearance index
@@ -865,7 +866,7 @@ export class Menu {
   showChangelog()     // the title's Changelog link: ui/changelog.js CHANGELOG ({ v, date, title, notes[] }, newest first)
   setLoading(progress /* 0..1 */, label)               // loading state before the world is ready
   settings;                                            // { style: "retro"|"sd"|"detailed"|"pixel", quality: "auto"|"high"|"low",
-                                                       //   muted: bool, sensitivity: 0.5..2, styleVersion: 2 } — a Settings panel on the title
+                                                       //   muted: bool, batterySaver: bool, sensitivity: 0.5..2, styleVersion: 2 } — a Settings panel on the title
   onSettingsChange = (settings) => {};                 //   screen (and reachable from pause) edits these; main applies + saves
 }
 export class MapView {
@@ -974,6 +975,32 @@ Large per-frame things (footsteps, gait) are polled, not evented.
 - `core/migrate.js` `migrateSettings(s)`: settings saved before Retro HD became the
   default (no `styleVersion`) move from Pixel to Retro HD once; a Pixel choice made
   after that sticks.
+- **iOS and battery.**
+  - `core/dynres.js` `DynamicResolution`:
+    - `frame(interval)` takes each frame's interval (s) and, once per second, may
+      move `scale` (0.6 … 1, steps of 0.1) through `onChange`.
+    - The display's rate is the shortest interval of the last three seconds,
+      held between 60 and 30 Hz.
+    - A window more than 22% slow steps down. Clean windows step up, after 4 at
+      first; a step up undone within 3 s doubles the wait, up to 32.
+    - `reset()` starts the window over; `setScale(s)` pins a scale.
+  - `main.js` scales the rows of Retro HD, Retro SD (through its lines) and
+    Detailed by `renderScale()`.
+    - It feeds the controller only while playing or on the title, and only on
+      Auto/Low and when not under `navigator.webdriver`. `?adaptive=` forces it
+      off or on, and `?scale=` pins the scale.
+    - `settings.batterySaver` skips rAF callbacks closer than about 1/30 s apart;
+      skipped frames don't end the input frame.
+    - Paused, frames after the second draw nothing until `redraw` is set, by a
+      resize or by the hook's `redraw()`.
+    - On `webglcontextlost` it saves, then reloads once the context is restored,
+      or 3 s after the page is visible again (iOS often never restores it).
+  - Hook: `dynres`, `renderScale`, `setRenderScale(s | null)`, `redraw()`.
+  - `AudioEngine.start()` sets `navigator.audioSession.type = "ambient"` where
+    supported (iOS 17+), so the game's sound mixes with music and follows the
+    silent switch.
+  - The plain blur passes (Retro HD down/blur, Retro SD Kawase/shafts) run at
+    `mediump`; Apple GPUs run half floats at twice the rate.
 - **Three living biomes.** `beach`, `swamp` and `highland` are gone: the beach widened
   into the `coast` belt, swamps became wet forest (still `forest`; mud, horsetails and
   frogs by moisture), highland plateaus became upland meadow (`plains`). Everything

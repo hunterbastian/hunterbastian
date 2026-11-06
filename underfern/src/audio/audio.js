@@ -545,6 +545,14 @@ export class AudioEngine {
     try {
       let ctx = this._injected;
       if (!ctx) {
+        // iOS 17+: an "ambient" session mixes with music already playing and
+        // follows the silent switch, as a game should.
+        try {
+          const session = globalThis.navigator?.audioSession;
+          if (session && session.type === "auto") session.type = "ambient";
+        } catch {
+          /* not supported: the default session */
+        }
         const AC = globalThis.AudioContext || globalThis.webkitAudioContext;
         if (!AC) {
           this.failed = true;
