@@ -131,9 +131,9 @@ function landSpot(T, x, z, def) {
   let lo = Infinity;
   let hi = -Infinity;
   for (let ring = 0; ring < 2; ring++) {
-    const rr = def.r * (ring ? 1 : 0.55);
-    for (let k = 0; k < 12; k++) {
-      const a = (k / 12) * TAU + ring * 0.26;
+    const rr = def.r * (ring ? 1 : 0.5);
+    for (let k = 0; k < 16; k++) {
+      const a = (k / 16) * TAU;
       const px = x + Math.cos(a) * rr;
       const pz = z + Math.sin(a) * rr;
       const h = T.heightAt(px, pz);

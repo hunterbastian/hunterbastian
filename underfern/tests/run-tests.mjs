@@ -255,7 +255,9 @@ const SUITES = [
           await page.click(".menu .hatch");
           await waitState(page, "playing", 60_000);
           const p = await page.evaluate(() => ({ id: __underfern.player?.species.id, alive: __underfern.player?.alive, growth: __underfern.player?.growth }));
-          expect(p.alive && p.growth === 0, `Hatch should start a fresh juvenile, got ${JSON.stringify(p)}`);
+          // A fresh juvenile, not a continued life: a well-fed hatchling may already
+          // have grown a frame's worth (~3e-5) before this reads it.
+          expect(p.alive && p.growth < 0.001, `Hatch should start a fresh juvenile, got ${JSON.stringify(p)}`);
           await expectClean(page, errors);
           return `${s.cards} species on the cards; Hatch → ${p.id}`;
         },
@@ -401,6 +403,42 @@ const SUITES = [
           expect(r.dist > 1, `player moved only ${r.dist.toFixed(2)} m in 2 s holding ${used}`);
           await expectClean(page, errors);
           return `${r.dist.toFixed(1)} m in 2 s holding ${used.slice(3)} (${r.gait})`;
+        },
+      },
+      {
+        name: "survival: climbing into the highlands names them (HUD toast, map readout)",
+        async run({ page, errors }) {
+          const r = await page.evaluate(() => {
+            const u = __underfern;
+            const T = u.world.terrain;
+            const p = u.player;
+            const from = T.zoneAt(p.position.x, p.position.z);
+            // Gentle, dry highland ground, out of the caves.
+            let spot = null;
+            for (let z = -T.half + 40; z < T.half - 40 && !spot; z += 9) {
+              for (let x = -T.half + 40; x < T.half - 40 && !spot; x += 9) {
+                if (T.zoneAt(x, z) !== "highlands" || T.slopeAt(x, z) > 0.1 || T.nearCave(x, z)) continue;
+                if (T.zoneAt(x + 12, z) !== "highlands" || T.zoneAt(x - 12, z) !== "highlands") continue;
+                spot = { x, z };
+              }
+            }
+            if (!spot) return { from, spot };
+            p.position.set(spot.x, T.heightAt(spot.x, spot.z), spot.z);
+            u.advance(3.5);
+            const toasts = [...document.querySelectorAll(".hud__toasts > *")].map((el) => el.textContent.trim());
+            return { from, spot, toasts, at: T.zoneAt(p.position.x, p.position.z) };
+          });
+          expect(r.spot, "found no highland ground to stand on");
+          expect(r.at === "highlands", `the player should stand in the highlands, got ${r.at}`);
+          expect(r.toasts.some((t) => t.includes("The Highlands")), `crossing into the highlands should name them (toasts: ${JSON.stringify(r.toasts)})`);
+          await page.keyboard.press("KeyM");
+          await page.evaluate(() => __underfern.advance(0.2));
+          const region = await page.evaluate(() => document.querySelector('.map [data-r="zone"]')?.textContent);
+          await page.keyboard.press("KeyM");
+          await page.evaluate(() => __underfern.advance(0.2));
+          expect(region === "The Highlands", `the map should name the region, got ${region}`);
+          await expectClean(page, errors);
+          return `${r.from} → highlands; map reads "${region}"`;
         },
       },
       {

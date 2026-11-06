@@ -282,6 +282,7 @@ export class Terrain {
   findSpawnPoint(rng, { biomes, minHeight = 1, maxSlope = 0.35, near, tries = 300 } = {}) // → {x, z} | null
                       // near = { x, z, minR, maxR } restricts to a ring; never inside a keep-out
   coastAt(x, z)       // 0..1 how far into the coastal belt: 1 on the open sand, ~0.5 in the dunes, 0 inland
+  zoneAt(x, z)        // the island's ring: "shore" | "lowlands" | "highlands" | "mountains" (ZONES), null on water
   mesas;              // [{ kind: "mesa" | "butte", x, z, r /* rim radius */, top, base /* above the sea */,
                       //   reach /* scree apron */, rim: [{ x, z }] /* 48 points */,
                       //   ramp: { x0, z0 /* at the rim */, x1, z1 /* at the foot */, width } | null }]
@@ -339,6 +340,27 @@ offshore islets are welcome. **Three living biomes**:
 
 `biomeAt` returns one of `ocean`, `lake`, `coast`, `plains`, `forest` or `rock`.
 
+**The rings.** The island climbs from the sea to its heart:
+- **Shore**: the coastal belt (`coastAt` > 0).
+- **Lowlands**: everything else short of the highlands.
+- **Highlands**: tableland where the highland mask `hm` passes 0.5. `hm` rises
+  over `HIGHLAND_IN0`–`HIGHLAND_IN1` (260–360 design m inland, its edge wandering
+  ±75 m with `nPlateau`) and along the range. It lifts the ground 26–40 m and
+  steps it into 13 m terraces and escarpments.
+- **Mountains**: the mountain mask over 0.3, or anything above 105 m.
+
+The spine runs through the island's heart (within 0.08 R of the centre,
+0.6–0.72 R long), so the massif is a compact core.
+
+`zoneAt` reads the layout's `hm` / `mm` masks (kept as `_zones`). Typically the
+shore is ~25% of the land, the lowlands ~35%, the highlands ~28% and the
+mountains ~12%.
+
+Lakes keep to the lowlands (`hm` ≤ 0.25 first). River springs sit at the
+highlands' edge (`hm` 0.15–0.8, 14–60 m). Mesas are drawn from highland cells
+first: up to 16 m of relief under a highland mesa, its ramp's line level with
+its base within −2.5…+7 m.
+
 **Lowland relief.**
 - *Rolling country*: domain-warped, slope-damped fBm of about 20–45 m inland.
 - *Sea cliffs*: on the rocky headlands (`nCliff`), a ~26 m rise within 15 m of
@@ -346,9 +368,12 @@ offshore islets are welcome. **Three living biomes**:
 - *Mesas and buttes* (`_placeMesas`, `_mesaField`): planned on the layout grid
   from their own stream (`"underfern-mesas"`), so the rest of the layout keeps
   its sequence.
-  - Sites: 3–4 mesas (rim radius 40–60 m, 24–36 m tall) and 2–3 buttes (10–16 m,
-    38–58 m). They sit well inland, clear of the range, off swamps, on ground
-    that varies less than 7 m under the top, and apart from each other.
+  - Sites: up to 3–4 mesas (rim radius 40–60 m, 24–36 m tall), drawn from the
+    highlands first, and 2–3 buttes (10–16 m, 38–58 m) in the lowlands. They
+    sit inland, off the mountains and the pass valleys (placed after them),
+    off swamps, on ground that varies less than 7 m under the top (16 m on the
+    terraced highlands), and apart from each other. `stats.mesaReject` counts
+    why sites were turned down.
   - Shape: the rim is ragged (a noise-warped distance). A level top runs to a
     rounded lip, then a sheer wall drops to the talus, and a concave scree apron
     runs out onto the plain.
@@ -360,7 +385,8 @@ offshore islets are welcome. **Three living biomes**:
     and ramps.
   - After the lakes and rivers are carved, `_reraiseMesas` stands them back up
     (a plain max), so a bank can't shave a wall.
-  - Caves avoid buttes and ramps. A mesa's wall may hold a den.
+  - Caves keep out of mesas, buttes and ramps: a sheer wall over a mouth smears
+    into its approach on a coarse mesh.
   - Landmarks and the Underfern keep clear of all of them.
 
 **Mountains & caves.** Layout decisions are made on the fixed coarse layout grid

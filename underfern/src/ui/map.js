@@ -27,6 +27,8 @@ const BIOME_NAME = {
   rock: "Bare rock",
 };
 const UPLAND_M = 45; // plains above this read as "Upland meadow"
+/** The island's rings, as the readout names them (terrain.zoneAt). */
+const ZONE_NAME = { shore: "The Shore", lowlands: "The Lowlands", highlands: "The Highlands", mountains: "The Mountains" };
 const MARKER_COLOR = {
   water: "#3f8f98",
   plant: "#6d8a3a",
@@ -191,6 +193,7 @@ export class MapView {
           </header>
           <dl class="map__readout">
             <div class="map__readout-wide"><dt>Position</dt><dd data-r="pos">—</dd></div>
+            <div class="map__readout-wide"><dt>Region</dt><dd data-r="zone">—</dd></div>
             <div><dt>Grid</dt><dd data-r="grid">—</dd></div>
             <div><dt>Heading</dt><dd data-r="hdg">—</dd></div>
             <div><dt>Elevation</dt><dd data-r="elev">—</dd></div>
@@ -206,7 +209,7 @@ export class MapView {
             <li><span class="lg lg--sw lg--fresh"></span>Lakes &amp; rivers — drinkable</li>
             <li><span class="lg lg--sw lg--sea"></span>Sea — salt</li>
             <li><span class="lg lg--peak"></span>Summit · height in metres</li>
-            <li><span class="lg lg--mesa"></span>Mesa · butte — sheer sides, height of the top</li>
+            <li><span class="lg lg--mesa"></span>Mesa · butte · height of the top</li>
             <li><span class="lg lg--route"></span>Pass &amp; trail to a lookout</li>
             <li><span class="lg lg--cave"></span>Cave mouth &amp; passage</li>
             <li><span class="lg lg--bone"></span>Old bones — fossil giants</li>
@@ -551,6 +554,7 @@ export class MapView {
       const h = t.heightAt(pos.x, pos.z) - (t.seaLevel || 0);
       set("elev", h < 0 ? `${Math.round(-h * 10) / 10} m deep` : `${Math.round(h)} m`);
     }
+    if (t && typeof t.zoneAt === "function") set("zone", ZONE_NAME[t.zoneAt(pos.x, pos.z)] || "—");
     if (t && typeof t.biomeAt === "function") {
       // Under a cave roof (and not walking on top of it): name the cave.
       const cave = t.caveAt ? t.caveAt(pos.x, pos.z) : null;

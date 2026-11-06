@@ -262,11 +262,24 @@ const game = {
   saveTimer: 0,
   deathTimer: 0,
   deathShown: false,
+  /** The ring of the island the player is in, and one it may be crossing into. */
+  zone: null,
+  zoneNext: null,
+  zoneT: 0,
   fps: 0,
   errors: [],
 };
 
 const attractFocus = new THREE.Vector3();
+
+/** What the HUD says on crossing into each ring of the island (terrain.zoneAt). */
+const ZONE_NOTE = {
+  shore: "The Shore — sand, dunes and salt water",
+  lowlands: "The Lowlands — lakes, rivers and deep forest",
+  highlands: "The Highlands — open tableland and mesas",
+  mountains: "The Mountains — rock, snow and the high passes",
+};
+const ZONE_ICON = { shore: "waves", lowlands: "leaf", highlands: "mesa", mountains: "peak" };
 
 /* ----------------------------------------------------------------------- */
 /* Save / load                                                               */
@@ -358,6 +371,8 @@ function startSurvival(speciesId, { growth = 0, from = null, pos = null, creativ
   const heading = from ? from.heading : Math.random() * Math.PI * 2;
   game.creative = !!creative && !from;
   game.sawTree = false;
+  game.zone = null;
+  game.zoneNext = null;
   const creature = eco.spawn(species.id, spot.x, spot.z, {
     growth: from ? from.growth : game.creative ? 1 : growth,
     heading,
@@ -588,6 +603,24 @@ function step(dt) {
       // The "death" listener only fires while playing; catch a death that
       // landed while paused (or before the listener existed) here.
       if (game.state === "playing" && p && p.alive === false) onPlayerDeath();
+      // The island's rings: a word when you cross into a new one (and stay
+      // a moment, so walking the line between two doesn't chatter).
+      if (p && world.terrain.zoneAt) {
+        const z = world.terrain.zoneAt(p.position.x, p.position.z);
+        if (z && z !== game.zone) {
+          if (z === game.zoneNext) game.zoneT += dt;
+          else {
+            game.zoneNext = z;
+            game.zoneT = 0;
+          }
+          if (game.zoneT > 2.5 || !game.zone) {
+            const first = !game.zone;
+            game.zone = z;
+            game.zoneNext = null;
+            if (!first) hud.toast(ZONE_NOTE[z], "info", ZONE_ICON[z]);
+          }
+        } else game.zoneNext = null;
+      }
       // The Underfern: a word the first time you come near it in a life.
       const tree = world.landmarks?.tree?.site;
       if (tree && p && !game.sawTree && Math.hypot(p.position.x - tree.x, p.position.z - tree.z) < tree.r + 70) {

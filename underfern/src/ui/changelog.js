@@ -4,6 +4,18 @@
 /** @type {{ v: string, date: string, title: string, notes: string[] }[]} */
 export const CHANGELOG = [
   {
+    v: "0.18",
+    date: "2026-11-06",
+    title: "The island in rings",
+    notes: [
+      "The island climbs from the sea to its heart: the Shore, the Lowlands, the Highlands and the Mountains.",
+      "The mountains now stand at the centre as one compact massif.",
+      "The Highlands ring them: open upland meadow stepped into terraces and escarpments, with most of the mesas.",
+      "The Lowlands hold the lakes, the forests and the rivers, which rise at the highlands' edge.",
+      "The HUD names each region as you cross into it, and the map shows where you are.",
+    ],
+  },
+  {
     v: "0.17",
     date: "2026-11-06",
     title: "Higher ground",

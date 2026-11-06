@@ -134,8 +134,8 @@ function groundUnder(T, x, z) {
   let lo = h0;
   let hi = h0;
   for (const rr of [R * 0.5, R]) {
-    for (let k = 0; k < 14; k++) {
-      const a = (k / 14) * TAU + rr * 0.01;
+    for (let k = 0; k < 16; k++) {
+      const a = (k / 16) * TAU;
       const px = x + Math.cos(a) * rr;
       const pz = z + Math.sin(a) * rr;
       const h = T.heightAt(px, pz);

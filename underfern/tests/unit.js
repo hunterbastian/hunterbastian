@@ -11,7 +11,7 @@ import { QUALITY, WORLD } from "../src/config.js";
 import { makeRng, hash, rand, randInt, pick, weightedPick } from "../src/core/rng.js";
 import { createNoise2D, fbm2D, ridged2D } from "../src/core/noise.js";
 import { EventBus } from "../src/core/events.js";
-import { Terrain, BIOMES, LIVING_BIOMES } from "../src/world/terrain.js";
+import { Terrain, BIOMES, LIVING_BIOMES, ZONES } from "../src/world/terrain.js";
 import { SPECIES, PLAYABLE, getSpecies, growthScale, growthStage } from "../src/creatures/species.js";
 import { Wind } from "../src/world/wind.js";
 import { World } from "../src/world/world.js";
@@ -642,7 +642,8 @@ test("mesas & buttes: stand out of the lowlands with sheer sides; every mesa top
         worst = Math.max(worst, (h - prev) / 2);
         prev = h;
       }
-      assert(worst < 0.75, `${name}: the ramp climbs at most ${worst.toFixed(2)} m per metre`);
+      // (1:1 is what the island-wide walkability test allows; creatures stall at ~1.3.)
+      assert(worst < 1, `${name}: the way up climbs at most ${worst.toFixed(2)} m per metre`);
       assert(w.at(m.x, m.z, 6), `${name}: its top is reachable from the lowlands`);
     } else {
       assert(!w.at(m.x, m.z, 2), `${name}: nobody walks up a butte`);
@@ -654,6 +655,63 @@ test("mesas & buttes: stand out of the lowlands with sheer sides; every mesa top
     assert.near(lo.mesas[i].x, t.mesas[i].x, 1e-6, "same x:");
     assert.near(lo.mesas[i].top, t.mesas[i].top, 1e-6, "same top:");
   }
+});
+
+test("the island climbs in rings: shore, lowlands, highlands, mountains — each higher and nearer the heart", () => {
+  const t = getHiTerrain();
+  const stat = {};
+  let mx = 0;
+  let mz = 0;
+  let mn = 0;
+  const pts = [];
+  for (let z = -t.half; z < t.half; z += 8) {
+    for (let x = -t.half; x < t.half; x += 8) {
+      const zone = t.zoneAt(x, z);
+      if (!zone) continue;
+      assert(ZONES.includes(zone), `a known zone (${zone})`);
+      pts.push({ x, z, zone, h: t.heightAt(x, z) });
+      if (zone === "mountains") {
+        mx += x;
+        mz += z;
+        mn++;
+      }
+    }
+  }
+  assert(mn > 0, "there are mountains");
+  mx /= mn;
+  mz /= mn;
+  for (const p of pts) {
+    const o = (stat[p.zone] ||= { n: 0, h: 0, d: 0 });
+    o.n++;
+    o.h += p.h;
+    o.d += Math.hypot(p.x - mx, p.z - mz);
+  }
+  const share = (k) => stat[k].n / pts.length;
+  for (const k of ZONES) assert(stat[k] && share(k) > 0.07, `${k}: a real share of the island (${((stat[k]?.n || 0) / pts.length * 100).toFixed(0)}%)`);
+  for (const k of ZONES) {
+    stat[k].h /= stat[k].n;
+    stat[k].d /= stat[k].n;
+  }
+  const line = ZONES.map((k) => `${k} ${stat[k].h.toFixed(0)} m, ${stat[k].d.toFixed(0)} m out`).join(" · ");
+  for (let i = 1; i < ZONES.length; i++) {
+    const [a, b] = [ZONES[i - 1], ZONES[i]];
+    assert(stat[b].h > stat[a].h + 5, `${b} stand higher than the ${a} (${line})`);
+    assert(stat[b].d < stat[a].d - 30, `${b} lie nearer the heart than the ${a} (${line})`);
+  }
+  for (const p of t.peaks) assert.equal(t.zoneAt(p.x, p.z), "mountains", "every summit is in the mountains:");
+  // The lakes lie in the lowlands.
+  let low = 0;
+  for (const lk of t.lakes) {
+    const c = {};
+    for (let k = 0; k < 16; k++) {
+      const a = (k / 16) * Math.PI * 2;
+      const zone = t.zoneAt(lk.x + Math.cos(a) * lk.r * 1.4, lk.z + Math.sin(a) * lk.r * 1.4);
+      if (zone) c[zone] = (c[zone] || 0) + 1;
+    }
+    if ((c.lowlands || 0) >= Math.max(c.highlands || 0, c.mountains || 0)) low++;
+  }
+  assert(low >= Math.ceil(t.lakes.length / 2), `most lakes lie in the lowlands (${low} of ${t.lakes.length})`);
+  assert.equal(t.zoneAt(t.half - 5, t.half - 5), null, "the open sea is in no zone:");
 });
 
 test("caves: 3–6 of different sizes — dens, a tunnel with two mouths, a cavern with a skylight; same at any resolution", () => {

@@ -177,6 +177,15 @@ ago. Allosaurus is still Utah's state fossil.
 
 ### The island
 
+The island climbs in rings from the sea to its heart, and the HUD names each one
+as you cross into it (the map's readout does too):
+1. **The Shore**: beach, dunes and sea cliffs, about a quarter of the land.
+2. **The Lowlands**: rolling country with the lakes, the rivers and most of
+   the forest, about a third.
+3. **The Highlands**: open tableland of upland meadow at 40–80 m, stepped into
+   terraces and escarpments, with the mesas standing on it.
+4. **The Mountains** at the heart: the massif, its passes and its lookouts.
+
 The island has three living biomes around a central **massif**:
 - **Coast**: a wide belt of beach, dunes held by marram grass, and salt grass with
   palms, cycads and driftwood.
@@ -184,18 +193,20 @@ The island has three living biomes around a central **massif**:
   meadows on the massif's lower slopes.
 - **Forest**: dark conifer and araucaria woods, wet and fern-filled in the lowlands.
 
-Freshwater lakes and rivers run between them. The massif has three or four horn
+Freshwater lakes lie in the lowlands, and rivers rise at the highlands' edge and
+run down to them or to the sea. The massif has three or four horn
 peaks up to about 190 m, snow-capped and joined by a jagged ridge. Its sides are
 bands of layered rock, and the cliffs are too steep to climb. One or two pass
 valleys cut right through the range, and switchback trails climb to **lookouts**
 high on the ridge, with the whole island below.
 
-The lowlands rise and fall too:
-- **Mesas** (three or four) stand out of the plains and forests: flat-topped
-  tablelands 80–120 m across, with sheer banded walls 25–35 m tall over aprons
+Beyond the massif the land rises and falls too:
+- **Mesas** (two or three, most of them up on the highlands): flat-topped
+  tablelands 80–120 m across, with sheer banded walls 20–45 m tall over aprons
   of scree. Each one has a single rubble ramp up to its top, a quiet world of
   its own with a view. Step off the edge anywhere else and you fall.
-- **Buttes** (two or three) are rock pillars 40–60 m tall that nothing climbs.
+- **Buttes** (two or three) are rock pillars 40–60 m tall standing out of the
+  lowlands. Nothing climbs them.
 - **Sea cliffs**: the rocky headlands rise about 25 m straight from a strip of
   shingle.
 - The rolling country between them has more relief, with hills and hollows of
@@ -365,6 +376,11 @@ there is one and otherwise falls back to the global install.
     and its caps on rare species, on a real low-resolution world
   - combat: heavies, poise, stagger and criticals; dodge i-frames, brace, parry
     and guard break; bleed and crush buildup
+  - the rings: shore, lowlands, highlands and mountains each a real share of the
+    island, each higher and nearer the heart than the last; every summit in the
+    mountains, the lakes in the lowlands
+  - mesas and buttes: tall, level-topped and sheer, every mesa top walkable up
+    its ramp, no butte climbable, the same at any resolution
 - **Smoke tests** play the real game:
   - the title screen: Survival → choose a species → Hatch, and a saved life
     (Continue) whose species has left the island
@@ -372,6 +388,7 @@ there is one and otherwise falls back to the global install.
     death screen → hatch again
   - lock-on (T), with the reticle on the target, and a held-F heavy that lands
     when let go
+  - crossing into the highlands: the HUD names them, and so does the map
   - an iPhone-sized touch run in the default Retro HD style:
     - the joystick and the pause button
     - the post pass blooming a daytime frame

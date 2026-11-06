@@ -51,6 +51,11 @@ const LAYOUT_RES = 256; // fixed layout grid (6.25 design m) — resolution inde
 const SHORE_BUCKET = 48; // metres per spatial-hash cell for shore queries
 const RIVER_REACH = 230; // design metres a river valley may influence
 const RIVER_HEAD = 95; // design metres over which a spring's gully deepens into a channel
+// The island climbs in rings: shore (the coastal belt, COAST_W), lowlands,
+// highlands from about here inland (design metres, the edge wandering ±75 m),
+// and the mountains at the heart.
+const HIGHLAND_IN0 = 260;
+const HIGHLAND_IN1 = 360;
 
 const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
 
@@ -488,6 +493,8 @@ const LAYERS = 6;
 // World metres covered by one repeat of each layer (near scale).
 const LAYER_TILE = [2.6, 2.8, 3.0, 6.5, 3.6, 4.2];
 /** Metres above the sea where the massif's snow caps begin (a dusting reaches lower). */
+/** The island's rings, from the sea inward (see Terrain.zoneAt). */
+export const ZONES = ["shore", "lowlands", "highlands", "mountains"];
 export const SNOW_LINE = 145;
 // Detail normal strength per layer (height units → slope).
 const LAYER_BUMP = [5, 5, 5, 8, 4, 3];
@@ -1714,6 +1721,8 @@ export class Terrain {
     t = now();
     this._paint(g);
     timings.paint = now() - t;
+    // The rings (zoneAt) read the layout's highland and mountain masks.
+    this._zones = { lgrid: g.lgrid, hm: g.lHm, mm: g.lMm, k: g.k };
 
     // Everything above works relative to the sea; store absolute heights.
     if (seaLevel !== 0) {
@@ -1942,6 +1951,25 @@ export class Terrain {
    */
   moistureAt(x, z) {
     return this._sampleField(this._moisture, x, z);
+  }
+
+  /**
+   * Which ring of the island (x, z) is in: "shore" (the coastal belt),
+   * "lowlands", "highlands" (the tableland round the mountains) or
+   * "mountains" (the range at the heart, and anything above ~105 m). Null on
+   * water.
+   * @returns {"shore" | "lowlands" | "highlands" | "mountains" | null}
+   */
+  zoneAt(x, z) {
+    const Z = this._zones;
+    if (!Z || this.isWater(x, z)) return null;
+    const dx = x / Z.k;
+    const dz = z / Z.k;
+    const h = this.heightAt(x, z) - this.seaLevel;
+    if (h > 105 || this._lsample(Z, Z.mm, dx, dz) > 0.3) return "mountains";
+    if (this._lsample(Z, Z.hm, dx, dz) > 0.5) return "highlands";
+    if (this.coastAt(x, z) > 0.02) return "shore";
+    return "lowlands";
   }
 
   /**
@@ -2313,14 +2341,15 @@ export class Terrain {
       g.bays.push({ x: Math.cos(a) * d, z: Math.sin(a) * d, r: R * rand(rng, 0.13, 0.2), depth: rand(rng, 0.16, 0.26) });
     }
 
-    // Mountain spine: a bent quadratic Bézier off to one side of the island.
+    // Mountain spine: a bent quadratic Bézier through the island's heart, so
+    // the mountains are the core the highlands, lowlands and shores ring.
     const ra = rng() * TAU;
-    const rc = R * rand(rng, 0.2, 0.3);
+    const rc = R * rand(rng, 0, 0.08);
     const cx = Math.cos(ra) * rc;
     const cz = Math.sin(ra) * rc;
     const dirA = ra + Math.PI / 2 + rand(rng, -0.4, 0.4);
-    const halfLen = R * rand(rng, 0.44, 0.56);
-    const bend = R * rand(rng, -0.22, 0.22);
+    const halfLen = R * rand(rng, 0.3, 0.36);
+    const bend = R * rand(rng, -0.12, 0.12);
     const ax = cx - Math.cos(dirA) * halfLen;
     const az = cz - Math.sin(dirA) * halfLen;
     const bx = cx + Math.cos(dirA) * halfLen;
@@ -2407,24 +2436,6 @@ export class Terrain {
         }
       }
     }
-    // Mesas and buttes out in the lowlands: placed on the ground as it stands,
-    // then raised into the layout heights (exactly as _macro raises them at
-    // the vertices) so lakes, rivers, caves and spawns all see them.
-    this._placeMesas(g, rest, mtn);
-    if (g.mesas.length) {
-      for (const M of g.mesas) {
-        const rr = Math.max(M.reach, M.ramp ? M.ramp.end + M.ramp.halfW + M.ramp.bank : 0) + 1;
-        const [i0, i1, j0, j1] = this._gridBox(L, M.x, M.z, rr);
-        for (let iz = j0; iz <= j1; iz++) for (let ix = i0; ix <= i1; ix++) g.lMesaHit[iz * LN + ix] = 1;
-      }
-      for (let i = 0; i < LN * LN; i++) {
-        if (!g.lMesaHit[i]) continue;
-        const x = L.origin + (i % LN) * L.step;
-        const z = L.origin + ((i / LN) | 0) * L.step;
-        rest[i] = this._mesas(g, x, z, rest[i]);
-      }
-    }
-
     // Scale the mountain layer so the tallest peak lands on maxHeight (the
     // gullies and fine detail added later move it by only a metre or two).
     g.mtnScale = mtn[maxIdx] > 1 ? clamp((this.maxHeight - rest[maxIdx]) / mtn[maxIdx], 0.4, 2) : 1;
@@ -2435,6 +2446,23 @@ export class Terrain {
     // A walkable valley through every pass, carved into the layout heights so
     // everything decided later (lakes, rivers, trails, caves, gullies) sees it.
     this._planPassValleys(g);
+
+    // Mesas and buttes: placed on the ground as it stands (pass valleys and
+    // all), then raised into the layout heights exactly as _macro raises them
+    // at the vertices (the mountain layer is nil under them), so lakes,
+    // rivers, caves and spawns all see them.
+    this._placeMesas(g, lH, mtn);
+    if (g.mesas.length) {
+      for (const M of g.mesas) {
+        const rr = Math.max(M.reach, M.ramp ? M.ramp.end + M.ramp.halfW + M.ramp.bank : 0) + 1;
+        const [i0, i1, j0, j1] = this._gridBox(L, M.x, M.z, rr);
+        for (let iz = j0; iz <= j1; iz++) for (let ix = i0; ix <= i1; ix++) g.lMesaHit[iz * LN + ix] = 1;
+      }
+      for (let i = 0; i < LN * LN; i++) {
+        if (!g.lMesaHit[i]) continue;
+        lH[i] = this._mesas(g, L.origin + (i % LN) * L.step, L.origin + ((i / LN) | 0) * L.step, lH[i]);
+      }
+    }
 
     // Smoothed slope of the large-scale surface (m/m) — steers the gullies.
     const lGx = new Float32Array(LN * LN);
@@ -2633,33 +2661,41 @@ export class Terrain {
       // Rocky headlands: a sheer rise of ~25 m straight up from a strand of shingle.
       h += cliff * 26 * smoothstep(2, 15, m) * (1 - inland * 0.55);
 
-      // Highlands and mountains along the spine.
+      // Highlands: a ring of tableland from about HIGHLAND_IN0 metres inland
+      // (its edge wandering) up to the mountains' feet, plus the old band
+      // along the range; the mountains rise out of it along the spine.
+      if (usePre) {
+        pn = f.prePn;
+        mesaN = f.preMesaN;
+      } else {
+        pn = fbm2D(g.nPlateau, x * 0.003, z * 0.003, 3);
+        mesaN = fbm2D(g.nMesa, x * 0.0042, z * 0.0042, 2);
+      }
+      hm = smoothstep(HIGHLAND_IN0, HIGHLAND_IN1, m + 75 * pn);
+      let w = 0;
+      let dd = 0;
       if (sd < 1e8) {
-        const w = g.rangeWidth * (0.55 + 0.45 * Math.sin(Math.PI * st));
-        const dd = sd + 55 * fbm2D(g.nRangeWarp, x * 0.004, z * 0.004, 2);
-        hm = smoothstep(w * 2.6, w * 1.0, dd) * fall;
-        if (usePre) {
-          pn = f.prePn;
-          mesaN = f.preMesaN;
-        } else {
-          pn = fbm2D(g.nPlateau, x * 0.003, z * 0.003, 3);
-          mesaN = fbm2D(g.nMesa, x * 0.0042, z * 0.0042, 2);
-        }
-        if (hm > 0) {
-          // Tableland stepped into plateaus: gentle swells in most places,
-          // mesa-like escarpments where the mesa noise says so.
-          const mesa = smoothstep(0.1, 0.38, mesaN);
-          const hb = h + (22 + 12 * pn) * hm;
-          const step = 13;
-          // A little mid-frequency wander in the step level keeps escarpment
-          // rims from running in straight, machined lines.
-          const wander = pn * 12 + 3.5 * g.nDetail(x * 0.017 - 41.7, z * 0.017 + 8.3);
-          const tq = (hb + wander) / step;
-          const fl = Math.floor(tq);
-          const sharp = lerp(0.42, 0.17, mesa);
-          const terr = (fl + smoothstep(0.5 - sharp, 0.5 + sharp, tq - fl)) * step - wander;
-          h = lerp(hb, terr, hm * (0.3 + 0.62 * mesa));
-        }
+        w = g.rangeWidth * (0.55 + 0.45 * Math.sin(Math.PI * st));
+        dd = sd + 55 * fbm2D(g.nRangeWarp, x * 0.004, z * 0.004, 2);
+        hm = Math.max(hm, smoothstep(w * 2.6, w * 1.0, dd));
+      }
+      hm *= fall;
+      if (hm > 0) {
+        // Tableland stepped into plateaus: gentle swells in most places,
+        // mesa-like escarpments where the mesa noise says so.
+        const mesa = smoothstep(0.1, 0.38, mesaN);
+        const hb = h + (26 + 14 * pn) * hm;
+        const step = 13;
+        // A little mid-frequency wander in the step level keeps escarpment
+        // rims from running in straight, machined lines.
+        const wander = pn * 12 + 3.5 * g.nDetail(x * 0.017 - 41.7, z * 0.017 + 8.3);
+        const tq = (hb + wander) / step;
+        const fl = Math.floor(tq);
+        const sharp = lerp(0.42, 0.17, mesa);
+        const terr = (fl + smoothstep(0.5 - sharp, 0.5 + sharp, tq - fl)) * step - wander;
+        h = lerp(hb, terr, hm * (0.3 + 0.62 * mesa));
+      }
+      if (sd < 1e8) {
         mtn = this._mountain(g, x, z, wx, wz, sd, dd, st, side, w, wa, wb) * smoothstep(0, 14, m);
         mm = f.mm;
         rough = f.rough;
@@ -2704,7 +2740,7 @@ export class Terrain {
    * pointing down to open ground and, all else equal, toward the island's
    * heart. Their own seed stream, so the rest of the layout keeps its sequence.
    * @param {object} g
-   * @param {Float32Array} rest ground height without the mountain layer
+   * @param {Float32Array} rest ground height (the layout heights, pass valleys carved)
    * @param {Float32Array} mtn the (unscaled) mountain layer
    */
   _placeMesas(g, rest, mtn) {
@@ -2726,19 +2762,36 @@ export class Terrain {
       return best;
     };
     const nE = g.nMesaEdge;
+    // Why sites were turned down (debugging: stats.mesaReject).
+    const rej = { coast: 0, spine: 0, route: 0, site: 0, zone: 0, ring: 0, relief: 0, spacing: 0, ramp: 0 };
+    this.stats.mesaReject = rej;
     const plan = [];
     const mesaCount = randInt(rng, 3, 4);
     const butteCount = randInt(rng, 2, 3);
     for (let i = 0; i < mesaCount; i++) plan.push("mesa");
     for (let i = 0; i < butteCount; i++) plan.push("butte");
+    // The highland tableland, as layout cells, to draw a mesa's site from.
+    const highCells = [];
+    for (let i = 0; i < LN * LN; i++) if (g.lHm[i] >= 0.6 && mtn[i] < 0.3 && g.lC[i] * R > 120) highCells.push(i);
 
     for (const kind of plan) {
       const mesa = kind === "mesa";
-      for (let tries = 0; tries < 900; tries++) {
-        const a = rng() * TAU;
-        const dd = Math.sqrt(rng()) * R * 0.95;
-        const x = Math.cos(a) * dd;
-        const z = Math.sin(a) * dd;
+      for (let tries = 0; tries < 3000; tries++) {
+        // Mesas belong to the highland tableland (failing that, anywhere);
+        // buttes stand out of the lowlands.
+        const wantHigh = mesa && tries < 2200 && highCells.length > 0;
+        let x;
+        let z;
+        if (wantHigh) {
+          const c = highCells[Math.floor(rng() * highCells.length)];
+          x = L.origin + (c % LN) * L.step + (rng() - 0.5) * L.step;
+          z = L.origin + ((c / LN) | 0) * L.step + (rng() - 0.5) * L.step;
+        } else {
+          const a = rng() * TAU;
+          const dd = Math.sqrt(rng()) * R * 0.95;
+          x = Math.cos(a) * dd;
+          z = Math.sin(a) * dd;
+        }
         const r = mesa ? rand(rng, 40, 60) : rand(rng, 10, 16);
         const H = mesa ? rand(rng, 24, 36) : rand(rng, 38, 58);
         const talus = mesa ? 0.42 : 0.3;
@@ -2749,11 +2802,14 @@ export class Terrain {
         const grade = 0.3;
         const rampLen = mesa ? H / grade + 12 : 0;
         // Inland, clear of the range itself, off swamps, on gentle ground.
-        if (inland(x, z) < reach + 45) continue;
-        if (spineDist(x, z) < g.rangeWidth * 1.5 + reach) continue;
+        if (inland(x, z) < reach + 45 && ++rej.coast) continue;
+        if (spineDist(x, z) < g.rangeWidth * 0.8 + r && ++rej.spine) continue;
+        // Clear of the pass valleys.
+        if (g.routes.some((rt) => this._polyDist(rt.pts, x, z) < reach + rt.fw + 25) && ++rej.route) continue;
         const i0 = idx(x, z);
         const h0 = rest[i0];
-        if (h0 < 2.5 || h0 > 34 || g.lHm[i0] > 0.35 || mtn[i0] > 0.3 || g.lSw[i0] > 0.2) continue;
+        if ((h0 < 2.5 || h0 > 95 || mtn[i0] > 0.3 || g.lSw[i0] > 0.2) && ++rej.site) continue;
+        if ((wantHigh ? g.lHm[i0] < 0.6 : g.lHm[i0] > (mesa ? 1 : 0.35)) && ++rej.zone) continue;
         let lo = h0;
         let hi = h0;
         let ok = true;
@@ -2763,15 +2819,18 @@ export class Terrain {
             const px = x + Math.cos(t) * rr;
             const pz = z + Math.sin(t) * rr;
             const j = idx(px, pz);
-            if (inland(px, pz) < 30 || g.lHm[j] > 0.45 || mtn[j] > 0.4 || g.lSw[j] > 0.35) ok = false;
+            if (inland(px, pz) < 30 || mtn[j] > 0.4 || g.lSw[j] > 0.35) ok = false;
+            if (!mesa && g.lHm[j] > 0.45) ok = false;
             if (rr <= r + wamp) {
               lo = Math.min(lo, rest[j]);
               hi = Math.max(hi, rest[j]);
             }
           }
         }
-        if (!ok || hi - lo > (mesa ? 7 : 5)) continue;
-        if (g.mesas.some((o) => Math.hypot(o.x - x, o.z - z) < o.reach + reach + 70)) continue;
+        // On the stepped tableland a mesa may straddle one terrace step.
+        if (!ok && ++rej.ring) continue;
+        if (hi - lo > (mesa ? (g.lHm[i0] > 0.5 ? 16 : 7) : 5) && ++rej.relief) continue;
+        if (g.mesas.some((o) => Math.hypot(o.x - x, o.z - z) < o.reach + reach + 70) && ++rej.spacing) continue;
 
         const M = {
           kind,
@@ -2804,7 +2863,18 @@ export class Terrain {
             const fz = z + uz * (r + wamp + rampLen);
             if (inland(fx, fz) < 25) continue;
             const jf = idx(fx, fz);
-            if (g.lHm[jf] > 0.45 || mtn[jf] > 0.3 || g.lSw[jf] > 0.35 || Math.abs(rest[jf] - M.base) > 6) continue;
+            if (mtn[jf] > 0.3 || g.lSw[jf] > 0.35 || Math.abs(rest[jf] - M.base) > 6) continue;
+            // Nor cross a terrace step on its way: the ground all along its
+            // line stays level with the base, so the ramp ends on the ground.
+            let low = Infinity;
+            let high = -Infinity;
+            for (let q = 1; q <= 10; q++) {
+              const d = r + wamp + ((rampLen + 12) * q) / 10;
+              const hq = rest[idx(x + ux * d, z + uz * d)];
+              low = Math.min(low, hq);
+              high = Math.max(high, hq);
+            }
+            if (low < M.base - 2.5 || high > M.base + 7) continue;
             // The ramp must not run into another mesa.
             const seg = { x, z, ux, uz, len: r + wamp + rampLen };
             if (g.mesas.some((o) => this._segDist(seg, o.x, o.z) < o.reach + 15)) continue;
@@ -2812,7 +2882,7 @@ export class Terrain {
             const score = off + 0.08 * Math.abs(rest[jf] - M.base) + rng() * 0.6;
             if (!best || score < best.score) best = { score, ux, uz };
           }
-          if (!best) continue;
+          if (!best && ++rej.ramp) continue;
           M.ux = best.ux;
           M.uz = best.uz;
           // Where the ragged rim crosses the ramp's line: the ramp starts there.
@@ -2865,6 +2935,13 @@ export class Terrain {
           }
         : null,
     }));
+  }
+
+  /** Distance from (x, z) to a polyline [x0, z0, x1, z1, …] (its vertices; routes are densely sampled). */
+  _polyDist(pts, x, z) {
+    let best = Infinity;
+    for (let i = 0; i < pts.length; i += 2) best = Math.min(best, Math.hypot(pts[i] - x, pts[i + 1] - z));
+    return best;
   }
 
   /** Distance from (x, z) to a segment { x, z, ux, uz, len } (a mesa's ramp line). */
@@ -2981,10 +3058,11 @@ export class Terrain {
     const avoid = [];
     for (const o of g.lookouts) avoid.push({ x: o.x, z: o.z, r: 60 });
     for (const p of g.passes) avoid.push({ x: p.x, z: p.z, r: 70 });
-    // Buttes are too slender to hollow; a mesa's wall may hold a den, but not under its ramp.
+    // No caves in mesas or buttes: a sheer wall above a mouth smears into its
+    // approach on a coarse mesh, and a butte is too slender to hollow.
     for (const M of g.mesas) {
-      if (M.kind === "butte") avoid.push({ x: M.x, z: M.z, r: M.reach + 20 });
-      else for (let a = M.ramp.start - 10; a <= M.ramp.end; a += 12) avoid.push({ x: M.x + M.ux * a, z: M.z + M.uz * a, r: 24 });
+      avoid.push({ x: M.x, z: M.z, r: M.reach + 20 });
+      if (M.ramp) for (let a = M.ramp.start - 10; a <= M.ramp.end; a += 12) avoid.push({ x: M.x + M.ux * a, z: M.z + M.uz * a, r: 24 });
     }
     for (const rt of g.routes) {
       if (rt.kind === "valley") continue;
@@ -4008,9 +4086,10 @@ export class Terrain {
       }
       return out;
     };
-    let springs = findSprings(0.15, 0.8, 7, 20, 0.05);
-    if (springs.length < 60) springs = springs.concat(findSprings(0.02, 1, 5, 26, 0.12));
-    if (springs.length < 60) springs = springs.concat(findSprings(0, 1, 4, 30, 0.2));
+    // Springs at the highland's edge, where the tableland breaks down to the lowlands.
+    let springs = findSprings(0.15, 0.8, 14, 60, 0.05);
+    if (springs.length < 60) springs = springs.concat(findSprings(0.02, 1, 8, 70, 0.12));
+    if (springs.length < 60) springs = springs.concat(findSprings(0, 1, 4, 80, 0.2));
 
     const segments = []; // { pts (design), w0, w1, d0, d1, mouth, spring }
     const used = [];
