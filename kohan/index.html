@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Kohan</title>
+  <meta name="claude:viewport-fit-sides" content="cover" />
+  <meta name="theme-color" content="#070e1d" />
+  <meta name="description" content="Kohan: walk a pixel-art lakeside with one autumn tree in first person, through a PS2 and GameCube post-processing stack." />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DotGothic16&family=Zen+Kaku+Gothic+New:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <canvas id="kohan" tabindex="-1" aria-label="A lakeside with one autumn tree, seen in first person"></canvas>
+
+  <p class="hud" id="hudLabel" aria-live="polite">200p · Painting</p>
+  <div class="crosshair" id="crosshair" hidden></div>
+
+  <section class="start" id="start" aria-labelledby="startTitle">
+    <p class="start__eyebrow"><span lang="ja">湖畔</span> · lakeside</p>
+    <h1 class="start__title" id="startTitle">Kohan</h1>
+    <p class="start__lede">One autumn tree on a spit of land, a cove, a standing stone in the shallows and a lantern on the islet. Walk it in first person, through a PS2 and GameCube post stack.</p>
+    <button class="start__go" id="startBtn" type="button">Click to walk</button>
+    <ul class="keys keys--desk" aria-label="Keyboard and mouse">
+      <li><kbd>W A S D</kbd> walk</li>
+      <li><kbd>Mouse</kbd> look</li>
+      <li><kbd>Shift</kbd> run</li>
+      <li><kbd>Space</kbd> hop</li>
+      <li><kbd>E</kbd> use</li>
+      <li><kbd>Tab</kbd> post stack</li>
+      <li><kbd>1–7</kbd> passes</li>
+      <li><kbd>P</kbd> presets</li>
+    </ul>
+    <ul class="keys keys--touch" aria-label="Touch">
+      <li><kbd>Left thumb</kbd> walk, push far to run</li>
+      <li><kbd>Right thumb</kbd> look</li>
+    </ul>
+  </section>
+
+  <aside class="stack" id="stack" aria-label="Post-processing stack">
+    <button class="stack__head" id="stackToggle" type="button" aria-expanded="true" aria-controls="stackBody">
+      <span class="stack__title">Post stack</span>
+      <span class="stack__hint" aria-hidden="true">Tab</span>
+    </button>
+    <div class="stack__body" id="stackBody">
+      <div class="presets" role="group" aria-label="Presets">
+        <button type="button" data-preset="painting" aria-pressed="true">Painting</button>
+        <button type="button" data-preset="ps2" aria-pressed="false">PS2</button>
+        <button type="button" data-preset="gamecube" aria-pressed="false">GameCube</button>
+        <button type="button" data-preset="raw" aria-pressed="false">Raw</button>
+      </div>
+      <ol class="passes">
+        <li class="pass">
+          <label class="pass__row" for="pass1"><input type="checkbox" id="pass1" data-pass="1" /><span class="pass__num">1</span><span class="pass__name">Low resolution</span></label>
+          <select id="lines" aria-label="Internal resolution">
+            <option value="180">180 lines</option>
+            <option value="200">200 lines</option>
+            <option value="224">224 lines</option>
+            <option value="240">240 lines</option>
+            <option value="360">360 lines</option>
+            <option value="480">480 lines</option>
+          </select>
+          <p class="pass__note">Render small, then scale up.</p>
+        </li>
+        <li class="pass">
+          <label class="pass__row" for="pass2"><input type="checkbox" id="pass2" data-pass="2" /><span class="pass__num">2</span><span class="pass__name">Bloom</span></label>
+          <p class="pass__note">Shrink the frame, Kawase blur, add it back.</p>
+        </li>
+        <li class="pass">
+          <label class="pass__row" for="pass3"><input type="checkbox" id="pass3" data-pass="3" /><span class="pass__num">3</span><span class="pass__name">Depth of field</span></label>
+          <p class="pass__note">Blend toward the blur with distance.</p>
+        </li>
+        <li class="pass">
+          <label class="pass__row" for="pass4"><input type="checkbox" id="pass4" data-pass="4" /><span class="pass__num">4</span><span class="pass__name">Sun shafts</span></label>
+          <p class="pass__note">Radial blur of the bright sky toward the sun.</p>
+        </li>
+        <li class="pass">
+          <label class="pass__row" for="pass5"><input type="checkbox" id="pass5" data-pass="5" /><span class="pass__num">5</span><span class="pass__name">Color depth &amp; dither</span></label>
+          <select id="depthMode" aria-label="Color depth">
+            <option value="ps2">PS2 15-bit</option>
+            <option value="gc">GameCube 18-bit</option>
+            <option value="rgb444">12-bit</option>
+            <option value="palette">Painting palette</option>
+            <option value="banding">Banding, no dither</option>
+          </select>
+          <p class="pass__note">Fewer colors, ordered dither, grain.</p>
+        </li>
+        <li class="pass">
+          <label class="pass__row" for="pass6"><input type="checkbox" id="pass6" data-pass="6" /><span class="pass__num">6</span><span class="pass__name">Deflicker</span></label>
+          <p class="pass__note">Blend each line with the lines above and below.</p>
+        </li>
+        <li class="pass">
+          <label class="pass__row" for="pass7"><input type="checkbox" id="pass7" data-pass="7" /><span class="pass__num">7</span><span class="pass__name">Composite &amp; CRT</span></label>
+          <p class="pass__note">Cable color bleed, scanlines, aperture grille.</p>
+        </li>
+      </ol>
+      <p class="stack__credit">Pass order follows <a href="https://x.com/ggsimm" target="_blank" rel="noopener">gsimone</a>'s thread on recreating the PS2 and GameCube look.</p>
+    </div>
+  </aside>
+
+  <button class="prompt" id="prompt" type="button" hidden><kbd id="promptKey">E</kbd><span id="promptText">Read the stone</span></button>
+
+  <div class="reading" id="reading" role="dialog" aria-labelledby="readingTitle" hidden>
+    <p class="reading__eyebrow" id="readingTitle">Carved down the stone</p>
+    <p class="reading__poem">One tree on the spit.<br />Each autumn the lake takes back<br />the leaves it lent out.</p>
+    <button class="reading__close" id="readingClose" type="button">Close</button>
+  </div>
+
+  <div class="joy" id="joy" hidden><div class="joy__knob" id="knob"></div></div>
+  <button class="hop" id="hopBtn" type="button" hidden>Hop</button>
+
+  <div class="error" id="error" hidden><p id="errorText"></p></div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
