@@ -855,7 +855,9 @@ POSITION, NORMAL, TANGENT, TEXCOORD_0, COLOR_0 (fixed colours: teeth, claws, eye
 → `aSkin` (skin palette, pattern mask, accent, scale detail), `_SURF` → `aSurf` (roughness,
 eye glint, **baked ambient occlusion**), JOINTS_0 / WEIGHTS_0 (remapped to the rig by bone
 name). Coordinates are the game's (y up, +z toward the snout, adult metres); the GLB is
-written without the Y-up conversion. `World.create` starts the downloads first and waits
+written without the Y-up conversion. Where a host won't serve `.glb` (the preview artifact),
+the loader reads the same model as embedded glTF JSON, `<id>.gltf.json`
+(`tools/blender/glb-to-gltf.mjs`). `World.create` starts the downloads first and waits
 for them at "Waking the dinosaurs"; a model made before they arrive, a species whose file
 fails, a world built synchronously (unit tests) or `?models=procedural` uses the procedural
 mesh below, which also stays the block-in, weight source and rig for the Blender build.

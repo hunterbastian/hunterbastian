@@ -54,6 +54,35 @@ export function parseGlb(buffer) {
   return { json, bin };
 }
 
+/**
+ * The same model as embedded glTF JSON (one buffer as a base64 data URI), for
+ * hosts that won't serve .glb (the preview artifact gets `<id>.gltf.json`).
+ */
+export function parseGltfJson(json) {
+  const uri = json?.buffers?.[0]?.uri || "";
+  const comma = uri.indexOf(",");
+  if (!uri.startsWith("data:") || comma < 0) throw new Error("[dinoAssets] glTF without an embedded buffer");
+  const raw = atob(uri.slice(comma + 1));
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  return { json, bin: { buffer: bytes.buffer, offset: 0, length: bytes.length } };
+}
+
+/** Fetch a species' model: the GLB, or its embedded-glTF twin where .glb isn't served. */
+async function fetchModel(id, base) {
+  let why = "";
+  try {
+    const res = await fetch(new URL(id + ".glb", base));
+    if (res.ok) return parseGlb(await res.arrayBuffer());
+    why = `${res.status} ${res.statusText}`;
+  } catch (err) {
+    why = err?.message || String(err);
+  }
+  const res = await fetch(new URL(id + ".gltf.json", base));
+  if (!res.ok) throw new Error(`${id}.glb: ${why}; ${id}.gltf.json: ${res.status} ${res.statusText}`);
+  return parseGltfJson(await res.json());
+}
+
 /** One accessor as a typed array (normalised integers become floats). */
 function accessor(glb, index) {
   const a = glb.json.accessors[index];
@@ -237,9 +266,7 @@ export async function loadDinoAssets(ids, boneNamesOf, { base = BASE } = {}) {
         _loading.set(
           id,
           (async () => {
-            const res = await fetch(new URL(id + ".glb", base));
-            if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-            const asset = await assetFromGlb(parseGlb(await res.arrayBuffer()), boneNamesOf(id));
+            const asset = await assetFromGlb(await fetchModel(id, base), boneNamesOf(id));
             _assets.set(id, asset);
             return asset;
           })()

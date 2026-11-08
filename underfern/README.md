@@ -460,6 +460,8 @@ python tools/blender/build_dinos.py --ref tools/blender/ref --out assets/dinos -
 # or: blender -b -P tools/blender/build_dinos.py -- --ref tools/blender/ref --out assets/dinos
 ```
 
+`node tools/blender/glb-to-gltf.mjs assets/dinos <dir>` writes each model as
+embedded glTF JSON for a host that won't serve `.glb`; the game falls back to it.
 `--ids tyrannosaurus …` builds just some species. `--preview` writes Cycles
 renders of each sculpt for review. All six take about four minutes.
 

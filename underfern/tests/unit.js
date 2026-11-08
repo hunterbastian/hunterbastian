@@ -27,7 +27,7 @@ import { speciesSilhouette, normalizeSettings, STYLES, GRADES } from "../src/ui/
 import { StorybookPass, STORY } from "../src/world/storybook.js";
 import { LOOK, STORY_GRADES, setStoryGrade } from "../src/world/look.js";
 import { createDinoModel, loadDinoModels, exportDinoReference } from "../src/creatures/dinoModel.js";
-import { getDinoAsset } from "../src/creatures/dinoAssets.js";
+import { getDinoAsset, parseGlb, parseGltfJson, assetFromGlb } from "../src/creatures/dinoAssets.js";
 
 /* --- Tiny harness --------------------------------------------------------- */
 
@@ -1461,6 +1461,16 @@ test("models: every species loads its Blender model, skinned to the game's own r
   }
   const raptor = getDinoAsset("utahraptor");
   assert(raptor.feathers && raptor.feathers.attributes.uv, "the raptor keeps its feathers");
+  // Where .glb isn't served, the same model reads from embedded glTF JSON (tools/blender/glb-to-gltf.mjs).
+  const glb = parseGlb(await (await fetch("../assets/dinos/dryosaurus.glb")).arrayBuffer());
+  const bytes = new Uint8Array(glb.bin.buffer, glb.bin.offset, glb.bin.length);
+  let raw = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) raw += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  const json = { ...glb.json, buffers: [{ byteLength: bytes.length, uri: "data:application/octet-stream;base64," + btoa(raw) }] };
+  const twin = await assetFromGlb(parseGltfJson(JSON.parse(JSON.stringify(json))), exportDinoReference("dryosaurus").bones.map((b) => b.name));
+  const orig = getDinoAsset("dryosaurus");
+  assert.equal(twin.lods[0].attributes.position.count, orig.lods[0].attributes.position.count, "glTF JSON twin, LOD0 vertices:");
+  assert.equal(twin.lods[0].attributes.skinIndex.array.join(), orig.lods[0].attributes.skinIndex.array.join(), "glTF JSON twin, skin:");
 });
 
 test("creature: metabolism drains food/water at the species rate (NPCs ×0.35)", () => {
