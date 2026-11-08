@@ -16,7 +16,7 @@ old procedural mesh for each species). For every species:
   4. Game mesh  the sculpt is decimated, mirror-symmetric, to the LOD budgets;
                 eyes, teeth and claws are kept as modelled in the reference.
   5. Bake       UV unwrap; Cycles bakes the sculpt into a tangent-space normal
-                map, and ambient occlusion into the vertices.
+                map; ambient occlusion is ray cast into the vertices.
   6. Skin       surface masks and bone weights carry over from the reference
                 (smoothed across the fused joins), onto the game's own bones.
   7. Export     one GLB per species: the armature, LOD0, LOD1 (and the
@@ -823,21 +823,11 @@ class Species:
         bpy.ops.object.bake(type="NORMAL", normal_space="TANGENT", use_selected_to_active=True, cage_extrusion=self.vs * 5.0, max_ray_distance=self.vs * 14.0, target="IMAGE_TEXTURES", margin=6)
         log(f"{self.ref.id}: normal map {size}² baked in {time.time() - t0:.1f}s")
 
-        # Ambient occlusion into the vertices.
-        col = lod0.data.color_attributes.new("AO", "FLOAT_COLOR", "POINT")
-        lod0.data.color_attributes.active_color = col
-        world = bpy.data.worlds.new("w")
-        sc.world = world
-        world.light_settings.distance = 0.35 * self.ref.H
-        sc.cycles.samples = 48
-        select_only(lod0)
+        # Ambient occlusion into the vertices (ray cast here: a Cycles vertex
+        # bake speckles a decimated surface black where its rays start inside it).
         t0 = time.time()
-        bpy.ops.object.bake(type="AO", target="VERTEX_COLORS")
-        log(f"{self.ref.id}: AO baked in {time.time() - t0:.1f}s")
-        ao = np.empty(len(lod0.data.vertices) * 4)
-        col.data.foreach_get("color", ao)
-        self.ao0 = ao.reshape(-1, 4)[:, 0].copy()
-        lod0.data.color_attributes.remove(col)
+        self.ao0 = vertex_ao(lod0.data, 0.35 * self.ref.H, max(0.01, 1.5 * self.vs))
+        log(f"{self.ref.id}: AO cast in {time.time() - t0:.1f}s (median {np.median(self.ao0):.2f}, 5th pct {np.percentile(self.ao0, 5):.2f})")
         for h in his[3 if self.feat_hi else 2:]:
             bpy.data.objects.remove(h)
 
@@ -1006,6 +996,35 @@ def join(pieces, name):
     ob.name = name
     ob.data.name = name
     return ob
+
+
+def vertex_ao(me, dist, eps, rays=40, seed=7):
+    """Ambient occlusion per vertex: cosine-weighted rays from just off the
+    surface, an occluder's weight falling off with distance, then smoothed."""
+    X = verts_of(me)
+    N = normals_of(me)
+    T = tris_of(me)
+    bvh = BVHTree.FromPolygons([tuple(map(float, x)) for x in X], [tuple(map(int, t)) for t in T], all_triangles=True)
+    rng = np.random.default_rng(seed)
+    u1, u2 = rng.random(rays), rng.random(rays)
+    r = np.sqrt(u1)
+    local = np.stack([r * np.cos(2 * math.pi * u2), r * np.sin(2 * math.pi * u2), np.sqrt(1 - u1)], -1)
+    ao = np.empty(len(X))
+    for i in range(len(X)):
+        n = N[i]
+        a = np.array([1.0, 0.0, 0.0]) if abs(n[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+        t = np.cross(n, a)
+        t /= max(np.linalg.norm(t), 1e-9)
+        b = np.cross(n, t)
+        o = Vector(X[i] + n * eps)
+        occ = 0.0
+        for d in local[:, 0, None] * t + local[:, 1, None] * b + local[:, 2, None] * n:
+            hit = bvh.ray_cast(o, Vector(d), dist)
+            if hit[0] is not None:
+                occ += 1.0 - 0.6 * (hit[3] / dist)
+        ao[i] = 1.0 - occ / rays
+    E = edges_of(me)
+    return np.clip(smooth_field(ao[:, None], E, 3, 0.5)[:, 0], 0.0, 1.0)
 
 
 def uv_from_nearest(dst, src, g):

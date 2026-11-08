@@ -447,7 +447,8 @@ For each species the script:
    ridges, cheekbones, jaw muscle, the antorbital hollow, ribs, belly and throat
    folds, scutes, osteoderms and wrinkle rings.
 4. Decimates the sculpt, mirror-symmetric, to two levels of detail.
-5. Bakes the full sculpt into a normal map and ambient occlusion with Cycles.
+5. Bakes the full sculpt into a normal map with Cycles, and casts ambient
+   occlusion into the vertices.
 6. Carries over bone weights and skin masks from the old mesh, and exports a
    GLB.
 
@@ -463,7 +464,8 @@ python tools/blender/build_dinos.py --ref tools/blender/ref --out assets/dinos -
 `node tools/blender/glb-to-gltf.mjs assets/dinos <dir>` writes each model as
 embedded glTF JSON for a host that won't serve `.glb`; the game falls back to it.
 `--ids tyrannosaurus …` builds just some species. `--preview` writes Cycles
-renders of each sculpt for review. All six take about four minutes.
+renders of each sculpt for review. All six take about a minute and a half (four
+with previews).
 
 ## How it works
 

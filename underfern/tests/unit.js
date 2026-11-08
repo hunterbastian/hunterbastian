@@ -1401,7 +1401,14 @@ test("models: every species loads its Blender model, skinned to the game's own r
       const S = g.attributes.aSurf.array;
       let bad = 0;
       let occluded = 0;
+      let black = 0;
+      let skinV = 0;
+      const K = g.attributes.aSkin.array;
       for (let v = 0; v < n; v++) {
+        if (K[v * 4] > 0.5) {
+          skinV++;
+          if (S[v * 3 + 2] < 0.05) black++;
+        }
         const sum = W[v * 4] + W[v * 4 + 1] + W[v * 4 + 2] + W[v * 4 + 3];
         if (Math.abs(sum - 1) > 1e-3 || J[v * 4] >= nb || J[v * 4 + 1] >= nb || J[v * 4 + 2] >= nb || J[v * 4 + 3] >= nb) bad++;
         assert(S[v * 3 + 2] >= 0 && S[v * 3 + 2] <= 1.001, `${at} occlusion out of range at ${v}: ${S[v * 3 + 2]}`);
@@ -1409,6 +1416,7 @@ test("models: every species loads its Blender model, skinned to the game's own r
       }
       assert.equal(bad, 0, `${at} vertices with bad skin weights:`);
       assert(occluded > n * 0.02, `${at} baked occlusion should darken folds and the underside (${occluded} of ${n})`);
+      assert(black < skinV * 0.005, `${at} occlusion speckled black on the skin (${black} of ${skinV} vertices)`);
       const got = box(g.attributes.position.array);
       for (let k = 0; k < 3; k++) assert(Math.abs(got[k] / want[k] - 1) < 0.12, `${at} size on axis ${k}: ${got[k].toFixed(2)} vs reference ${want[k].toFixed(2)}`);
     }
