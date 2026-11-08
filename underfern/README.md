@@ -441,11 +441,14 @@ bones, by name.
 For each species the script:
 
 1. Takes the game's rig and its old procedural mesh as a block-in.
-2. Fuses body, legs and arms into one surface with a voxel remesh, and fills the
-   creases where the limbs meet the body.
-3. Sculpts the anatomy: thigh, calf and tail-base muscle, neck bands, brow
-   ridges, cheekbones, jaw muscle, the antorbital hollow, ribs, belly and throat
-   folds, scutes, osteoderms and wrinkle rings.
+2. Fuses body, legs and arms into one surface with a voxel remesh, with hip and
+   thigh muscle modelled as volumes on the two-legged animals, the quadrupeds'
+   leg tops tucked under the flank, and the seams relaxed into the body.
+3. Sculpts the anatomy: thigh, calf and tail-base muscle, the back's muscle
+   and hip crests, neck bands, brow ridges, cheekbones, jaw muscle, the
+   antorbital hollow, eyelids, the T. rex's broad skull and the Allosaurus's
+   horns and snout ridges, ribs, belly and throat folds, scutes, osteoderms
+   and wrinkle rings.
 4. Decimates the sculpt, mirror-symmetric, to two levels of detail.
 5. Bakes the full sculpt into a normal map with Cycles, and casts ambient
    occlusion into the vertices.

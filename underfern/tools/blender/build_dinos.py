@@ -50,9 +50,9 @@ RECIPES = {
     "utahraptor": dict(kind="theropod", thigh=1.0, calf=0.9, caudo=1.0, temple=0.6, brow=0.7, cheek=0.6, fenestra=0.7,
                        nasal=0.25, scutes=0.0, ribs=0.6, belly=0.6, neck=0.8, folds=0.7, tail=0.7, wrinkles=0.6, ossicles=0.0),
     "allosaurus": dict(kind="theropod", thigh=1.0, calf=1.0, caudo=1.0, temple=0.8, brow=0.8, cheek=0.8, fenestra=1.0,
-                       nasal=0.7, scutes=0.7, ribs=0.8, belly=0.9, neck=1.0, folds=1.0, tail=1.0, wrinkles=0.9, ossicles=0.0),
+                       nasal=0.3, scutes=0.7, ribs=0.8, belly=0.9, neck=1.0, folds=1.0, tail=1.0, wrinkles=0.9, ossicles=0.0, crests=1.0),
     "tyrannosaurus": dict(kind="theropod", thigh=1.1, calf=1.0, caudo=1.15, temple=1.3, brow=1.0, cheek=1.0, fenestra=0.9,
-                          nasal=1.0, scutes=0.9, ribs=0.8, belly=1.0, neck=1.2, folds=1.2, tail=1.0, wrinkles=1.1, ossicles=0.0),
+                          nasal=1.0, scutes=0.9, ribs=0.8, belly=1.0, neck=1.2, folds=1.2, tail=1.0, wrinkles=1.1, ossicles=0.0, skull_widen=0.2),
     "stegosaurus": dict(kind="quad", thigh=0.9, calf=0.5, caudo=0.8, temple=0.3, brow=0.4, cheek=0.5, fenestra=0.0,
                         nasal=0.0, scutes=0.0, ribs=0.6, belly=1.0, neck=0.9, folds=1.1, tail=0.8, wrinkles=1.2, ossicles=1.0),
     "brontosaurus": dict(kind="sauropod", thigh=0.8, calf=0.4, caudo=0.8, temple=0.25, brow=0.3, cheek=0.3, fenestra=0.0,
@@ -154,6 +154,44 @@ def close_holes(ob):
     bm.to_mesh(ob.data)
     bm.free()
     ob.data.update()
+
+
+def sd_ellipsoid(P, C, axes, radii):
+    """Approximate signed distance to an ellipsoid (centre C, axes rows, radii)."""
+    q = (P - C) @ axes.T
+    k0 = np.linalg.norm(q / radii, axis=-1)
+    k1 = np.linalg.norm(q / (radii * radii), axis=-1)
+    return k0 * (k0 - 1.0) / np.maximum(k1, 1e-9)
+
+
+def ellipsoid_mesh(C, axes, radii, nu=24, nv=14):
+    """A closed ellipsoid mesh: centre C, orthonormal axes (rows), radii."""
+    verts = [C + axes[2] * radii[2]]
+    for j in range(1, nv):
+        th = math.pi * j / nv
+        for i in range(nu):
+            ph = 2 * math.pi * i / nu
+            verts.append(C + axes[0] * radii[0] * math.sin(th) * math.cos(ph) + axes[1] * radii[1] * math.sin(th) * math.sin(ph) + axes[2] * radii[2] * math.cos(th))
+    verts.append(C - axes[2] * radii[2])
+    last = len(verts) - 1
+    faces = [(0, 1 + i, 1 + (i + 1) % nu) for i in range(nu)]
+    for j in range(nv - 2):
+        r0, r1 = 1 + j * nu, 1 + (j + 1) * nu
+        for i in range(nu):
+            a_, b_, c_, d_ = r0 + i, r0 + (i + 1) % nu, r1 + i, r1 + (i + 1) % nu
+            faces += [(a_, c_, b_), (b_, c_, d_)]
+    r0 = 1 + (nv - 2) * nu
+    faces += [(r0 + i, last, r0 + (i + 1) % nu) for i in range(nu)]
+    return np.array(verts), np.array(faces)
+
+
+def frame_from(ax):
+    """Two unit vectors perpendicular to ax: forward-ish (toward +z) and the cross."""
+    fwd = np.array([0.0, 0.0, 1.0]) - ax * ax[2]
+    if np.linalg.norm(fwd) < 1e-6:
+        fwd = np.array([0.0, 1.0, 0.0]) - ax * ax[1]
+    fwd /= np.linalg.norm(fwd)
+    return fwd, np.cross(ax, fwd)
 
 
 def laplacian(V, E, w, iters):
@@ -431,6 +469,15 @@ def sculpt_body(ref, A, Nrm, rc):
     base = np.exp(-((a - aC) / (0.1 * H + 0.08 * nl)) ** 2) * body * (a > aH)
     Dd += rc["folds"] * 0.002 * H * np.sin(2 * math.pi * ((a - aC) / (0.035 * H + 0.02 * nl) + 0.6 * wob)) * base * smoothstep(0.9, 1.4, th) * (0.6 + 0.8 * wob)
 
+    # The back, as the player sees it: epaxial muscle either side of a low
+    # spine ridge from the neck's base to the tail's first third, and the
+    # ilium's crests over the hips.
+    backm = body & (~headm) & (a > aH * 0.62) & (a < aC + 0.3 * nl)
+    fade = smoothstep(aH * 0.62, aH * 0.8, a) * (1 - smoothstep(aC + 0.1 * nl, aC + 0.3 * nl, a))
+    D += rc.get("back", 1.0) * 0.011 * H * gauss(th, 0.5, 0.22) * fade * backm
+    D += rc.get("back", 1.0) * 0.004 * H * gauss(th, 0.0, 0.09) * fade * backm
+    D += rc.get("back", 1.0) * 0.012 * H * gauss(a, aH + 0.05 * span, 0.14 * span) * gauss(th, 0.85, 0.16) * body
+
     # Dorsal midline: a low row of scutes along the back and tail.
     if rc["scutes"] > 0:
         sc = 0.5 + 0.5 * np.cos(2 * math.pi * a / (0.06 * H))
@@ -511,9 +558,17 @@ def sculpt_head(ref, A, Nrm, rc):
     D += rc["temple"] * 0.05 * k * gauss(hf, ef - 0.13 * k, 0.08 * k) * gauss(hu, eu - 0.01 * k, 0.07 * k) * lat
     # The antorbital opening: a shallow, skin-covered hollow ahead of the eye.
     D -= rc["fenestra"] * 0.035 * k * gauss(hf, ef + 0.2 * k, 0.09 * k) * gauss(hu, eu - 0.02 * k, 0.04 * k) * smoothstep(0.4, 0.8, lat)
-    # Eye socket rim: a crease round the eye.
+    # Eyelids: a rim round the (recessed) eye, and a soft crease outside it.
     de = np.linalg.norm(np.stack([hx - ex, hu - eu, hf - ef], -1), axis=-1)
-    Dd -= 0.3 * er * gauss(de, 1.4 * er, 0.3 * er)
+    Dd += 0.24 * er * gauss(de, 1.1 * er, 0.2 * er)
+    Dd -= 0.14 * er * gauss(de, 1.75 * er, 0.3 * er)
+    # Allosaurus: a horn ahead of each eye, and paired ridges along the snout.
+    if rc.get("crests", 0) > 0:
+        cr = rc["crests"]
+        D += cr * 0.045 * k * gauss(hf, ef + 0.05 * k, 0.045 * k) * gauss(hu, eu + 0.075 * k, 0.035 * k) * smoothstep(0.3 * ex, 0.6 * ex, hx)
+        top = smoothstep(0.3, 0.75, Nrm @ Nh)
+        ridge_x = 0.45 * ex
+        D += cr * 0.018 * k * top * gauss(hx, ridge_x, 0.035 * k) * smoothstep(ef + 0.02 * k, ef + 0.12 * k, hf) * (1 - smoothstep(0.75 * k, 0.92 * k, hf))
     # Nasal rugosity: knobbly bone along the top of the snout.
     if rc["nasal"] > 0:
         top = smoothstep(0.45, 0.85, Nrm @ Nh)
@@ -634,8 +689,18 @@ class Species:
             V[dome] = inside + (V[dome] - J0) * 0.35
             near = top & (along >= 0)
             C = J0 + along[near, None] * ax
-            k = 0.72 + 0.28 * smoothstep(0.0, 0.35, A0.t[near])
+            fore = pid < 20 and ref.legs[pid - 10]["fore"]
+            k0 = 0.88 if fore and self.rc["kind"] == "quad" else 0.72
+            k = k0 + (1 - k0) * smoothstep(0.0, 0.35, A0.t[near])
             V[near] = C + (V[near] - C) * k[:, None]
+            if self.rc["kind"] in ("quad", "sauropod") and pid < 20:
+                # A column beside a narrow body: slide its top in under the
+                # body's skin (most at the top, none by mid-thigh) so the
+                # flank runs down into the leg.
+                upper = m & (A0.seg == 0) & (A0.t < 0.6)
+                bw = np.interp(A0.a[upper], ref.sa, ref.sw)
+                over = np.maximum(0.0, V[upper, 0] * side - 0.85 * bw)
+                V[upper, 0] -= side * over * (1 - smoothstep(0.0, 0.6, A0.t[upper])) * (0.5 if fore and self.rc["kind"] == "quad" else 0.85)
             # Hip / shoulder muscle: swell the body's flank over what still
             # stands out, so the limb comes out of the body, not a socket.
             xl = float((V[top, 0] * side).max())
@@ -648,6 +713,14 @@ class Species:
             gap = np.maximum(0.0, want - V[:, 0] * side)
             sel = body0 & (V[:, 0] * side > 0)
             V[sel, 0] += side * (gap * f * lat)[sel]
+        # Muscle masses, modelled as volumes and fused in with the rest: the
+        # hip and thigh (and the shoulder on a quadruped) round each limb into
+        # the body; the caudofemoralis runs from the thigh back along the tail.
+        masses = self.muscle_masses(V, A0)
+        for C_, axes_, radii_ in masses:
+            mv, mf = ellipsoid_mesh(C_, axes_, radii_)
+            F = np.vstack([F, mf + len(V)])
+            V = np.vstack([V, mv])
         ob = mesh_obj("soft_hi", V, F)
         close_holes(ob)
         apply_modifier(ob, "REMESH", mode="VOXEL", voxel_size=self.vs, adaptivity=0.0, use_smooth_shade=True)
@@ -663,8 +736,29 @@ class Species:
         for arm in ref.arms:
             d = np.linalg.norm(X - arm["shoulder"], axis=-1)
             w = np.maximum(w, np.exp(-((d / (0.2 * ref.H)) ** 2)))
-        X = fillet(X, E, normals_of(me), w, 60)
-        X = laplacian(X, E, 0.5 * w, 10)  # round off the shelf where a limb's top meets the flank
+        # …and blend the masses in: strongest within reach of their surfaces.
+        for C_, axes_, radii_ in masses:
+            d = np.abs(sd_ellipsoid(X, C_, axes_, radii_))
+            w = np.maximum(w, np.exp(-((d / (0.22 * ref.H)) ** 2)))
+        X = fillet(X, E, normals_of(me), w, 140)
+        X = laplacian(X, E, 0.5 * w, 12)  # round off shelves where a limb or a mass meets the flank
+        # The seam where each limb meets the body (where the nearest reference
+        # part changes from body to limb): relax a band around it, so a leg's
+        # top edge melts into the flank.
+        Pm, Fm = L0["P"], L0["I"][soft]
+        tri, _, _ = nearest_on(bvh_for(Pm, Fm), Pm, Fm, X)
+        lab = np.where(L0["part"][soft][tri] == 0, 0, 1)
+        jv = np.unique(E[lab[E[:, 0]] != lab[E[:, 1]]].ravel())
+        if len(jv):
+            from mathutils.kdtree import KDTree
+            kd = KDTree(len(jv))
+            for i, v in enumerate(jv):
+                kd.insert(Vector(X[v]), i)
+            kd.balance()
+            dj = np.array([kd.find(Vector(x))[2] for x in X])
+            quad = self.rc["kind"] in ("quad", "sauropod")
+            band = (0.12 if quad else 0.06) * ref.H
+            X = laplacian(X, E, (0.65 if quad else 0.4) * np.exp(-((dj / band) ** 2)), 30 if quad else 12)
         X = laplacian(X, E, np.full(len(X), 0.3), 2)
         set_verts(me, X)
         log(f"{ref.id}: fused volume {len(X)} verts (voxel {self.vs * 100:.2f} cm) in {time.time() - t0:.1f}s")
@@ -674,6 +768,22 @@ class Species:
         bvh = bvh_for(Pm, Fm)
         tri, _, _ = nearest_on(bvh, Pm, Fm, X)
         part = partm[tri]
+        # Where the skull meets the neck: relax the step between them; and
+        # the skull's own shape (the T. rex's broad back of the head).
+        A = Anatomy(ref, X, part)
+        ln = ref.head["len"]
+        hn = np.exp(-(((A.a - ref.arcs["head0"]) / (0.12 * ln)) ** 2)) * (part == 0)
+        X = laplacian(X, E, 0.55 * hn, 30)
+        wid = self.rc.get("skull_widen", 0.0)
+        if wid > 0:
+            O, Dh, Nh = ref.head["O"], norm(ref.head["D"]), norm(ref.head["N"])
+            ef = float((ref.eye["center"] - O) @ Dh)
+            eu = float((ref.eye["center"] - O) @ Nh)
+            hf = (X - O) @ Dh
+            hu = (X - O) @ Nh
+            g = wid * gauss(hf, ef - 0.1 * ln, 0.2 * ln) * smoothstep(eu - 0.12 * ln, eu, hu) * (part == 0) * (A.a > ref.arcs["head0"] - 0.1 * ln)
+            X[:, 0] *= 1 + g
+        set_verts(me, X)
         Nrm = normals_of(me)
         A = Anatomy(ref, X, part)
         Dm, Dd = sculpt_body(ref, A, Nrm, self.rc)
@@ -714,7 +824,45 @@ class Species:
             set_verts(fo.data, Fx + FN * ((0.0015 * ref.H) * (g - 0.6 * ridge))[:, None])
             self.feat_hi = fo
 
+    def muscle_masses(self, V, A0):
+        ref, rc = self.ref, self.rc
+        quad = rc["kind"] in ("quad", "sauropod")
+        out = []
+        aH = ref.arcs["hips"]
+        for li, leg in enumerate(ref.legs):
+            pid = 10 + li
+            J0, J1 = leg["hip"], leg["knee"]
+            l1 = float(np.linalg.norm(J1 - J0))
+            ax = (J1 - J0) / max(l1, 1e-9)
+            side = 1.0 if J0[0] >= 0 else -1.0
+            fwd, oth = frame_from(ax)
+            outv = oth if oth[0] * side > 0 else -oth
+            m = (A0.part == pid) & (A0.seg == 0) & (A0.t > 0.15) & (A0.t < 0.45)
+            if m.sum() < 8:
+                continue
+            C = J0 + ((V[m] - J0) @ ax)[:, None] * ax
+            R = V[m] - C
+            rf = float(np.percentile(R @ fwd, 95))
+            rb = float(-np.percentile(R @ fwd, 5))
+            ro = float(np.percentile(R @ outv, 95))
+            k = rc.get("mass", 1.0)
+            if quad or leg["fore"]:
+                continue  # quadrupeds: the seam is smoothed instead (build_high)
+            # Hip and thigh.
+            Cm = J0 + ax * 0.24 * l1 + fwd * 0.25 * (rf - rb)
+            out.append((Cm, np.array([fwd, outv, ax]), np.array([0.5 * (rf + rb) * k, ro * 0.92 * k, 0.42 * l1])))
+        return out
+
     # 4: game meshes -----------------------------------------------------------
+    def hard(self, L, g):
+        """A hard part of the reference (eyes, teeth, claws, features); the
+        eyes are set back into their sockets, under the lids the sculpt adds."""
+        V, F, _ = submesh(L, L["grp"] == g)
+        if g == EYES:
+            V = V.copy()
+            V[:, 0] -= np.sign(V[:, 0]) * 0.14 * self.ref.eye["r"]
+        return V, F
+
     def piece(self, name, V, F, grp):
         ob = mesh_obj(name, V, F)
         a = ob.data.attributes.new("grp", "INT", "POINT")
@@ -740,7 +888,7 @@ class Species:
         pieces = [self.decimated(self.soft_hi, "soft0", budget_soft, SOFT), self.decimated(self.jaw_hi, "jaw0", int(ntri(L0, JAW) * 1.3), JAW)]
         for g, nm in ((EYES, "eyes0"), (TEETH, "teeth0"), (CLAWS, "claws0"), (FEAT, "feat0")):
             if (L0["grp"] == g).any():
-                V, F, _ = submesh(L0, L0["grp"] == g)
+                V, F = self.hard(L0, g)
                 pieces.append(self.piece(nm, V, F, g))
         lod0 = join(pieces, "lod0")
         self.lod0 = lod0
@@ -767,7 +915,7 @@ class Species:
         pieces = [ob]
         for g, nm in ((EYES, "eyes1"), (CLAWS, "claws1")):
             if (L1["grp"] == g).any():
-                V, F, _ = submesh(L1, L1["grp"] == g)
+                V, F = self.hard(L1, g)
                 p = self.piece(nm, V, F, g)
                 # UVs: borrow the nearest LOD0 vertex's of the same group (flat in the normal map).
                 p.data.uv_layers.new(name="UVMap")
@@ -809,7 +957,7 @@ class Species:
         L0 = self.L0
         for g in (EYES, TEETH, CLAWS):
             if (L0["grp"] == g).any():
-                V, F, _ = submesh(L0, L0["grp"] == g)
+                V, F = self.hard(L0, g)
                 his.append(mesh_obj(f"hard_hi_{g}", V, F))
         for h in his:
             h.data.shade_smooth()
@@ -1089,12 +1237,14 @@ def preview(sp, path, size=(1000, 600)):
     sun.data.energy = 3.5
     sun.data.angle = 0.2
     look_at(sun, np.array([3.0, 6.0, 4.0]), [0, 0, 0])
+    if sc.world is None:
+        sc.world = bpy.data.worlds.new("preview")
     sc.world.color = (0.3, 0.32, 0.36)
     sc.render.resolution_x, sc.render.resolution_y = size
     sc.cycles.samples = 24
     L = ref.length
     c = np.array(ref.r["bound"]["center"])
-    views = {"side": c + np.array([1.05 * L, 0.18 * L, 0.25 * L]), "head": None}
+    views = {"side": c + np.array([1.05 * L, 0.18 * L, 0.25 * L]), "back": c + np.array([0.3 * L, 0.42 * L, -0.85 * L]), "head": None}
     hd = ref.head["O"] + norm(ref.head["D"]) * ref.head["len"] * 0.5
     views["head"] = hd + np.array([1.9, 0.45, 0.5]) * ref.head["len"] * 1.3
     shows = [("hi", [sp.soft_hi, sp.jaw_hi] + ([sp.feat_hi] if sp.feat_hi else []), clay), ("lod0", [sp.lod0], clayN)]

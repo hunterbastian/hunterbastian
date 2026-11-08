@@ -4,6 +4,18 @@
 /** @type {{ v: string, date: string, title: string, notes: string[] }[]} */
 export const CHANGELOG = [
   {
+    v: "0.24",
+    date: "2026-11-08",
+    title: "Resculpted",
+    notes: [
+      "Legs grow out of the body: the Brontosaurus and Stegosaurus stand on columns tucked under their flanks, with no collar where leg meets body.",
+      "The predators' thighs are one mass with the hip, and the back carries muscle either side of the spine, with the hip bones' crests over the haunches.",
+      "Eyes sit in sockets under lids.",
+      "The T. rex has a broader back to its skull, and the Allosaurus its horns ahead of the eyes and ridges along the snout.",
+      "The step where the skull meets the neck is smoothed away.",
+    ],
+  },
+  {
     v: "0.23",
     date: "2026-11-08",
     title: "Made in Blender",
