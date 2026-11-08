@@ -34,7 +34,8 @@ export const GAME = {
 // "detailed" draws at full resolution; "pixel" draws the 3D scene at a few
 // hundred rows and upscales it with nearest-neighbour filtering.
 export const STYLE = {
-  default: "retro",
+  // Storybook, graded Dark fantasy (world/look.js STORY_GRADES).
+  default: "story",
   // Rows the retro frame is drawn at, at most (a phone's own resolution caps it lower).
   retroRows: { high: 720, low: 540 },
   // Lines the Retro SD frame aims for (rounded so each is a whole number of device pixels).

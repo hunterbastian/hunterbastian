@@ -526,10 +526,10 @@ export function speciesSilhouette(species, { scale = true } = {}) {
 /* --- Settings ------------------------------------------------------------------------ */
 
 /** Default player settings (see Menu#settings). */
-export const DEFAULT_SETTINGS = Object.freeze({ style: "retro", pixelSize: 0.5, grade: "jungle", quality: "auto", muted: false, batterySaver: false, sensitivity: 1, styleVersion: 2 });
+export const DEFAULT_SETTINGS = Object.freeze({ style: "story", pixelSize: 0.5, grade: "fantasy", quality: "auto", muted: false, batterySaver: false, sensitivity: 1, styleVersion: 3 });
 
 /** Storybook's colour grades (world/look.js STORY_GRADES), in the order Settings lists them. */
-export const GRADES = ["jungle", "fantasy", "picture"];
+export const GRADES = ["fantasy", "jungle", "picture"];
 const GRADE_HINT = {
   jungle: "Jungle film: deep humid greens, golden light over teal shade, a wet, misty distance.",
   fantasy: "Dark fantasy: muted, earthy colour, gold light over cool grey shade, a golden haze.",
@@ -548,15 +548,15 @@ export function normalizeSettings(s = {}) {
   const sens = Number(src.sensitivity);
   const pix = Number(src.pixelSize);
   return {
-    style: STYLES.includes(src.style) ? src.style : "retro",
+    style: STYLES.includes(src.style) ? src.style : "story",
     pixelSize: Number.isFinite(pix) ? clamp(Math.round(pix * 100) / 100, 0, 1) : 0.5,
-    grade: GRADES.includes(src.grade) ? src.grade : "jungle",
+    grade: GRADES.includes(src.grade) ? src.grade : "fantasy",
     quality: ["auto", "high", "low"].includes(src.quality) ? src.quality : "auto",
     muted: Boolean(src.muted),
     batterySaver: Boolean(src.batterySaver),
     sensitivity: Number.isFinite(sens) ? clamp(Math.round(sens * 100) / 100, 0.5, 2) : 1,
     // Bumped when the default style changes (core/migrate.js moves older settings over once).
-    styleVersion: 2,
+    styleVersion: 3,
   };
 }
 
@@ -701,10 +701,10 @@ function paintVista(canvas, mode) {
 }
 
 /**
- * The Storybook preview (2D, once): a bright morning over layered hills — a
- * deep sky and cumulus, ridges going blue with distance, each lit at its
- * crest and falling into shade, conifers and a sauropod, all edged in a soft
- * cool ink.
+ * The Storybook preview (2D, once), in its default Dark fantasy grade: a pale
+ * gold sky and a low sun, ridges sinking into grey-blue haze, olive hills lit
+ * at the crest and falling into shade, conifers and a sauropod, all edged in
+ * a soft cool ink, with the grade's heavier vignette.
  */
 function paintStory(canvas) {
   const ctx = canvas.getContext("2d");
@@ -712,10 +712,16 @@ function paintStory(canvas) {
   const w = canvas.width;
   const h = canvas.height;
   const sky = ctx.createLinearGradient(0, 0, 0, h * 0.62);
-  sky.addColorStop(0, "#2f7fd6");
-  sky.addColorStop(0.6, "#8cc4ee");
-  sky.addColorStop(1, "#e3f1f4");
+  sky.addColorStop(0, "#56626c");
+  sky.addColorStop(0.55, "#b8ac87");
+  sky.addColorStop(1, "#e8d7a4");
   ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, w, h);
+  const sun = ctx.createRadialGradient(w * 0.72, h * 0.5, 0, w * 0.72, h * 0.5, h * 0.7);
+  sun.addColorStop(0, "rgba(255, 232, 170, 0.9)");
+  sun.addColorStop(0.15, "rgba(246, 214, 140, 0.45)");
+  sun.addColorStop(1, "rgba(240, 200, 120, 0)");
+  ctx.fillStyle = sun;
   ctx.fillRect(0, 0, w, h);
   const rng = makeRng(hash("vista-story", 3));
   // Cumulus: clusters of soft white puffs with a cool underside.
@@ -726,11 +732,11 @@ function paintStory(canvas) {
       const px = cx + (rng() - 0.5) * w * 0.12;
       const py = cy + (rng() - 0.5) * h * 0.06;
       const r = h * (0.05 + rng() * 0.05);
-      ctx.fillStyle = "rgba(196, 220, 238, 0.9)";
+      ctx.fillStyle = "rgba(146, 140, 122, 0.85)";
       ctx.beginPath();
       ctx.arc(px, py + r * 0.25, r, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+      ctx.fillStyle = "rgba(236, 224, 192, 0.92)";
       ctx.beginPath();
       ctx.arc(px, py, r * 0.92, 0, Math.PI * 2);
       ctx.fill();
@@ -782,15 +788,15 @@ function paintStory(canvas) {
       ctx.stroke();
     }
   };
-  ridge(0.5, 0.1, "#a9c4e0", "#93b0d2", 6);
-  ridge(0.6, 0.08, "#86b3a8", "#6f9c98", 8, 14, "#5f8f8a");
-  ridge(0.74, 0.07, "#8cc152", "#62a03f", 6, 10);
+  ridge(0.5, 0.1, "#9aa1a2", "#838c93", 6);
+  ridge(0.6, 0.08, "#868d74", "#6d7562", 8, 14, "#5a6250");
+  ridge(0.74, 0.07, "#80864f", "#5c623d", 6, 10, "#3d4531");
   // A sauropod on the near hill.
   const k = h / 100;
   const bx = w * 0.34;
   const by = h * 0.78;
-  ctx.fillStyle = "#3f5a3a";
-  ctx.strokeStyle = "#3f5a3a";
+  ctx.fillStyle = "#363b2c";
+  ctx.strokeStyle = "#363b2c";
   ctx.beginPath();
   ctx.ellipse(bx, by - 7 * k, 9 * k, 4.2 * k, 0, 0, Math.PI * 2);
   ctx.fill();
@@ -807,10 +813,16 @@ function paintStory(canvas) {
   }
   ctx.stroke();
   const fg = ctx.createLinearGradient(0, h * 0.86, 0, h);
-  fg.addColorStop(0, "#72ad43");
-  fg.addColorStop(1, "#4f8a33");
+  fg.addColorStop(0, "#5f6541");
+  fg.addColorStop(1, "#3f442b");
   ctx.fillStyle = fg;
   ctx.fillRect(0, h * 0.9, w, h * 0.1);
+  // The grade's heavier vignette.
+  const vig = ctx.createRadialGradient(w / 2, h / 2, h * 0.35, w / 2, h / 2, w * 0.62);
+  vig.addColorStop(0, "rgba(0, 0, 0, 0)");
+  vig.addColorStop(1, "rgba(14, 12, 9, 0.5)");
+  ctx.fillStyle = vig;
+  ctx.fillRect(0, 0, w, h);
 }
 
 /** The SD preview (2D, once): half-size frame, 5-bit dither, soft 2× and scanlines. */
@@ -1360,7 +1372,7 @@ export class Menu {
                 <input type="radio" name="${id}-style" value="story" />
                 <span class="style-opt__img"><canvas width="672" height="240" aria-hidden="true"></canvas></span>
                 <span class="style-opt__name">Storybook</span>
-                <span class="style-opt__desc">Lush colour, painted distance, soft light and ink — the island as a picture book.</span>
+                <span class="style-opt__desc">Painted light and soft ink, graded dark fantasy, jungle film or picture book.</span>
               </label>
               <label class="style-opt">
                 <input type="radio" name="${id}-style" value="retro" />
@@ -1391,8 +1403,8 @@ export class Menu {
           <fieldset class="field" data-field="grade">
             <legend class="field__label">Colour grade · Storybook</legend>
             <div class="segmented">
-              <label><input type="radio" name="${id}-grade" value="jungle" /><span>Jungle</span></label>
               <label><input type="radio" name="${id}-grade" value="fantasy" /><span>Fantasy</span></label>
+              <label><input type="radio" name="${id}-grade" value="jungle" /><span>Jungle</span></label>
               <label><input type="radio" name="${id}-grade" value="picture" /><span>Picture</span></label>
             </div>
             <p class="field__hint" data-hint="grade"></p>

@@ -78,6 +78,7 @@ export const LOOK = {
 /**
  * Storybook's colour grades. The painted light, ink and brushwork stay the
  * same; the colour around them changes:
+ * Dark fantasy is the game's default look.
  *   jungle  — a humid jungle film: deep emerald greens, golden-amber light over
  *             teal-green shade, a firm filmic S, wet grey-green distance.
  *   fantasy — dark fantasy: a muted, earthy palette (khaki and olive greens),
@@ -124,7 +125,7 @@ export const STORY_GRADES = {
     skyTint: [0.93, 1.0, 1.08],
   },
 };
-export const STORY_GRADE_DEFAULT = "jungle";
+export const STORY_GRADE_DEFAULT = "fantasy";
 
 /** Fill the Storybook grade uniforms from one of STORY_GRADES (unknown → the default). */
 export function setStoryGrade(name) {

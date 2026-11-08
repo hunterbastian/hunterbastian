@@ -291,26 +291,27 @@ Open **Settings** from the title screen or the pause menu. Settings are saved on
 device.
 
 - **Graphics style:**
-  - **Storybook**: the island as a painted picture book, in the spirit of the
-    soft open country of *Breath of the Wild*:
+  - **Storybook** (default, graded *Dark fantasy*): the island as a painted
+    picture, with painted light and soft ink:
     - **In every surface's own shader** (free, phones included): the colour
       grade, a painted middle distance that sinks into the grade's haze in
       layers, and light that falls in three soft bands.
     - **Colour grade** (Settings, under Storybook):
-      - *Jungle film* (default): a humid, cinematic grade in the spirit of
-        Jurassic Park and The Isle. Deep emerald greens, golden light over
-        teal-green shade, a firm filmic contrast and a wet, misty distance.
-      - *Dark fantasy*: in the spirit of Dark Souls and Elden Ring. A muted,
-        earthy palette with khaki and olive greens, gold light over cool grey
-        shade lifted into haze, a golden misty distance and a heavier
-        vignette.
-      - *Picture book*: the bright first grade, with spring greens and a blue
-        painted distance.
+      - *Dark fantasy* (the game's look): in the spirit of Dark Souls and
+        Elden Ring. A muted, earthy palette with khaki and olive greens, gold
+        light over cool grey shade lifted into haze, a golden misty distance
+        and a heavier vignette.
+      - *Jungle film*: a humid, cinematic grade in the spirit of Jurassic Park
+        and The Isle. Deep emerald greens, golden light over teal-green shade,
+        a firm filmic contrast and a wet, misty distance.
+      - *Picture book*: the bright first grade, in the spirit of *Breath of the
+        Wild*'s open country, with spring greens and a blue painted distance.
     - **In a short finishing pass:** soft ink on silhouettes, fading with
       distance (not on Low), and brushwork, a Kuwahara filter that flattens
       texture noise into patches of colour (High only).
     - It draws up to 1080 rows (720 on Low), stretched smoothly.
-  - **Retro HD** (default): a sub-HD frame (720 rows on High, 540 on Low, fewer if
+  - **Retro HD** (the default before 0.22; players still on it moved to
+    Storybook once): a sub-HD frame (720 rows on High, 540 on Low, fewer if
     the screen has fewer), soft quincunx-style anti-aliasing, bloom, a desaturated
     and bronzed grade, film grain and a little lens fringing at the corners, then a
     smooth upscale.

@@ -124,8 +124,8 @@ test("screen: a desktop window isn't turned; the app frame is the viewport", () 
 test("storybook: a saved Storybook choice sticks; brushwork on High only, ink everywhere but Low; its look is off by default", () => {
   assert(STYLES.includes("story"), "Storybook is one of the styles");
   assert.equal(normalizeSettings({ style: "story" }).style, "story", "a saved Storybook choice is kept:");
-  assert.equal(normalizeSettings({ style: "nonsense" }).style, "retro", "an unknown style falls back to Retro HD:");
-  assert.equal(migrateSettings({ style: "story", styleVersion: 2 }), null, "Storybook isn't migrated away:");
+  assert.equal(normalizeSettings({ style: "nonsense" }).style, "story", "an unknown style falls back to Storybook, the default:");
+  assert.equal(migrateSettings({ style: "story", grade: "jungle", styleVersion: 3 }), null, "Storybook isn't migrated away:");
   const pass = new StorybookPass({});
   pass.setQuality("high");
   assert(pass.brush && pass.ink && pass.composite.defines.BRUSH === 1 && pass.composite.defines.INK === 1, "High: brushwork and ink");
@@ -133,28 +133,38 @@ test("storybook: a saved Storybook choice sticks; brushwork on High only, ink ev
   assert(!pass.brush && !pass.ink && pass.composite.defines.BRUSH === 0 && pass.composite.defines.INK === 0, "Low: neither");
   assert(STORY.ink > 0 && STORY.ink < 0.85, `ink a touch lighter than the look study (${STORY.ink})`);
   pass.dispose();
-  // Its colour grades: jungle film (the default), dark fantasy and the picture book.
-  assert.equal(normalizeSettings({}).grade, "jungle", "the default grade:");
-  assert.equal(normalizeSettings({ grade: "fantasy" }).grade, "fantasy", "a saved grade is kept:");
-  assert.equal(normalizeSettings({ grade: "noir" }).grade, "jungle", "an unknown grade falls back:");
+  // Its colour grades: dark fantasy (the game's default), jungle film and the picture book.
+  assert.equal(normalizeSettings({}).style, "story", "the default style:");
+  assert.equal(normalizeSettings({}).grade, "fantasy", "the default grade:");
+  assert.equal(normalizeSettings({ grade: "jungle" }).grade, "jungle", "a saved grade is kept:");
+  assert.equal(normalizeSettings({ grade: "noir" }).grade, "fantasy", "an unknown grade falls back:");
   for (const g of GRADES) assert(STORY_GRADES[g], `${g} has its numbers`);
   assert.equal(setStoryGrade("fantasy"), "fantasy", "setStoryGrade applies a known grade:");
   const fantasy = LOOK.uLookSG.value.toArray();
   assert(fantasy[2] > 0.2 && fantasy[3] > 0, "dark fantasy desaturates and deepens the vignette");
   assert(LOOK.uLookSGLight.value.z < 0.85, "dark fantasy's light is gold");
-  assert.equal(setStoryGrade("noir"), "jungle", "an unknown grade falls back to the jungle film:");
+  assert.equal(setStoryGrade("jungle"), "jungle", "the jungle film:");
   assert(LOOK.uLookSG.value.y > 0.1 && LOOK.uLookSGShade.value.x < 0.95, "the jungle film has a firm S and teal-green shade");
+  assert.equal(setStoryGrade("noir"), "fantasy", "an unknown grade falls back to dark fantasy:");
+  assert(LOOK.uLookSG.value.z > 0.2, "…which is what's applied");
   // main.js turns it on only in the Storybook style; until then every material runs as before.
   assert.equal(LOOK.uLookStory.value.x + LOOK.uLookStory.value.y + LOOK.uLookStory.value.z, 0, "the storybook look starts off:");
 });
 
-test("settings: Retro HD becomes the default once; a Pixel choice made since sticks", () => {
+test("settings: each new default style arrives once — Retro HD (v2), then Storybook in Dark fantasy (v3); choices made since stick", () => {
+  // Pre-0.10 settings on the old default, Pixel, ride both moves.
   const moved = migrateSettings({ style: "pixel", pixelSize: 0.75, muted: true });
-  assert(moved && moved.style === "retro" && moved.styleVersion === 2, `old Pixel settings should move to Retro HD, got ${JSON.stringify(moved)}`);
+  assert(moved && moved.style === "story" && moved.grade === "fantasy" && moved.styleVersion === 3, `old Pixel settings should end on Storybook, got ${JSON.stringify(moved)}`);
   assert(moved.pixelSize === 0.75 && moved.muted === true, "the other settings carry over");
-  assert(migrateSettings({ muted: true }).style === "retro", "settings with no style get the new default");
-  assert(migrateSettings({ style: "detailed" }).style === "detailed", "a Detailed player stays Detailed");
-  assert(migrateSettings({ style: "pixel", styleVersion: 2 }) === null, "Pixel picked after the change is left alone");
+  // Retro HD, the old default, moves to Storybook in Dark fantasy once.
+  const retro = migrateSettings({ style: "retro", styleVersion: 2, sensitivity: 1.4 });
+  assert(retro.style === "story" && retro.grade === "fantasy" && retro.styleVersion === 3 && retro.sensitivity === 1.4, `Retro HD settings move to Storybook, got ${JSON.stringify(retro)}`);
+  assert(migrateSettings({ muted: true }).style === "story", "settings with no style get the new default");
+  // Any other choice stays, just stamped.
+  const detailed = migrateSettings({ style: "detailed", styleVersion: 2 });
+  assert(detailed.style === "detailed" && detailed.styleVersion === 3 && !("grade" in detailed), `a Detailed player stays Detailed, got ${JSON.stringify(detailed)}`);
+  assert(migrateSettings({ style: "pixel", styleVersion: 2 }).style === "pixel", "Pixel picked after 0.10 is kept");
+  assert(migrateSettings({ style: "retro", styleVersion: 3 }) === null, "Retro HD picked after the change is left alone");
   assert(migrateSettings(null) === null && migrateSettings("pixel") === null, "junk is ignored");
 });
 

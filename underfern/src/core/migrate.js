@@ -37,13 +37,19 @@ try {
 }
 
 /**
- * 0.10: "Retro HD" became the default render style. Settings saved before
- * then still name the old default, Pixel — move them over once, stamped so a
- * player who picks Pixel again keeps it.
+ * Default style changes, each applied once and stamped (styleVersion) so a
+ * player who picks the old style again keeps it:
+ *   0.10 (v2): "Retro HD" became the default — the old default, Pixel, moves over.
+ *   0.22 (v3): Storybook graded Dark fantasy became the default — Retro HD moves over.
  * @param {object} s stored settings
  * @returns {object | null} the settings to store instead, or null if they're current
  */
 export function migrateSettings(s) {
-  if (!s || typeof s !== "object" || s.styleVersion >= 2) return null;
-  return { ...s, style: s.style === "pixel" || !s.style ? "retro" : s.style, styleVersion: 2 };
+  if (!s || typeof s !== "object" || s.styleVersion >= 3) return null;
+  let out = s;
+  if (!(out.styleVersion >= 2)) out = { ...out, style: out.style === "pixel" || !out.style ? "retro" : out.style, styleVersion: 2 };
+  // 0.22: Storybook, graded Dark fantasy, became the default. Settings still
+  // on the old default, Retro HD, move over once; any other choice stays.
+  if (out.style === "retro" || !out.style) return { ...out, style: "story", grade: "fantasy", styleVersion: 3 };
+  return { ...out, styleVersion: 3 };
 }

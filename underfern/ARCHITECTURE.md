@@ -57,8 +57,8 @@ working (add, don't rename) and note it in your report.
       (x palette, y painted distance, z cel bands, each 0..1; 0 in every other
       style, set by `main.js`). The wrap lighting is stepped into three soft
       bands.
-    - Its colour comes from a grade: `STORY_GRADES` (`jungle` default,
-      `fantasy`, `picture`) fill the `uLookSG*` uniforms through
+    - Its colour comes from a grade: `STORY_GRADES` (`fantasy` default — the
+      game's look, `jungle`, `picture`) fill the `uLookSG*` uniforms through
       `setStoryGrade(name)` (`settings.grade`, `?grade=`). `lookGrade` applies
       the grade's vibrance and desaturation, its green nudges in shade and in
       sun, its split tone, its extra S and toe. `lookAtmosphere` mixes in the
@@ -86,7 +86,9 @@ working (add, don't rename) and note it in your report.
   - an output pass at canvas size: the GameCube deflicker (¼ ½ ¼ vertical), composite
     chroma bleed in YIQ, scanlines whose beam swells with brightness, and a faint
     aperture-grille mask at 3+ screen pixels per line.)
-  `"retro"` (default — "Retro HD", a
+  `"story"` is the default (`STYLE.default`), graded `fantasy`; core/migrate.js
+  moved settings on the old default over once (styleVersion 3).
+  `"retro"` ("Retro HD", the default before 0.22, a
   late-2000s console look: `world/retro.js` draws the scene into a sub-HD target,
   720 rows on high and 540 on low at most, then one short post pass adds a bright-pass
   bloom at ¼ and ⅛ size, a quincunx-style soften, lens fringe, a desaturated bronze /

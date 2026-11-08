@@ -107,7 +107,7 @@ const SHOT_TIMEOUT = 120_000;
 /** Errors that come from the sandbox, not the game. */
 const IGNORED = [/fonts\.(googleapis|gstatic)\.com/];
 
-async function openPage(browser, url, { mobile = false, upright = false } = {}) {
+async function openPage(browser, url, { mobile = false, upright = false, settings = null } = {}) {
   const ctx = await browser.newContext(
     upright
       ? { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 3 }
@@ -117,6 +117,9 @@ async function openPage(browser, url, { mobile = false, upright = false } = {}) 
   );
   // Web fonts are cosmetic; stub them so runs are offline-safe and deterministic.
   await ctx.route(/fonts\.(googleapis|gstatic)\.com/, (route) => route.fulfill({ status: 200, contentType: "text/css", body: "" }));
+  // Saved settings, in place before the game reads them (a suite that tests a
+  // non-default style and still switches styles in Settings, which ?style= would pin).
+  if (settings) await ctx.addInitScript((s) => localStorage.setItem("underfern.settings.v1", s), JSON.stringify(settings));
   const page = await ctx.newPage();
   if (upright) {
     // An iPhone's portrait insets: the notch on top, the home indicator below.
@@ -214,6 +217,13 @@ const SUITES = [
           expect(t.modes.join() === "survival,creative", `the title should offer Survival then Creative, got ${JSON.stringify(t.modes)}`);
           expect(t.links.join() === "controls,settings,changelog", `the title's links should be Controls · Settings · Changelog, got ${JSON.stringify(t.links)}`);
           expect(t.bar === "hidden", "a minimal title: no tool bar over it");
+          // A first visit: the game's own look — Storybook, graded Dark fantasy.
+          const look = await page.evaluate(async () => {
+            const { LOOK } = await import("/src/world/look.js");
+            return { style: __underfern.style, post: __underfern.retro?.constructor.name, story: LOOK.uLookStory.value.x, desat: LOOK.uLookSG.value.z };
+          });
+          expect(look.style === "story" && look.post === "StorybookPass" && look.story === 1, `a first visit should open in Storybook, got ${JSON.stringify(look)}`);
+          expect(look.desat > 0.2, `…graded Dark fantasy, got ${JSON.stringify(look)}`);
           await frames(page, 2);
           await shot(page, "title");
           await expectClean(page, errors);
@@ -596,10 +606,12 @@ const SUITES = [
   {
     name: "touch · phone",
     query: "?species=stegosaurus&growth=0.4&t=0.45&quality=low&mute=1",
+    // A player who picked Retro HD: this suite tests its post pass, then switches styles in Settings.
+    settings: { style: "retro", styleVersion: 3 },
     mobile: true,
     steps: [
       {
-        name: "touch (iPhone-sized, Retro HD default): joystick moves the player",
+        name: "touch (iPhone-sized, Retro HD picked in Settings): joystick moves the player",
         async run({ page, ctx, errors }) {
           await waitState(page, "playing");
           const setup = await page.evaluate(() => ({
@@ -612,7 +624,7 @@ const SUITES = [
             buttons: document.querySelectorAll(".touch-btn").length,
           }));
           expect(setup.isTouch, "input should detect touch on a mobile context");
-          expect(setup.style === "retro", `the default style should be Retro HD, got ${setup.style}`);
+          expect(setup.style === "retro", `a saved Retro HD choice should be kept, got ${setup.style}`);
           expect(setup.zone && setup.zone.w > 50, "no joystick zone (.touch-zone--move)");
           expect(setup.buttons >= 5, `expected touch buttons, found ${setup.buttons}`);
           const client = await ctx.newCDPSession(page);
@@ -1039,7 +1051,7 @@ async function runSmoke(browser, base) {
     let session = null;
     let broken = null;
     try {
-      session = await openPage(browser, `${base}/index.html${suite.query}`, { mobile: !!suite.mobile, upright: !!suite.upright });
+      session = await openPage(browser, `${base}/index.html${suite.query}`, { mobile: !!suite.mobile, upright: !!suite.upright, settings: suite.settings || null });
     } catch (err) {
       broken = `couldn't open the page: ${err.message}`;
     }

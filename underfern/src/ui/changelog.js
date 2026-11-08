@@ -4,6 +4,15 @@
 /** @type {{ v: string, date: string, title: string, notes: string[] }[]} */
 export const CHANGELOG = [
   {
+    v: "0.22",
+    date: "2026-11-08",
+    title: "Dark fantasy",
+    notes: [
+      "Underfern's look is now Storybook, graded Dark fantasy: muted, earthy colour, gold light over cool grey shade and a golden haze.",
+      "If you were on Retro HD, the old default, you've been moved over once. Every other style and grade is still in Settings.",
+    ],
+  },
+  {
     v: "0.21",
     date: "2026-11-08",
     title: "Colour grades",
