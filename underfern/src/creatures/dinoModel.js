@@ -16,6 +16,7 @@ import { makeRng, hash } from "../core/rng.js";
 import { clamp, lerp, damp, smoothstep, TAU } from "../core/math.js";
 import { getSpecies } from "./species.js";
 import { patchLook } from "../world/look.js";
+import { getDinoAsset, loadDinoAssets } from "./dinoAssets.js";
 
 /* --- Tuning ------------------------------------------------------------- */
 
@@ -270,9 +271,9 @@ function getFeatherTexture() {
 
 const SKIN_VERTEX_PARS = /* glsl */ `
 attribute vec4 aSkin;
-attribute vec2 aSurf;
+attribute vec3 aSurf;
 varying vec4 vSkin;
-varying vec2 vSurf;
+varying vec3 vSurf;
 varying vec3 vRestPos;
 varying vec3 vRestNormal;
 `;
@@ -301,7 +302,7 @@ uniform vec4 uTint;
 uniform float uWet;
 uniform float uShade;  // 1 in the open … dark inside a cave (creature.js sets it from terrain.shelterAt)
 varying vec4 vSkin;    // x skin palette amount, y pattern mask, z accent, w scale detail
-varying vec2 vSurf;    // x roughness, y eye glint
+varying vec3 vSurf;    // x roughness, y eye glint, z ambient occlusion (baked in Blender; 1 on the procedural mesh)
 varying vec3 vRestPos;
 varying vec3 vRestNormal;
 
@@ -366,6 +367,15 @@ const SKIN_FRAGMENT_NORMAL = /* glsl */ `
 #endif
 `;
 
+// Baked occlusion: shadows the sky and bounce light in folds, under the belly
+// and between the legs, and a little of the sun.
+const SKIN_FRAGMENT_AO = /* glsl */ `
+float sAO = mix( 1.0, vSurf.z, 0.9 );
+reflectedLight.indirectDiffuse *= sAO;
+reflectedLight.indirectSpecular *= sAO;
+reflectedLight.directDiffuse *= mix( 1.0, sAO, 0.35 );
+`;
+
 const SKIN_FRAGMENT_GLINT = /* glsl */ `
 float sLight = dot( reflectedLight.directDiffuse + reflectedLight.indirectDiffuse, vec3( 0.3333 ) ) / max( dot( diffuseColor.rgb, vec3( 0.3333 ) ), 0.03 );
 vec3 sGlintH = normalize( vec3( 0.35, 0.5, 1.0 ) );
@@ -382,6 +392,7 @@ function patchSkinShader(shader, uniforms) {
     .replace("#include <color_fragment>", SKIN_FRAGMENT_COLOR)
     .replace("#include <roughnessmap_fragment>", SKIN_FRAGMENT_ROUGH)
     .replace("#include <normal_fragment_maps>", "#include <normal_fragment_maps>\n" + SKIN_FRAGMENT_NORMAL)
+    .replace("#include <aomap_fragment>", "#include <aomap_fragment>\n" + SKIN_FRAGMENT_AO)
     .replace("#include <opaque_fragment>", SKIN_FRAGMENT_GLINT + "\n#include <opaque_fragment>");
 }
 
@@ -407,10 +418,15 @@ function createSkinUniforms() {
 
 /**
  * Per-individual skin material. Every instance shares one compiled program
- * (same patch + cache key); only the uniform values differ.
+ * (same patch + cache key); only the uniform values differ. `normalMap` is a
+ * Blender model's baked sculpt (tangent space, glTF uv).
  */
-function createSkinMaterial(uniforms, feather) {
+function createSkinMaterial(uniforms, feather, normalMap = null) {
   const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0 });
+  if (normalMap && !feather) {
+    m.normalMap = normalMap;
+    m.normalScale.set(1, 1);
+  }
   if (feather) {
     m.map = getFeatherTexture();
     m.alphaTest = 0.5;
@@ -572,7 +588,7 @@ class Builder {
     this.p.push(x, y, z);
     this.c.push(look.color.r, look.color.g, look.color.b);
     this.k.push(look.skin, look.pattern, look.accent, look.detail);
-    this.s.push(look.rough, look.glint);
+    this.s.push(look.rough, look.glint, 1);
     // Strongest four influences, renormalised.
     const n = inf.n;
     const used = [-1, -1, -1, -1];
@@ -610,7 +626,7 @@ class Builder {
     g.setAttribute("position", new THREE.Float32BufferAttribute(this.p, 3));
     g.setAttribute("color", new THREE.Float32BufferAttribute(this.c, 3));
     g.setAttribute("aSkin", new THREE.Float32BufferAttribute(this.k, 4));
-    g.setAttribute("aSurf", new THREE.Float32BufferAttribute(this.s, 2));
+    g.setAttribute("aSurf", new THREE.Float32BufferAttribute(this.s, 3));
     g.setAttribute("skinIndex", new THREE.Uint16BufferAttribute(this.bi, 4));
     g.setAttribute("skinWeight", new THREE.Float32BufferAttribute(this.bw, 4));
     if (this.uv) g.setAttribute("uv", new THREE.Float32BufferAttribute(this.uv, 2));
@@ -2536,25 +2552,97 @@ function buildFeathers(bp, B) {
 const _geoCache = new Map();
 
 /**
+ * Every part of the skinned mesh into B, in order. With `parts`, records each
+ * part's vertex and triangle range (the Blender reference export reads them).
+ */
+function buildSkin(bp, lod, B, parts = null) {
+  const mark = (name, fn) => {
+    const v0 = B.count;
+    const t0 = B.idx.length / 3;
+    fn();
+    if (parts && B.count > v0) parts.push({ name, v0, v1: B.count, t0, t1: B.idx.length / 3 });
+  };
+  mark("body", () => buildBody(bp, lod, B));
+  mark("jaw", () => buildJaw(bp, lod, B));
+  mark("eyes", () => buildEyes(bp, lod, B));
+  if (lod.detail) mark("teeth", () => buildTeeth(bp, B));
+  bp.legs.forEach((leg, i) => mark("leg" + i, () => buildLeg(bp, leg, lod, B)));
+  bp.arms.forEach((arm, i) => mark("arm" + i, () => buildArm(bp, arm, lod, B)));
+  mark("features", () => buildFeatures(bp, lod, B));
+  if (bp.sail) mark("sail", () => buildSail(bp, lod, B));
+}
+
+/**
+ * Tooling (tools/blender/export-reference.mjs): the rig, the landmarks and the
+ * procedural mesh of one species, as plain JSON for the Blender build. The
+ * Blender models are sculpted over this reference and skinned from its
+ * weights, so they bend on the same bones.
+ * @param {string} id species id
+ */
+export function exportDinoReference(id) {
+  const sp = getSpecies(id);
+  const bp = getBlueprint(sp);
+  const v = (p) => [p.x, p.y, p.z].map((n) => Math.round(n * 1e5) / 1e5);
+  const flat = (a) => Array.from(a, (n) => Math.round(n * 1e5) / 1e5);
+  const mesh = (lodIndex) => {
+    const B = new Builder();
+    const parts = [];
+    buildSkin(bp, LOD_LEVELS[lodIndex], B, parts);
+    return { parts, position: flat(B.p), index: B.idx.slice(), color: flat(B.c), skin: flat(B.k), surf: flat(B.s.filter((_, i) => i % 3 !== 2)), joints: B.bi.slice(), weights: flat(B.bw) };
+  };
+  let feathers = null;
+  if (bp.body.features?.feathers) {
+    const FB = new Builder(true);
+    buildFeathers(bp, FB);
+    feathers = { position: flat(FB.p), index: FB.idx.slice(), uv: flat(FB.uv), normal: flat(FB.nrm), color: flat(FB.c), skin: flat(FB.k), surf: flat(FB.s.filter((_, i) => i % 3 !== 2)), joints: FB.bi.slice(), weights: flat(FB.bw) };
+  }
+  // The spine, sampled: point, tangent and cross-section (half width, top, bottom).
+  const spine = [];
+  const N = 160;
+  const pr = {};
+  for (let i = 0; i <= N; i++) {
+    const a = (i / N) * bp.L;
+    bp.prof(a, pr);
+    spine.push({ a: Math.round(a * 1e4) / 1e4, p: v(bp.path.point(a)), t: v(bp.path.tangent(a)), w: pr.w, top: pr.t, bot: pr.b });
+  }
+  return {
+    id,
+    name: sp.name,
+    diet: sp.diet,
+    plan: sp.body.plan,
+    length: sp.length,
+    height: sp.height,
+    features: Object.keys(bp.body.features || {}),
+    bones: bp.bones.map((b) => ({ name: b.name, parent: b.parent, pos: v(b.pos) })),
+    arcs: { L: bp.L, hips: bp.aHips, spine: bp.aSpine, chest: bp.aChest, tail: bp.aTail, head0: bp.head.a0, head1: bp.head.a1 },
+    spine,
+    head: { O: v(bp.head.O), D: v(bp.head.D), N: v(bp.head.N), len: bp.head.len },
+    eye: { center: v(bp.eye.center), axis: v(bp.eye.axis), r: bp.eye.r },
+    jaw: { pivot: v(bp.jaw.pivot) },
+    legs: bp.legs.map((l) => ({ name: l.name, side: l.side, fore: !!l.fore, hip: v(l.hip), knee: v(l.knee), ankle: v(l.ankle), ball: v(l.ball), toe: v(l.toeEnd), bones: l.bones.map((b) => bp.bones[b].name) })),
+    arms: bp.arms.map((a) => ({ name: a.name, side: a.side, shoulder: v(a.shoulder), elbow: v(a.elbow), wrist: v(a.wrist), hand: v(a.handEnd), bones: a.bones.map((b) => bp.bones[b].name) })),
+    bound: { center: v(bp.bound.center), radius: bp.bound.radius },
+    lod: [mesh(0), mesh(1)],
+    feathers,
+  };
+}
+
+/**
  * Shared, per-species geometry for one LOD: { skin, feathers, tris }.
  * Built lazily the first time a species is spawned, then reused by every
  * individual (only skeletons and materials are per animal).
  */
 function getGeometry(sp, lodIndex) {
+  // The Blender model, when it has loaded (dinoAssets.js).
+  const asset = getDinoAsset(sp.id);
+  if (asset) return { skin: asset.lods[lodIndex], feathers: asset.feathers, tris: asset.tris[lodIndex], normalMap: asset.normalMap, source: "blender" };
   const key = sp.id + ":" + lodIndex;
   let g = _geoCache.get(key);
   if (g) return g;
   const bp = getBlueprint(sp);
   const lod = LOD_LEVELS[lodIndex];
   const B = new Builder();
-  buildBody(bp, lod, B);
-  buildJaw(bp, lod, B);
-  buildEyes(bp, lod, B);
-  if (lod.detail) buildTeeth(bp, B);
-  for (const leg of bp.legs) buildLeg(bp, leg, lod, B);
-  for (const arm of bp.arms) buildArm(bp, arm, lod, B);
-  buildFeatures(bp, lod, B);
-  if (bp.sail) buildSail(bp, lod, B);
+  buildSkin(bp, lod, B);
   const skin = B.toGeometry(true);
   let feathers = null;
   if (bp.body.features?.feathers) {
@@ -2568,7 +2656,7 @@ function getGeometry(sp, lodIndex) {
     }
   }
   const tris = skin.index.count / 3 + (feathers ? feathers.index.count / 3 : 0);
-  g = { skin, feathers, tris };
+  g = { skin, feathers, tris, normalMap: null, source: "procedural" };
   _geoCache.set(key, g);
   return g;
 }
@@ -2712,7 +2800,9 @@ export class DinoModel {
     u.uScales.value.set(1 / tile, 1 / (tile * 6), 2.2, 0.28);
     u.uSeed.value.set(rng() * 40, rng() * 40, rng() * 40);
     this._uniforms = u;
-    this._mat = createSkinMaterial(u, false);
+    const g0 = getGeometry(sp, 0);
+    const g1 = getGeometry(sp, 1);
+    this._mat = createSkinMaterial(u, false, g0.normalMap);
     this._featherMat = sp.body.features?.feathers ? createSkinMaterial(u, true) : null;
     this._headScale = 1 + (rng() - 0.5) * 0.08;
     this._bones[I.head].scale.setScalar(this._headScale);
@@ -2724,7 +2814,7 @@ export class DinoModel {
     const lod = new THREE.LOD();
     this._meshes = [];
     for (let i = 0; i < LOD_LEVELS.length; i++) {
-      const g = getGeometry(sp, i);
+      const g = i === 0 ? g0 : g1;
       const level = new THREE.Group();
       const parts = [[g.skin, this._mat]];
       if (g.feathers) parts.push([g.feathers, this._featherMat]);
@@ -2732,6 +2822,8 @@ export class DinoModel {
         const mesh = new THREE.SkinnedMesh(geo, mat);
         mesh.bind(this._skeleton, new THREE.Matrix4());
         mesh.boundingSphere = bp.bound.clone();
+        // A sculpted model stands a little proud of the blueprint's bound.
+        if (geo.boundingSphere) mesh.boundingSphere.radius = Math.max(mesh.boundingSphere.radius, geo.boundingSphere.center.distanceTo(bp.bound.center) + geo.boundingSphere.radius * 1.02);
         mesh.castShadow = true;
         mesh.receiveShadow = true;
         level.add(mesh);
@@ -2741,10 +2833,8 @@ export class DinoModel {
     }
     this._lod = lod;
     this.object.add(lod);
-    const g0 = getGeometry(sp, 0);
-    const g1 = getGeometry(sp, 1);
-    /** Render cost: triangles per LOD and draw calls (excluding shadow passes). */
-    this.stats = { triangles: [g0.tris, g1.tris], drawCalls: g0.feathers ? 2 : 1 };
+    /** Render cost: triangles per LOD and draw calls (excluding shadow passes); source "blender" | "procedural". */
+    this.stats = { triangles: [g0.tris, g1.tris], drawCalls: g0.feathers ? 2 : 1, source: g0.source };
 
     /* Animation state. */
     this._time = rng() * 100;
@@ -3555,6 +3645,16 @@ function lerpPose(a, b, w) {
  */
 export function createDinoModel(species, { seed = 1, variant = 0 } = {}) {
   return new DinoModel(species, { seed, variant });
+}
+
+/**
+ * Load the Blender models of these species (assets/dinos/*.glb). Models made
+ * before they arrive, or for a species whose file fails, use the procedural
+ * mesh. Resolves to { loaded, failed } (ids); never rejects.
+ * @param {string[]} ids species ids
+ */
+export function loadDinoModels(ids) {
+  return loadDinoAssets(ids, (id) => getBlueprint(getSpecies(id)).bones.map((b) => b.name));
 }
 
 /**

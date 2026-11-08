@@ -150,30 +150,29 @@ character where you left it.
 
 ### The dinosaurs
 
-Playable, in menu order:
+Six live on the island, three hunters and three grazers, and you can play any of
+them. In menu order:
 
 | Species | Diet | Adult size | Plays like |
 | --- | --- | --- | --- |
 | **Dryosaurus** | herbivore | 3.5 m · 90 kg | Tiny and fragile but the fastest thing on the island. Stay with the herd. |
 | **Utahraptor** | carnivore | 6 m · 500 kg | Agile pack hunter; feathered, with a sickle claw and bleeding bites. |
-| **Ceratosaurus** | carnivore | 7 m · 900 kg | Horned ambusher of the wet woods and riverbanks, and an excellent swimmer. |
 | **Stegosaurus** | herbivore | 9 m · 4.5 t | Slow and steady; its tail spikes cause terrible bleeding. |
 | **Allosaurus** | carnivore | 9.5 m · 2.3 t | Utah's state fossil, and the Jurassic's apex predator. |
 | **Brontosaurus** | herbivore | 22 m · 15 t | Hatches the size of a dog and grows into a mountain. |
 | **Tyrannosaurus rex** | carnivore | 12 m · 8 t | The hardest bite on the island, crushing through armour, and a nose for carrion at a distance. A fleet hatchling that grows into a slow, quickly tiring crusher (the slowest to grow up). |
-| **Spinosaurus** | carnivore | 14 m · 7 t | The longest hunter: sail-backed, short-legged and slow on land, the best swimmer on the island. Ambushes at the water's edge. |
+Dryosaurus herds are the staple prey of every hunter on the island. Tyrannosaurus
+also roams wild, rarely and almost always alone.
 
-NPC-only: **Camptosaurus** (6 m, the common herding prey everything eats) and
-**Diplodocus** (a rare, gentle 26 m giant with a whip of a tail). Tyrannosaurus
-and Spinosaurus also roam wild, rarely and almost always alone.
+Every dinosaur is modelled in Blender: a sculpted, skinned mesh with a baked
+normal map and ambient occlusion, built by a script from the game's own rig (see
+[Models](#models)).
 
 An island out of time: its animals never shared a coast. Allosaurus, Stegosaurus,
-Dryosaurus, Ceratosaurus, Camptosaurus and the two sauropods roamed the Late
-Jurassic Morrison Formation, about 150 million years ago. Utahraptor hunted Utah's
-Cedar Mountain Formation early in the Cretaceous. Spinosaurus waded the rivers of
-North Africa (Kem Kem and Bahariya) 99–93 million years ago, and Tyrannosaurus rex
-was among the very last dinosaurs, in the Hell Creek Formation 68–66 million years
-ago. Allosaurus is still Utah's state fossil.
+Dryosaurus and Brontosaurus roamed the Late Jurassic Morrison Formation, about 150
+million years ago. Utahraptor hunted Utah's Cedar Mountain Formation early in the
+Cretaceous, and Tyrannosaurus rex was among the very last dinosaurs, in the Hell
+Creek Formation 68–66 million years ago. Allosaurus is still Utah's state fossil.
 
 ### The island
 
@@ -352,7 +351,8 @@ URL parameters, handy for sharing a moment or testing:
 
 | Param | Effect |
 | --- | --- |
-| `?species=<id>` | skip the menu and hatch as that species (`dryosaurus`, `utahraptor`, `ceratosaurus`, `stegosaurus`, `allosaurus`, `brontosaurus`, `tyrannosaurus`, `spinosaurus`) |
+| `?species=<id>` | skip the menu and hatch as that species (`dryosaurus`, `utahraptor`, `stegosaurus`, `allosaurus`, `brontosaurus`, `tyrannosaurus`) |
+| `?models=procedural` | the old procedural dinosaur meshes instead of the Blender models |
 | `?growth=0..1` | starting growth for `?species` |
 | `?creative=1` | with `?species`: Creative mode (full grown, can't be hurt, never saved) |
 | `?pos=x,z` | spawn position in metres |
@@ -431,6 +431,38 @@ there is one and otherwise falls back to the global install.
 Software rendering is slow (about 1–3 fps), so the smoke tests fast-forward game
 time through the `window.__underfern` test hook instead of waiting on frames.
 
+## Models
+
+The dinosaurs are built in Blender by a script, `tools/blender/build_dinos.py`,
+and shipped as one GLB per species in `assets/dinos/` (about 1.5–2 MB each). The
+game's procedural rig still animates them: each model is skinned to the same
+bones, by name.
+
+For each species the script:
+
+1. Takes the game's rig and its old procedural mesh as a block-in.
+2. Fuses body, legs and arms into one surface with a voxel remesh, and fills the
+   creases where the limbs meet the body.
+3. Sculpts the anatomy: thigh, calf and tail-base muscle, neck bands, brow
+   ridges, cheekbones, jaw muscle, the antorbital hollow, ribs, belly and throat
+   folds, scutes, osteoderms and wrinkle rings.
+4. Decimates the sculpt, mirror-symmetric, to two levels of detail.
+5. Bakes the full sculpt into a normal map and ambient occlusion with Cycles.
+6. Carries over bone weights and skin masks from the old mesh, and exports a
+   GLB.
+
+To rebuild them you need Blender 4.2 or later, or its Python module
+(`pip install bpy`, Python 3.13):
+
+```sh
+node tools/blender/export-reference.mjs tools/blender/ref
+python tools/blender/build_dinos.py --ref tools/blender/ref --out assets/dinos --preview tools/blender/preview
+# or: blender -b -P tools/blender/build_dinos.py -- --ref tools/blender/ref --out assets/dinos
+```
+
+`--ids tyrannosaurus …` builds just some species. `--preview` writes Cycles
+renders of each sculpt for review. All six take about four minutes.
+
 ## How it works
 
 Plain ES modules under `src/`, loaded by `index.html` through an import map:
@@ -456,7 +488,8 @@ Plain ES modules under `src/`, loaded by `index.html` through an import map:
   - `atmosphere.js`: fireflies, light shafts, peak wisps and cave fungi
   - `impacts.js`: the blood, grit and dust that blows throw off
 - `creatures/`:
-  - species data and the procedural skinned dinosaur models
+  - species data, the rig and its procedural animation (`dinoModel.js`), and the
+    Blender models it drives (`dinoAssets.js`, `assets/dinos/`)
   - the shared survival simulation (`creature.js`)
   - AI brains with sight, hearing and smell
   - the ecosystem that spawns herds and packs around you and turns the dead into

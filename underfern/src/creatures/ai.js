@@ -37,7 +37,7 @@ const WALK = 0.45;
 const JOG = 0.8;
 const TROT = 1;
 
-const DEFENDERS = new Set(["stegosaurus", "diplodocus", "brontosaurus"]);
+const DEFENDERS = new Set(["stegosaurus", "brontosaurus"]);
 
 // Hunting style per carnivore: chase = distance at which a stalk turns into a
 // sprint, crouch = distance inside which it creeps, callP = chance of a roar
@@ -48,12 +48,9 @@ const DEFENDERS = new Set(["stegosaurus", "diplodocus", "brontosaurus"]);
 // is backed away from, not fought).
 const HUNT_STYLE = {
   utahraptor: { chase: 38, crouch: 55, callP: 0.55, chaseTime: 22, ambush: false },
-  ceratosaurus: { chase: 22, crouch: 60, callP: 0.4, chaseTime: 14, ambush: true },
   allosaurus: { chase: 30, crouch: 50, callP: 0.8, chaseTime: 17, ambush: false },
   // A stalker that rarely announces itself: one short, explosive rush, then it tires.
   tyrannosaurus: { chase: 24, crouch: 45, callP: 0.35, chaseTime: 11, ambush: true },
-  // A long, patient creep at the water's edge; narrow fishing jaws aren't for armoured giants.
-  spinosaurus: { chase: 20, crouch: 75, callP: 0.2, chaseTime: 9, ambush: true, water: true, bigPrey: 0.45 },
 };
 const DEFAULT_STYLE = { chase: 30, crouch: 50, callP: 0.5, chaseTime: 16, ambush: false };
 
@@ -1085,7 +1082,6 @@ export class Brain {
     if (hpF < 0.35) return false;
     // Cornered, exhausted, or with enough of the herd around: kick back.
     if (this._cornered || num(c.stamina, 100) < 8) return true;
-    if (c.species.id === "camptosaurus" && this._herdN >= 3 && massOf(atk) < massOf(c) * 1.6) return this._defendRoll < 0.55;
     return false;
   }
 

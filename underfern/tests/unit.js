@@ -26,6 +26,8 @@ import { ThirdPersonCamera } from "../src/player/camera.js";
 import { speciesSilhouette, normalizeSettings, STYLES, GRADES } from "../src/ui/menu.js";
 import { StorybookPass, STORY } from "../src/world/storybook.js";
 import { LOOK, STORY_GRADES, setStoryGrade } from "../src/world/look.js";
+import { createDinoModel, loadDinoModels, exportDinoReference } from "../src/creatures/dinoModel.js";
+import { getDinoAsset } from "../src/creatures/dinoAssets.js";
 
 /* --- Tiny harness --------------------------------------------------------- */
 
@@ -1078,7 +1080,7 @@ const str = (v) => typeof v === "string" && v.trim().length > 0;
 
 test("species: every SpeciesDef carries the full contract with sane values", () => {
   const ids = Object.keys(SPECIES);
-  assert(ids.length >= 10, `expected ≥ 10 species, got ${ids.length}`);
+  assert(ids.length === 6, `expected 6 species, got ${ids.length}`);
   for (const id of ids) {
     const s = SPECIES[id];
     const at = `[${id}]`;
@@ -1125,60 +1127,48 @@ test("species: every SpeciesDef carries the full contract with sane values", () 
   }
 });
 
-test("species: PLAYABLE ids exist (brontosaurus included), NPC-only stay unplayable", () => {
-  assert(PLAYABLE.length >= 8, `expected ≥ 8 playable species, got ${PLAYABLE.length}`);
+test("species: six on the island, all playable: three hunters and three grazers", () => {
+  const six = ["dryosaurus", "utahraptor", "stegosaurus", "allosaurus", "brontosaurus", "tyrannosaurus"];
+  assert.equal(PLAYABLE.length, 6, "playable count:");
   assert.equal(new Set(PLAYABLE).size, PLAYABLE.length, "no duplicates:");
-  for (const id of ["dryosaurus", "utahraptor", "ceratosaurus", "stegosaurus", "allosaurus", "brontosaurus", "tyrannosaurus", "spinosaurus"]) {
-    assert(PLAYABLE.includes(id), `${id} should be playable`);
-  }
+  assert.equal(Object.keys(SPECIES).length, 6, "species on the island:");
+  for (const id of six) assert(PLAYABLE.includes(id), `${id} should be playable`);
   for (const id of PLAYABLE) {
     assert(SPECIES[id], `PLAYABLE id ${id} missing from SPECIES`);
     assert.equal(SPECIES[id].playable, true, `${id}.playable:`);
   }
-  // …and the other way round: a def marked playable must be on the menu.
-  for (const s of Object.values(SPECIES)) if (s.playable) assert(PLAYABLE.includes(s.id), `${s.id} is playable but missing from PLAYABLE`);
-  assert(!SPECIES.gastonia && !PLAYABLE.includes("gastonia"), "Gastonia has left the island");
-  for (const id of ["camptosaurus", "diplodocus"]) {
-    assert(SPECIES[id], `NPC species ${id} missing`);
-    assert.equal(SPECIES[id].playable, false, `${id}.playable:`);
-    assert(!PLAYABLE.includes(id), `${id} must not be playable`);
+  const diet = (d) => PLAYABLE.filter((id) => SPECIES[id].diet === d).length;
+  assert.equal(diet("carnivore"), 3, "carnivores:");
+  assert.equal(diet("herbivore"), 3, "herbivores:");
+  for (const gone of ["gastonia", "ceratosaurus", "spinosaurus", "camptosaurus", "diplodocus"]) {
+    assert(!SPECIES[gone] && !PLAYABLE.includes(gone), `${gone} has left the island`);
   }
-  assert(PLAYABLE.some((id) => SPECIES[id].diet === "carnivore") && PLAYABLE.some((id) => SPECIES[id].diet === "herbivore"), "both diets playable");
+  // Something to hunt and something to fear at every size.
+  const mass = (d) => PLAYABLE.filter((id) => SPECIES[id].diet === d).map((id) => SPECIES[id].mass).sort((x, y) => x - y);
+  assert(mass("herbivore")[0] < 200 && mass("herbivore")[2] > 10000, "grazers from small to giant");
+  assert(mass("carnivore")[0] < 1000 && mass("carnivore")[2] > 5000, "hunters from small to giant");
+  assert(SPECIES.dryosaurus.spawnWeight === Math.max(...PLAYABLE.map((id) => SPECIES[id].spawnWeight)), "Dryosaurus is the commonest prey");
   assert.throws(() => getSpecies("velociraptor"), "getSpecies(unknown)");
 });
 
-test("species: the apex newcomers — Tyrannosaurus and Spinosaurus — are rare, solitary and true to type", () => {
+test("species: Tyrannosaurus is the rare, solitary apex", () => {
   const rex = SPECIES.tyrannosaurus;
-  const spino = SPECIES.spinosaurus;
   const allo = SPECIES.allosaurus;
-  for (const s of [rex, spino]) {
-    const at = `[${s.id}]`;
-    assert.equal(s.diet, "carnivore", `${at} diet:`);
-    assert.equal(s.social, "solo", `${at} social:`);
-    assert(/Cretaceous/.test(s.era), `${at} era should name its age: ${s.era}`);
-    assert(s.spawnWeight > 0 && s.spawnWeight < allo.spawnWeight, `${at} rarer than Allosaurus (${s.spawnWeight})`);
-    assert(s.maxAlive >= 1 && s.maxAlive <= 2, `${at} maxAlive ${s.maxAlive}`);
-    assert(s.mass > allo.mass * 1.8, `${at} big enough that a grown Allosaurus gives way`);
-    assert(s.length > allo.length, `${at} longer than Allosaurus`);
-    assert(s.body.plan === "biped" && s.body.arms && s.body.hind, `${at} a biped body with arms`);
-  }
+  assert.equal(rex.diet, "carnivore", "diet:");
+  assert.equal(rex.social, "solo", "social:");
+  assert(/Cretaceous/.test(rex.era), `era should name its age: ${rex.era}`);
+  assert(rex.spawnWeight > 0 && rex.spawnWeight < allo.spawnWeight, `rarer than Allosaurus (${rex.spawnWeight})`);
+  assert(rex.maxAlive >= 1 && rex.maxAlive <= 2, `maxAlive ${rex.maxAlive}`);
+  assert(rex.mass > allo.mass * 1.8, "big enough that a grown Allosaurus gives way");
+  assert(rex.length > allo.length, "longer than Allosaurus");
+  assert(rex.body.plan === "biped" && rex.body.arms && rex.body.hind, "a biped body with arms");
   assert.equal(rex.name, "Tyrannosaurus rex", "T. rex name:");
-  assert.equal(spino.name, "Spinosaurus", "Spinosaurus name:");
   // T. rex: the hardest bite, armour-crushing, the keenest nose; a slow, tiring sprinter.
   for (const s of Object.values(SPECIES)) if (s !== rex) assert(rex.bite > s.bite, `T. rex should out-bite ${s.id}`);
   assert(rex.pierce > 0 && rex.smell > 1, "T. rex pierces armour and smells far");
   assert(rex.speed.sprint < allo.speed.sprint && rex.turnRate < allo.turnRate, "T. rex is slower and clumsier than Allosaurus");
   assert(rex.juvenileSpeed > 1, "young tyrannosaurs are the fast ones");
   assert.equal(rex.call.kind, "rumble", "T. rex call:");
-  // Spinosaurus: the longest hunter, the best swimmer, a water's-edge ambusher.
-  for (const s of Object.values(SPECIES)) {
-    if (s !== spino) assert(spino.swim >= s.swim && spino.speed.swim >= s.speed.swim, `Spinosaurus should out-swim ${s.id}`);
-    if (s !== spino && s.diet === "carnivore") assert(spino.length > s.length, `Spinosaurus should be longer than ${s.id}`);
-  }
-  assert(spino.waterAffinity > 0.5 && spino.biomes.includes("coast") && spino.biomes.includes("plains"), "Spinosaurus keeps to the coast (and the riverbanks, by its water affinity)");
-  assert(spino.height < allo.height, "Spinosaurus stands lower at the hip than Allosaurus");
-  assert(spino.body.features?.sail, "Spinosaurus carries its sail");
-  assert.equal(spino.call.kind, "rattle", "Spinosaurus call:");
 });
 
 test("menu: every species has its own field-guide plate (none borrows another's drawing)", () => {
@@ -1378,6 +1368,99 @@ test("sky: weather — one deterministic state per day, varied, auroras only aft
     sky.day = keep.day;
     sky.setPhase(keep.phase);
   }
+});
+
+test("models: every species loads its Blender model, skinned to the game's own rig", async () => {
+  const { failed } = await loadDinoModels(PLAYABLE);
+  assert.equal(failed.length, 0, `models that fell back to procedural: ${failed.join(", ")}`);
+  const ATTRS = ["position", "normal", "tangent", "uv", "color", "aSkin", "aSurf", "skinIndex", "skinWeight"];
+  for (const id of PLAYABLE) {
+    const a = getDinoAsset(id);
+    assert(a, `${id}: no Blender model`);
+    assert.equal(a.jointsMissing.length, 0, `${id}: bones the rig doesn't have:`);
+    const ref = exportDinoReference(id);
+    const nb = ref.bones.length;
+    // The same animal as the reference: its bounding box within a few percent.
+    const box = (arr) => {
+      const lo = [Infinity, Infinity, Infinity];
+      const hi = [-Infinity, -Infinity, -Infinity];
+      for (let i = 0; i < arr.length; i += 3) for (let k = 0; k < 3; k++) {
+        lo[k] = Math.min(lo[k], arr[i + k]);
+        hi[k] = Math.max(hi[k], arr[i + k]);
+      }
+      return hi.map((h, k) => h - lo[k]);
+    };
+    const want = box(ref.lod[0].position);
+    for (const [li, g] of a.lods.entries()) {
+      const at = `[${id} lod${li}]`;
+      for (const k of ATTRS) assert(g.attributes[k], `${at} missing ${k}`);
+      assert.equal(g.attributes.aSurf.itemSize, 3, `${at} aSurf (roughness, glint, occlusion):`);
+      const n = g.attributes.position.count;
+      const W = g.attributes.skinWeight.array;
+      const J = g.attributes.skinIndex.array;
+      const S = g.attributes.aSurf.array;
+      let bad = 0;
+      let occluded = 0;
+      for (let v = 0; v < n; v++) {
+        const sum = W[v * 4] + W[v * 4 + 1] + W[v * 4 + 2] + W[v * 4 + 3];
+        if (Math.abs(sum - 1) > 1e-3 || J[v * 4] >= nb || J[v * 4 + 1] >= nb || J[v * 4 + 2] >= nb || J[v * 4 + 3] >= nb) bad++;
+        assert(S[v * 3 + 2] >= 0 && S[v * 3 + 2] <= 1.001, `${at} occlusion out of range at ${v}: ${S[v * 3 + 2]}`);
+        if (S[v * 3 + 2] < 0.6) occluded++;
+      }
+      assert.equal(bad, 0, `${at} vertices with bad skin weights:`);
+      assert(occluded > n * 0.02, `${at} baked occlusion should darken folds and the underside (${occluded} of ${n})`);
+      const got = box(g.attributes.position.array);
+      for (let k = 0; k < 3; k++) assert(Math.abs(got[k] / want[k] - 1) < 0.12, `${at} size on axis ${k}: ${got[k].toFixed(2)} vs reference ${want[k].toFixed(2)}`);
+    }
+    const t0 = a.lods[0].index.count / 3;
+    const t1 = a.lods[1].index.count / 3;
+    assert(t1 < t0 * 0.4, `[${id}] LOD1 should be much lighter: ${t1} vs ${t0}`);
+    assert(t0 < 26000, `[${id}] LOD0 within budget: ${t0} triangles`);
+    assert(a.normalMap && a.normalMap.image && a.normalMap.image.width >= 512, `[${id}] a baked normal map`);
+    // Skinned like the reference: each vertex mostly follows the bone its
+    // nearest reference vertex follows (the fused joins blend a little).
+    const g = a.lods[0];
+    const P = g.attributes.position.array;
+    const RP = ref.lod[0].position;
+    const dom = (Wa, Ja, v) => {
+      let b = 0;
+      for (let k = 1; k < 4; k++) if (Wa[v * 4 + k] > Wa[v * 4 + b]) b = k;
+      return Ja[v * 4 + b];
+    };
+    let agree = 0;
+    let tested = 0;
+    for (let v = 0; v < g.attributes.position.count; v += 7) {
+      let best = Infinity;
+      let bi = 0;
+      for (let r = 0; r < RP.length / 3; r++) {
+        const dx = RP[r * 3] - P[v * 3];
+        const dy = RP[r * 3 + 1] - P[v * 3 + 1];
+        const dz = RP[r * 3 + 2] - P[v * 3 + 2];
+        const d = dx * dx + dy * dy + dz * dz;
+        if (d < best) {
+          best = d;
+          bi = r;
+        }
+      }
+      tested++;
+      if (dom(g.attributes.skinWeight.array, g.attributes.skinIndex.array, v) === dom(ref.lod[0].weights, ref.lod[0].joints, bi)) agree++;
+    }
+    assert(agree / tested > 0.8, `[${id}] skin weights should follow the reference's bones: ${((agree / tested) * 100).toFixed(0)}% agree`);
+    // A live model uses it, with its normal map, and animates.
+    const m = createDinoModel(id, { seed: 5 });
+    try {
+      assert.equal(m.stats.source, "blender", `[${id}] model source:`);
+      assert(m._mat.normalMap === a.normalMap, `[${id}] the skin material wears the normal map`);
+      m.update(0.1, { speed: 3 });
+      m.update(0.1, { speed: 3, action: "bite", actionT: 0.5 });
+      const hs = m.getHitSpheres();
+      assert(hs.length > 4 && hs.every((h) => Number.isFinite(h.x + h.y + h.z + h.r)), `[${id}] hit spheres`);
+    } finally {
+      m.dispose();
+    }
+  }
+  const raptor = getDinoAsset("utahraptor");
+  assert(raptor.feathers && raptor.feathers.attributes.uv, "the raptor keeps its feathers");
 });
 
 test("creature: metabolism drains food/water at the species rate (NPCs ×0.35)", () => {
@@ -1624,7 +1707,7 @@ test("combat: bleed and crush buildup fill with hits, burst when full, and drain
   const eco = w.ecosystem;
   const p = landSpot(33);
   const a = eco.spawn("utahraptor", p.x, p.z, { growth: 1 });
-  const v = eco.spawn("camptosaurus", p.x + 10, p.z, { growth: 1 });
+  const v = eco.spawn("dryosaurus", p.x + 10, p.z, { growth: 1 });
   a.brain = v.brain = null;
   try {
     v.receiveHit(a, 5, "bite", 0, 0, 1, 60, 0);
@@ -1699,14 +1782,11 @@ test("ecosystem: rare apex species never exceed maxAlive in the wild (a player o
     return k;
   };
   try {
-    for (const id of ["spinosaurus", "tyrannosaurus"]) for (const c of wild(id)) eco.remove(c);
-    assert(picks("coast", "spinosaurus") > 0, "a Spinosaurus can turn up when none is about");
+    for (const c of wild("tyrannosaurus")) eco.remove(c);
     assert(picks("forest", "tyrannosaurus") > 0, "a T. rex can turn up when none is about");
-    const me = eco.spawn("spinosaurus", p.x, p.z, { growth: 0, isPlayer: true });
+    const me = eco.spawn("tyrannosaurus", p.x, p.z, { growth: 0, isPlayer: true });
     spawned.push(me);
-    assert(picks("coast", "spinosaurus") > 0, "the player's own kind doesn't use up the wild one");
-    spawned.push(eco.spawn("spinosaurus", p.x + 40, p.z, { growth: 1 }));
-    assert.equal(picks("coast", "spinosaurus"), 0, "with one Spinosaurus about, no second:");
+    assert(picks("forest", "tyrannosaurus") > 0, "the player's own kind doesn't use up the wild ones");
     spawned.push(eco.spawn("tyrannosaurus", p.x - 40, p.z, { growth: 1 }));
     assert(picks("forest", "tyrannosaurus") > 0, "T. rex allows a second");
     spawned.push(eco.spawn("tyrannosaurus", p.x - 40, p.z + 40, { growth: 1 }));
@@ -1718,7 +1798,7 @@ test("ecosystem: rare apex species never exceed maxAlive in the wild (a player o
   }
 });
 
-test("ai: a Spinosaurus backs away from a big herbivore that turns on it; a T. rex fights back", () => {
+test("ai: a T. rex fights back against a Brontosaurus that strikes it", () => {
   const w = getWorld();
   const eco = w.ecosystem;
   const p = landSpot(11);
@@ -1729,21 +1809,12 @@ test("ai: a Spinosaurus backs away from a big herbivore that turns on it; a T. r
     made.push(c);
     return c;
   };
-  // One blow from `foe`, then a moment for `c` to think it over.
-  const struck = (c, foe) => {
-    c.takeDamage(30, foe, "tail");
-    for (let i = 0; i < 4; i++) c.brain.update(0.05);
-    return { state: c.brain.state, target: c.brain.target };
-  };
   try {
     const bronto = at("brontosaurus", 0, 14, true);
-    const campto = at("camptosaurus", -40, 0, true);
-    let r = struck(at("spinosaurus", 0, 0), bronto);
-    assert.equal(r.state, "flee", "Spinosaurus struck by a Brontosaurus:");
-    r = struck(at("spinosaurus", -40, 10), campto);
-    assert(r.state === "hunt" && r.target === campto, `Spinosaurus should turn on a Camptosaurus that strikes it, got ${r.state}`);
-    r = struck(at("tyrannosaurus", 30, 0), bronto);
-    assert(r.state === "hunt" && r.target === bronto, `T. rex should fight back against a Brontosaurus, got ${r.state}`);
+    const rex = at("tyrannosaurus", 30, 0);
+    rex.takeDamage(30, bronto, "tail");
+    for (let i = 0; i < 4; i++) rex.brain.update(0.05);
+    assert(rex.brain.state === "hunt" && rex.brain.target === bronto, `T. rex should fight back against a Brontosaurus, got ${rex.brain.state}`);
   } finally {
     for (const c of made) eco.remove(c);
   }
@@ -1855,11 +1926,11 @@ test("ai: the herd defends its player, its leader waits and comes back when call
       Object.assign(m, { food: 100, water: 100 });
       m.brain._tiredUntil = w.time + 1e6;
     }
-    const quarry = eco.spawn("camptosaurus", raptor.position.x + 14, raptor.position.z, { growth: 1 });
+    const quarry = eco.spawn("dryosaurus", raptor.position.x + 14, raptor.position.z, { growth: 1 });
     quarry.brain = null;
     made.push(quarry);
     think(pack, 4);
-    assert(!pack.some((m) => m.brain.target === quarry), "a full pack leaves the Camptosaurus alone at first");
+    assert(!pack.some((m) => m.brain.target === quarry), "a full pack leaves the Dryosaurus alone at first");
     quarry.takeDamage(8, raptor, "bite");
     think(pack);
     assert(pack.some((m) => m.brain.state === "hunt" && m.brain.target === quarry), "once the player bites, the pack hunts its quarry, hungry or not");
@@ -2020,12 +2091,12 @@ test("ecosystem: query finds the living within a radius", () => {
   const w = getWorld();
   const eco = w.ecosystem;
   const p = landSpot(7);
-  const a = eco.spawn("camptosaurus", p.x, p.z, { growth: 1 });
-  const b = eco.spawn("camptosaurus", p.x + 30, p.z, { growth: 1 });
+  const a = eco.spawn("dryosaurus", p.x, p.z, { growth: 1 });
+  const b = eco.spawn("dryosaurus", p.x + 30, p.z, { growth: 1 });
   try {
     const near = eco.query(p.x, p.z, 10);
     assert(near.includes(a) && !near.includes(b), "query radius 10 m");
-    const wide = eco.query(p.x, p.z, 40, (c) => c.species.id === "camptosaurus");
+    const wide = eco.query(p.x, p.z, 40, (c) => c.species.id === "dryosaurus");
     assert(wide.includes(a) && wide.includes(b), "query radius 40 m with a filter");
   } finally {
     eco.remove(a);

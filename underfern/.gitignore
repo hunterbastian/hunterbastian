@@ -6,3 +6,8 @@ tests/out/
 # local tooling
 node_modules/
 .vercel/
+
+# Blender build intermediates (README, "Models")
+tools/blender/ref/
+tools/blender/preview/
+tools/blender/__pycache__/

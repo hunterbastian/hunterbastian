@@ -224,9 +224,18 @@ const SUITES = [
           });
           expect(look.style === "story" && look.post === "StorybookPass" && look.story === 1, `a first visit should open in Storybook, got ${JSON.stringify(look)}`);
           expect(look.desat > 0.2, `…graded Dark fantasy, got ${JSON.stringify(look)}`);
+          // The island's animals wear their Blender models (assets/dinos), not the procedural meshes.
+          const models = await page.evaluate(() => {
+            const out = {};
+            for (const c of __underfern.world.ecosystem.creatures) out[c.species.id + ":" + c.model.stats.source] = (out[c.species.id + ":" + c.model.stats.source] || 0) + 1;
+            return out;
+          });
+          const keys = Object.keys(models);
+          expect(keys.length > 0 && keys.every((k) => k.endsWith(":blender")), `every animal should use its Blender model, got ${JSON.stringify(models)}`);
           await frames(page, 2);
           await shot(page, "title");
           await expectClean(page, errors);
+          return `models: ${keys.join(" ")}`;
         },
       },
       {
@@ -258,7 +267,7 @@ const SUITES = [
             intro: document.querySelector(".menu .species__intro").textContent.trim(),
           }));
           const WORDS = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve"];
-          expect(s.cards >= 5, `expected the playable species as cards, found ${s.cards}`);
+          expect(s.cards === 6, `expected the six playable species as cards, found ${s.cards}`);
           expect(s.intro.startsWith(`${WORDS[s.cards] ?? s.cards} animals`), `the intro should count the ${s.cards} cards: "${s.intro}"`);
           await frames(page, 2);
           await shot(page, "title-species");

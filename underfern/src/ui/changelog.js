@@ -4,6 +4,18 @@
 /** @type {{ v: string, date: string, title: string, notes: string[] }[]} */
 export const CHANGELOG = [
   {
+    v: "0.23",
+    date: "2026-11-08",
+    title: "Made in Blender",
+    notes: [
+      "Every dinosaur is now modelled in Blender: one sculpted body that legs and arms grow out of, with muscle, brow ridges, cheekbones, ribs, folds and wrinkles.",
+      "Baked shading carries the sculpt's fine detail, and soft shadow in every fold, under the belly and between the legs.",
+      "Six species now, three hunters and three grazers: Tyrannosaurus, Allosaurus and Utahraptor; Brontosaurus, Stegosaurus and Dryosaurus.",
+      "Ceratosaurus, Spinosaurus, Camptosaurus and Diplodocus have left the island. A saved life as one of them is let go.",
+      "Dryosaurus herds are the staple prey now, and the hunters turn up a little more often.",
+    ],
+  },
+  {
     v: "0.22",
     date: "2026-11-08",
     title: "Dark fantasy",

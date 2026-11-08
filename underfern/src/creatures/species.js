@@ -41,18 +41,6 @@ const THEROPOD_FOOT = {
   claw: 0.3, // claw length as a fraction of the middle toe
 };
 
-// Spinosaurid foot: long, widely splayed toes with low, flat claws
-// (a broad footprint for soft river margins).
-const WADER_FOOT = {
-  ...THEROPOD_FOOT,
-  toes: [
-    { yaw: -0.38, len: 0.88, r: 1.0 },
-    { yaw: 0.02, len: 1.0, r: 1.05 },
-    { yaw: 0.42, len: 0.86, r: 1.0 },
-  ],
-  claw: 0.22,
-};
-
 const RAPTOR_FOOT = {
   kind: "raptor",
   toes: [
@@ -150,10 +138,10 @@ export const SPECIES = {
     juvenileScale: 0.3,
     swim: 0.35,
     social: "herd",
-    groupSize: [3, 6],
+    groupSize: [3, 7],
     aggression: 0.05,
     perception: 110,
-    spawnWeight: 1.2,
+    spawnWeight: 2.2, // the staple prey of every hunter on the island
     biomes: ["plains", "forest", "coast"],
     call: { kind: "chirp", pitch: 540, duration: 0.45 },
     colors: {
@@ -251,7 +239,7 @@ export const SPECIES = {
     groupSize: [2, 4],
     aggression: 0.7,
     perception: 95,
-    spawnWeight: 0.55,
+    spawnWeight: 0.75,
     biomes: ["forest", "plains"],
     call: { kind: "shriek", pitch: 300, duration: 1.0 },
     colors: {
@@ -317,103 +305,6 @@ export const SPECIES = {
     },
   },
 
-  ceratosaurus: {
-    id: "ceratosaurus",
-    name: "Ceratosaurus",
-    diet: "carnivore",
-    playable: true,
-    tagline: "Horned ambusher of the wet woods and riverbanks.",
-    description:
-      "A deep-tailed, horn-nosed predator with a ridge of bony scutes down its back and long bladed teeth. " +
-      "It swims better than any hunter its size: stalk the shallows, strike from the water and drag prey in after you.",
-    era: "Late Jurassic · Morrison Formation",
-    length: 7,
-    height: 1.9,
-    mass: 900,
-    health: 560,
-    bite: 52,
-    biteCooldown: 1.1,
-    biteRange: 1.4,
-    attack: "bite",
-    armor: 0.1,
-    bleed: 2,
-    speed: { walk: 2.3, trot: 6, sprint: 12, crouch: 1.6, swim: 5 },
-    turnRate: 2.8,
-    stamina: { regen: 9, sprintDrain: 8 },
-    metabolism: { hunger: 4.6, thirst: 4.2 },
-    growthMinutes: 27,
-    juvenileScale: 0.28,
-    swim: 0.9,
-    social: "solo",
-    groupSize: [1, 2],
-    aggression: 0.65,
-    perception: 85,
-    spawnWeight: 0.45,
-    biomes: ["forest", "coast"],
-    call: { kind: "roar", pitch: 140, duration: 1.6 },
-    colors: {
-      eye: "#d0a032",
-      morphs: [
-        { base: "#6b6250", dorsal: "#33302a", belly: "#bfb394", pattern: "#26231e", light: "#d4c8a6", accent: "#b84a2a" },
-        { base: "#5e6450", dorsal: "#2f342a", belly: "#b8b896", pattern: "#22261e", light: "#cfcfaa", accent: "#c25a2c" },
-        { base: "#7a5f48", dorsal: "#3e2e22", belly: "#c8b190", pattern: "#2a1f17", light: "#dccaa8", accent: "#a83a26" },
-      ],
-      pattern: { bands: [1.6, 0.15, 2.2], spots: [0, 0.6], stripe: [0, 0, 0], dorsal: 0.85, mottle: 0.25 },
-    },
-    body: {
-      plan: "biped",
-      scaleTile: 0.4,
-      trunk: [
-        [-3.75, 1.66, 0.012, 0.02, 0.02],
-        [-3.25, 1.71, 0.035, 0.08, 0.08, 2, -0.3],
-        [-2.45, 1.8, 0.07, 0.19, 0.19, 2, -0.35],
-        [-1.5, 1.9, 0.13, 0.27, 0.29, 2, -0.3],
-        [-0.65, 1.99, 0.23, 0.3, 0.44, 2, -0.15],
-        [0.0, 2.05, 0.31, 0.31, 0.56],
-        [0.52, 2.03, 0.36, 0.29, 0.74, 2, 0.12],
-        [1.02, 1.99, 0.35, 0.28, 0.72, 2, 0.12],
-        [1.42, 2.0, 0.27, 0.25, 0.48],
-        [1.78, 2.17, 0.18, 0.18, 0.26],
-        [2.08, 2.38, 0.15, 0.155, 0.19],
-        [2.33, 2.5, 0.14, 0.145, 0.165],
-      ],
-      head: {
-        at: [2.46, 2.43],
-        length: 0.8,
-        pitch: -0.12,
-        stations: [
-          [0.0, 0.29, 0.14, 0.12, -0.1],
-          [0.1, 0.315, 0.155, 0.142, -0.14],
-          [0.22, 0.3, 0.06, 0.13, -0.22],
-          [0.38, 0.265, 0.035, 0.105, -0.3],
-          [0.58, 0.235, 0.034, 0.09, -0.34],
-          [0.78, 0.205, 0.034, 0.08, -0.34],
-          [0.92, 0.155, 0.033, 0.07, -0.28],
-          [0.98, 0.095, 0.03, 0.05, -0.15],
-          [1.0, 0.035, 0.02, 0.024, 0],
-        ],
-        jaw: { hinge: 0.08, depth: [[0, 0.09], [0.15, 0.16], [0.45, 0.12], [0.8, 0.1], [1, 0.045]], width: 0.84 },
-        eye: { u: 0.21, v: 0.2, r: 0.033 },
-        nostril: { u: 0.93, v: 0.09, r: 0.016 },
-        beak: 0,
-        teeth: { upper: 12, lower: 11, length: 0.06, from: 0.28, to: 0.95 },
-      },
-      bones: { tail: 8, neck: 4, spineZ: 0.52, chestZ: 1.05, neckZ: 1.55, tailZ: -0.45 },
-      hind: {
-        x: 0.27, footX: 0.22, footZ: 0.1, thigh: 0.78, shin: 0.76, meta: 0.44, toe: 0.32, metaAngle: 0.42,
-        radii: { top: [0.312, 0.416, 0.416], hip: [0.299, 0.39, 0.377], thigh: [0.243, 0.311, 0.297], knee: [0.108, 0.12, 0.12], calf: [0.106, 0.1, 0.15], ankle: [0.061, 0.064, 0.064], meta: [0.053, 0.055, 0.048], ball: [0.053, 0.053, 0.046] },
-        foot: THEROPOD_FOOT,
-      },
-      arms: {
-        x: 0.24, y: 1.74, z: 1.25, upper: 0.24, fore: 0.15, hand: 0.13,
-        radii: [0.062, 0.042, 0.03],
-        fingers: [{ yaw: -0.22, len: 0.75 }, { yaw: -0.07, len: 1.0 }, { yaw: 0.08, len: 0.95 }, { yaw: 0.22, len: 0.55 }],
-        claw: 0.22,
-      },
-      features: { teeth: true, nasalHorn: true, browBosses: true, scuteRow: true },
-    },
-  },
-
   stegosaurus: {
     id: "stegosaurus",
     name: "Stegosaurus",
@@ -445,7 +336,7 @@ export const SPECIES = {
     groupSize: [2, 4],
     aggression: 0.3,
     perception: 60,
-    spawnWeight: 0.55,
+    spawnWeight: 0.75,
     biomes: ["plains", "forest"],
     call: { kind: "bellow", pitch: 90, duration: 2.0 },
     colors: {
@@ -540,7 +431,7 @@ export const SPECIES = {
     groupSize: [1, 1],
     aggression: 0.85,
     perception: 100,
-    spawnWeight: 0.35,
+    spawnWeight: 0.55,
     biomes: ["plains", "forest"],
     call: { kind: "roar", pitch: 75, duration: 2.2 },
     colors: {
@@ -644,7 +535,7 @@ export const SPECIES = {
     aggression: 0.8,
     perception: 115,
     smell: 1.5, // huge olfactory bulbs
-    spawnWeight: 0.07,
+    spawnWeight: 0.1,
     biomes: ["forest", "plains"],
     // A closed-mouth boom under a growl; open / lift / swell shape the call pose (defaults 1 / 1 / 0).
     call: { kind: "rumble", pitch: 30, duration: 3.4, open: 0.65, lift: 0.3, swell: 0.06 },
@@ -727,332 +618,6 @@ export const SPECIES = {
     },
   },
 
-  spinosaurus: {
-    id: "spinosaurus",
-    name: "Spinosaurus",
-    diet: "carnivore",
-    playable: true,
-    tagline: "A sail above the shallows, a trap of teeth below.",
-    description:
-      "The longest hunter on the island: a crocodile's snout, a sail of skin over its spines and a tail built like an oar. " +
-      "Short-legged and slow on land, unmatched in water. Wait where the herds come down to drink, and leave the armoured giants to the tyrant.",
-    era: "Mid-Cretaceous · Kem Kem and Bahariya, 99–93 Ma",
-    length: 14,
-    height: 2.3,
-    mass: 7000,
-    health: 2600,
-    bite: 95,
-    biteCooldown: 1.1,
-    biteRange: 1.6,
-    attack: "bite",
-    armor: 0.1,
-    bleed: 3, // deep conical punctures
-    speed: { walk: 2.0, trot: 4.6, sprint: 7.8, crouch: 1.4, swim: 5.6 },
-    turnRate: 1.5,
-    stamina: { regen: 8, sprintDrain: 11 },
-    metabolism: { hunger: 3.8, thirst: 3.2 },
-    growthMinutes: 42,
-    juvenileScale: 0.17,
-    swim: 0.95, // the best swimmer on the island
-    swimDepth: 1.15, // rides low: back and sail out, snout at the surface
-    waterAffinity: 0.85,
-    maxAlive: 1,
-    social: "solo",
-    groupSize: [1, 1],
-    aggression: 0.6,
-    perception: 105,
-    spawnWeight: 0.12,
-    biomes: ["coast", "plains"],
-    call: { kind: "rattle", pitch: 100, duration: 2.2, lift: 0.55 }, // lift: the long neck rises only part way
-    colors: {
-      eye: "#c2a640",
-      morphs: [
-        { base: "#6e6a50", dorsal: "#3b3a2c", belly: "#cbc2a0", pattern: "#2b2a21", light: "#d9d0ac", accent: "#b6532e" }, // river olive, rust sail band
-        { base: "#87725a", dorsal: "#51412f", belly: "#d8c8a6", pattern: "#36291e", light: "#e6d7b6", accent: "#c8963c" }, // sand and umber, ochre band
-        { base: "#5d655f", dorsal: "#333a37", belly: "#c3c3ad", pattern: "#242927", light: "#d3d3be", accent: "#8f3a2c" }, // slate, oxblood band
-      ],
-      // Crocodile-like cross-bands (they run up the sail as bars), light dappling, a dark back.
-      // No stripe: one at rest-normal y ≈ 0 would flood the whole sail.
-      pattern: { bands: [1.0, 0.52, 2.6], spots: [0.25, 0.63], stripe: [0, 0, 0], dorsal: 0.82, mottle: 0.3 },
-    },
-    body: {
-      plan: "biped",
-      scaleTile: 0.55,
-      swimNeck: 0.05, // per-neck-bone pitch while swimming (default -0.12 lifts the head; this keeps it low)
-      trunk: [
-        // Paddle tail: tall neural spines and long chevrons, laterally flattened (square < 2 pinches top and bottom).
-        [-7.35, 1.56, 0.01, 0.02, 0.02],
-        [-6.9, 1.64, 0.026, 0.12, 0.1, 1.7],
-        [-6.0, 1.8, 0.055, 0.34, 0.27, 1.6],
-        [-4.8, 2.04, 0.09, 0.5, 0.4, 1.6],
-        [-3.55, 2.3, 0.15, 0.56, 0.47, 1.65],
-        [-2.35, 2.5, 0.25, 0.54, 0.5, 1.8, -0.08],
-        [-1.25, 2.63, 0.38, 0.5, 0.56, 2, -0.1],
-        [-0.5, 2.7, 0.52, 0.46, 0.72, 2, -0.05],
-        // Long, fairly narrow trunk with a deep chest.
-        [0.0, 2.72, 0.58, 0.44, 0.84],
-        [0.75, 2.72, 0.6, 0.42, 1.0, 2, 0.08],
-        [1.5, 2.68, 0.59, 0.4, 1.04, 2, 0.08],
-        [2.2, 2.66, 0.47, 0.36, 0.86, 2, 0.06],
-        // S-curved neck rising gently to a low-held head.
-        [2.75, 2.74, 0.33, 0.3, 0.55],
-        [3.3, 2.94, 0.26, 0.24, 0.38],
-        [3.85, 3.1, 0.215, 0.2, 0.29],
-        [4.4, 3.2, 0.188, 0.18, 0.23],
-        [4.9, 3.24, 0.165, 0.17, 0.2],
-      ],
-      head: {
-        at: [5.04, 3.2],
-        length: 1.52,
-        pitch: -0.14,
-        stations: [
-          [0.0, 0.3, 0.15, 0.13, -0.1],
-          [0.1, 0.31, 0.15, 0.15, -0.16],
-          [0.2, 0.27, 0.07, 0.135, -0.3],
-          [0.29, 0.215, 0.04, 0.105, -0.45],
-          [0.37, 0.235, 0.034, 0.09, -0.72], // the small nasal crest ahead of the eyes
-          [0.45, 0.18, 0.03, 0.08, -0.5],
-          [0.56, 0.138, 0.028, 0.07, -0.35],
-          [0.68, 0.118, 0.026, 0.063, -0.3],
-          [0.79, 0.098, 0.012, 0.054, -0.25], // the notch: narrowest, lip line rises
-          [0.87, 0.112, 0.05, 0.072, -0.15],
-          [0.94, 0.112, 0.07, 0.082, -0.08], // terminal rosette, premaxilla hanging over the jaw tip
-          [0.985, 0.07, 0.05, 0.06, 0],
-          [1.0, 0.028, 0.024, 0.03, 0],
-        ],
-        jaw: { hinge: 0.08, depth: [[0, 0.11], [0.15, 0.17], [0.45, 0.1], [0.75, 0.075], [0.83, 0.075], [0.92, 0.1], [1, 0.045]], width: 0.84 },
-        eye: { u: 0.17, v: 0.24, r: 0.042 },
-        nostril: { u: 0.49, v: 0.135, r: 0.032 }, // retracted to mid-snout, high on the side
-        beak: 0,
-        teeth: {
-          upper: 15, lower: 14, length: 0.1, from: 0.34, to: 0.985,
-          conical: true, rosette: 0.87, // straight round cones; past u 0.87 they splay forward and out
-          size: [[0.34, 0.55], [0.6, 0.95], [0.78, 0.5], [0.84, 0.6], [0.93, 1.45], [0.985, 0.9]], // u → length multiplier
-        },
-      },
-      bones: { tail: 10, neck: 5, spineZ: 0.85, chestZ: 1.75, neckZ: 2.75, tailZ: -0.7 },
-      hind: {
-        x: 0.42, footX: 0.36, footZ: 0.14, thigh: 1.06, shin: 0.9, meta: 0.46, toe: 0.5, metaAngle: 0.46,
-        radii: { top: [0.3, 0.6, 0.6], hip: [0.46, 0.59, 0.56], thigh: [0.37, 0.47, 0.44], knee: [0.2, 0.21, 0.21], calf: [0.19, 0.185, 0.27], ankle: [0.115, 0.12, 0.12], meta: [0.1, 0.102, 0.09], ball: [0.1, 0.1, 0.088] },
-        foot: WADER_FOOT,
-      },
-      arms: {
-        x: 0.36, y: 2.35, z: 2.2, upper: 0.62, fore: 0.44, hand: 0.38,
-        radii: [0.13, 0.085, 0.055],
-        // Digit I carries the great hooked thumb claw (per-finger claw / r override the hand's).
-        fingers: [{ yaw: -0.24, len: 0.95, claw: 0.66, r: 1.3 }, { yaw: -0.02, len: 1.0, claw: 0.4 }, { yaw: 0.2, len: 0.8, claw: 0.36 }],
-        claw: 0.4,
-      },
-      features: {
-        teeth: true,
-        // A continuous skin membrane over the neural spines.
-        sail: {
-          // [z, height above the back (m)]: a rounded "M", tallest over the posterior dorsals.
-          profile: [[2.85, 0], [2.5, 0.5], [2.1, 1.1], [1.7, 1.4], [1.35, 1.38], [1.0, 1.18], [0.6, 1.38], [0.15, 1.62], [-0.35, 1.5], [-0.9, 1.05], [-1.5, 0.48], [-2.05, 0.12], [-2.45, 0]],
-          spines: 17, // ribs in the membrane
-          thick: 0.075, // half-thickness at the root (m), thinning toward the rim
-          rake: 0.1, // spines lean back (rad)
-        },
-      },
-    },
-  },
-
-  camptosaurus: {
-    id: "camptosaurus",
-    name: "Camptosaurus",
-    diet: "herbivore",
-    playable: false,
-    tagline: "The Morrison's everyday grazer: wary, common and tasty.",
-    description:
-      "A sturdy, beaked ornithopod that grazes on all fours and rises onto its hind legs to run. " +
-      "Its herds are the staple prey of every predator on the island.",
-    era: "Late Jurassic · Morrison Formation",
-    length: 6,
-    height: 1.6,
-    mass: 700,
-    health: 420,
-    bite: 20,
-    biteCooldown: 1.2,
-    biteRange: 1.0,
-    attack: "kick",
-    armor: 0,
-    bleed: 0.8,
-    speed: { walk: 1.7, trot: 4.5, sprint: 9.5, crouch: 1.2, swim: 1.6 },
-    turnRate: 2.6,
-    stamina: { regen: 10, sprintDrain: 9 },
-    metabolism: { hunger: 4.0, thirst: 4.2 },
-    growthMinutes: 24,
-    juvenileScale: 0.25,
-    swim: 0.3,
-    social: "herd",
-    groupSize: [3, 7],
-    aggression: 0.1,
-    perception: 90,
-    spawnWeight: 1.6,
-    biomes: ["plains", "forest"],
-    call: { kind: "honk", pitch: 210, duration: 0.8 },
-    colors: {
-      eye: "#3a2616",
-      morphs: [
-        { base: "#827757", dorsal: "#5a5040", belly: "#d1c6a2", pattern: "#463c2e", light: "#e2d6b2", accent: "#9b6f44" },
-        { base: "#76785a", dorsal: "#4e523c", belly: "#cfcca8", pattern: "#3a3d2c", light: "#dedcb8", accent: "#a07a42" },
-        { base: "#8f7a5c", dorsal: "#614e3c", belly: "#d8c8a8", pattern: "#4a3a2c", light: "#e8d8b8", accent: "#8a5a38" },
-      ],
-      pattern: { bands: [1.4, 0.45, 2.2], spots: [0.3, 0.62], stripe: [0.3, 0.12, 0.22], dorsal: 0.75, mottle: 0.28 },
-    },
-    body: {
-      plan: "quadruped",
-      scaleTile: 0.32,
-      bipedalSprint: true,
-      trunk: [
-        [-3.2, 1.42, 0.014, 0.018, 0.018],
-        [-2.7, 1.47, 0.04, 0.05, 0.052, 2, -0.2],
-        [-1.95, 1.56, 0.08, 0.11, 0.12, 2, -0.25],
-        [-1.05, 1.67, 0.16, 0.2, 0.23, 2, -0.15],
-        [-0.35, 1.75, 0.26, 0.25, 0.42, 2, -0.05],
-        [0.0, 1.77, 0.3, 0.26, 0.52],
-        [0.5, 1.73, 0.35, 0.26, 0.68, 2, 0.1],
-        [1.02, 1.63, 0.33, 0.24, 0.6, 2, 0.1],
-        [1.45, 1.53, 0.25, 0.21, 0.4],
-        [1.8, 1.55, 0.16, 0.15, 0.2],
-        [2.1, 1.66, 0.115, 0.115, 0.14],
-        [2.33, 1.73, 0.1, 0.1, 0.12],
-      ],
-      head: {
-        at: [2.44, 1.67],
-        length: 0.56,
-        pitch: -0.36,
-        stations: [
-          [0.0, 0.13, 0.08, 0.072, 0],
-          [0.12, 0.148, 0.085, 0.082, -0.08],
-          [0.28, 0.142, 0.032, 0.076, -0.14],
-          [0.48, 0.118, 0.026, 0.058, -0.18],
-          [0.7, 0.095, 0.025, 0.045, -0.16],
-          [0.88, 0.075, 0.025, 0.038, -0.06],
-          [0.97, 0.05, 0.02, 0.03, 0],
-          [1.0, 0.02, 0.01, 0.014, 0],
-        ],
-        jaw: { hinge: 0.1, depth: [[0, 0.06], [0.18, 0.08], [0.55, 0.055], [0.88, 0.035], [1, 0.014]], width: 0.84 },
-        eye: { u: 0.27, v: 0.09, r: 0.024 },
-        nostril: { u: 0.9, v: 0.045, r: 0.013 },
-        beak: 0.18,
-        teeth: null,
-      },
-      bones: { tail: 8, neck: 3, spineZ: 0.5, chestZ: 1.05, neckZ: 1.62, tailZ: -0.4 },
-      hind: {
-        x: 0.22, footX: 0.2, footZ: 0.06, thigh: 0.66, shin: 0.66, meta: 0.36, toe: 0.19, metaAngle: 0.38,
-        radii: { top: [0.26, 0.338, 0.338], hip: [0.247, 0.312, 0.299], thigh: [0.203, 0.243, 0.23], knee: [0.084, 0.09, 0.09], calf: [0.085, 0.083, 0.119], ankle: [0.046, 0.05, 0.05], meta: [0.042, 0.044, 0.04], ball: [0.044, 0.044, 0.038] },
-        foot: ORNITHOPOD_FOOT,
-      },
-      fore: {
-        x: 0.21, y: 1.0, z: 1.42, footX: 0.24, footZ: 1.54, upper: 0.52, fore: 0.44, meta: 0.16, toe: 0.07, metaAngle: -0.08,
-        radii: { top: [0.138, 0.175, 0.175], hip: [0.125, 0.15, 0.15], thigh: [0.098, 0.111, 0.104], knee: [0.062, 0.062, 0.062], calf: [0.062, 0.069, 0.062], ankle: [0.04, 0.044, 0.044], meta: [0.038, 0.038, 0.038], ball: [0.039, 0.039, 0.037] },
-        foot: { ...STUMPY_HAND, toes: STUMPY_HAND.toes.slice(1, 4), pad: false, thumbSpike: true },
-      },
-      features: { beak: true },
-    },
-  },
-
-  diplodocus: {
-    id: "diplodocus",
-    name: "Diplodocus",
-    diet: "herbivore",
-    playable: false,
-    tagline: "A 26-metre giant with a neck for treetops and a whip.",
-    description:
-      "A gentle titan that sweeps its long neck through the canopy while the ground trembles under its feet. " +
-      "It ignores almost everything until it is cornered, when one crack of that whip-like tail can floor a predator.",
-    era: "Late Jurassic · Morrison Formation",
-    length: 26,
-    height: 3.6,
-    mass: 15000,
-    health: 6000,
-    bite: 140,
-    biteCooldown: 2.2,
-    biteRange: 4,
-    attack: "tail",
-    armor: 0.2,
-    bleed: 3,
-    speed: { walk: 1.6, trot: 2.8, sprint: 4.2, crouch: 1.2, swim: 1.5 },
-    turnRate: 0.7,
-    stamina: { regen: 6, sprintDrain: 9 },
-    metabolism: { hunger: 2.4, thirst: 2.8 },
-    growthMinutes: 60,
-    juvenileScale: 0.15,
-    swim: 0.3,
-    social: "herd",
-    groupSize: [2, 4],
-    aggression: 0.15,
-    perception: 80,
-    spawnWeight: 0.18,
-    biomes: ["plains", "forest", "coast"],
-    call: { kind: "bellow", pitch: 45, duration: 3.0 },
-    colors: {
-      eye: "#2e2012",
-      morphs: [
-        { base: "#7a7466", dorsal: "#57524a", belly: "#c9c1ad", pattern: "#46423a", light: "#d8d0bc", accent: "#7a5a40" },
-        { base: "#827058", dorsal: "#5c4c3c", belly: "#cfbea2", pattern: "#4a3c2e", light: "#dccaae", accent: "#6a4a34" },
-        { base: "#6d7262", dorsal: "#4b5044", belly: "#c4c6b0", pattern: "#3c4036", light: "#d4d6c0", accent: "#6e5a44" },
-      ],
-      pattern: { bands: [0.55, 0.45, 3], spots: [0.3, 0.62], stripe: [0, 0, 0], dorsal: 0.6, mottle: 0.32 },
-    },
-    body: {
-      plan: "quadruped",
-      scaleTile: 0.9,
-      trunk: [
-        [-14.02, 1.3, 0.012, 0.012, 0.012],
-        [-12.67, 1.55, 0.026, 0.028, 0.028],
-        [-10.94, 2.0, 0.055, 0.06, 0.06],
-        [-9.02, 2.6, 0.11, 0.13, 0.13],
-        [-7.01, 3.2, 0.19, 0.24, 0.24, 2, -0.1],
-        [-4.99, 3.75, 0.31, 0.37, 0.39, 2, -0.1],
-        [-2.98, 4.15, 0.5, 0.52, 0.58, 2.1],
-        [-1.4, 4.33, 0.78, 0.6, 1.05, 2.2, 0.05],
-        [0, 4.3, 0.98, 0.62, 1.35, 2.2, 0.08],
-        [1.25, 4.18, 1.12, 0.6, 1.7, 2.2, 0.1],
-        [3.15, 4.02, 1.06, 0.58, 1.62, 2.2, 0.1],
-        [4.1, 3.95, 0.84, 0.56, 1.2, 2.1, 0.05],
-        [5.05, 4.15, 0.62, 0.5, 0.78],
-        [6.5, 4.7, 0.44, 0.38, 0.5],
-        [8.1, 5.3, 0.33, 0.28, 0.36],
-        [9.7, 5.82, 0.23, 0.2, 0.25],
-        [11.05, 6.15, 0.15, 0.14, 0.16],
-      ],
-      head: {
-        at: [11.32, 6.13],
-        length: 0.66,
-        pitch: -0.42,
-        stations: [
-          [0.0, 0.15, 0.09, 0.1, 0],
-          [0.14, 0.2, 0.095, 0.112, -0.1],
-          [0.3, 0.16, 0.04, 0.1, -0.08],
-          [0.5, 0.105, 0.03, 0.086, 0],
-          [0.72, 0.085, 0.03, 0.08, 0.04],
-          [0.9, 0.072, 0.03, 0.078, 0.06],
-          [0.98, 0.05, 0.025, 0.068, 0.06],
-          [1.0, 0.02, 0.012, 0.036, 0],
-        ],
-        jaw: { hinge: 0.1, depth: [[0, 0.06], [0.2, 0.065], [0.6, 0.05], [0.92, 0.045], [1, 0.02]], width: 0.86 },
-        eye: { u: 0.25, v: 0.12, r: 0.03 },
-        nostril: { u: 0.2, v: 0.19, r: 0.022, top: true },
-        beak: 0,
-        teeth: { upper: 9, lower: 8, length: 0.035, from: 0.7, to: 0.98, peg: true },
-      },
-      bones: { tail: 12, neck: 8, spineZ: 1.4, chestZ: 3.0, neckZ: 4.6, tailZ: -1.3 },
-      hind: {
-        x: 0.72, footX: 0.76, footZ: 0.1, thigh: 1.78, shin: 1.38, meta: 0.45, toe: 0.24, metaAngle: 0.1,
-        radii: { top: [0.715, 0.91, 0.91], hip: [0.65, 0.806, 0.78], thigh: [0.54, 0.621, 0.594], knee: [0.288, 0.288, 0.288], calf: [0.275, 0.263, 0.312], ankle: [0.198, 0.198, 0.198], meta: [0.187, 0.187, 0.187], ball: [0.2, 0.2, 0.189] },
-        foot: STUMPY_FOOT,
-      },
-      fore: {
-        x: 0.76, y: 3.05, z: 3.95, footX: 0.82, footZ: 4.05, upper: 1.36, fore: 1.1, meta: 0.56, toe: 0.08, metaAngle: -0.03,
-        radii: { top: [0.525, 0.65, 0.65], hip: [0.475, 0.55, 0.55], thigh: [0.364, 0.416, 0.39], knee: [0.25, 0.25, 0.25], calf: [0.237, 0.25, 0.237], ankle: [0.184, 0.184, 0.184], meta: [0.174, 0.174, 0.174], ball: [0.184, 0.184, 0.178] },
-        foot: { kind: "column", toes: [], hallux: false, claw: 0, pad: true, thumbClaw: true },
-      },
-      features: { teeth: true, dorsalSpines: true },
-    },
-  },
-
   brontosaurus: {
     id: "brontosaurus",
     name: "Brontosaurus",
@@ -1084,7 +649,7 @@ export const SPECIES = {
     groupSize: [2, 5],
     aggression: 0.12,
     perception: 70,
-    spawnWeight: 0.7,
+    spawnWeight: 0.8,
     biomes: ["plains", "forest", "coast"],
     call: { kind: "bellow", pitch: 38, duration: 3.4 },
     colors: {
@@ -1095,7 +660,7 @@ export const SPECIES = {
         { base: "#82705d", dorsal: "#5a4b3e", belly: "#d1c2a7", pattern: "#4b3e33", light: "#dccdb2", accent: "#977055" },
         { base: "#6b6b62", dorsal: "#46473f", belly: "#c3c1ae", pattern: "#3a3b33", light: "#d0cfbd", accent: "#7d6c58" },
       ],
-      // No stripes (that's Diplodocus): broad dapples, soft mottling, a dark back.
+      // No stripes: broad dapples, soft mottling, a dark back.
       pattern: { bands: [0, 0.6, 3], spots: [0.55, 0.53], stripe: [0, 0, 0], dorsal: 0.82, mottle: 0.5 },
     },
     body: {
@@ -1104,7 +669,7 @@ export const SPECIES = {
       neckFlexBase: 0.7, // lowers the neck from the shoulders to drink, like a crane's jib
       feedLean: 0.25,
       trunk: [
-        // Whip tail: shorter and heavier than Diplodocus'.
+        // Whip tail: shorter and heavier than a diplodocid's.
         [-10.6, 1.5, 0.014, 0.014, 0.014],
         [-9.5, 1.85, 0.04, 0.042, 0.042],
         [-8.1, 2.42, 0.095, 0.105, 0.105],
@@ -1163,7 +728,8 @@ export const SPECIES = {
   },
 };
 
-export const PLAYABLE = ["dryosaurus", "utahraptor", "ceratosaurus", "stegosaurus", "allosaurus", "brontosaurus", "tyrannosaurus", "spinosaurus"];
+// Three hunters and three grazers, small to giant.
+export const PLAYABLE = ["dryosaurus", "utahraptor", "stegosaurus", "allosaurus", "brontosaurus", "tyrannosaurus"];
 
 /**
  * Look up a species definition.

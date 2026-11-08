@@ -32,7 +32,7 @@ const DOT_EVENT_INTERVAL = 1; // starvation / bleeding "damage" events once a se
 const REST_LOCK = 2; // seconds a hit keeps a creature from lying back down
 const GOOD_SWIMMER = 0.7; // swim ability at which swimming costs no stamina
 const LEG_HEAL_TIME = 70; // seconds a broken leg takes to heal (resting heals ×2)
-const QUADRUPEDS = new Set(["stegosaurus", "diplodocus", "brontosaurus", "camptosaurus"]); // fallback when body.plan is absent
+const QUADRUPEDS = new Set(["stegosaurus", "brontosaurus"]); // fallback when body.plan is absent
 const ATTACK_TYPES = { bite: true, tail: true, kick: true };
 
 // One-shot attack timing: total duration, the moment (0..1) the blow lands,
@@ -425,7 +425,7 @@ export class Creature {
   /**
    * How tall this animal stands (m) at its current size — the headroom it
    * needs to get into a cave or along a tunnel: a little over the hips for
-   * most, more for a Stegosaurus's plates or a Spinosaurus's sail; sauropods
+   * most, more for a Stegosaurus's plates; sauropods
    * duck their necks.
    */
   get standHeight() {

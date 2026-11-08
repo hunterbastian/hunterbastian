@@ -149,6 +149,9 @@ underfern/
   src/world/world.js    INTEGRATION
   src/creatures/species.js  DINO-ART
   src/creatures/dinoModel.js DINO-ART
+  src/creatures/dinoAssets.js DINO-ART the Blender models: GLB reader, rig remap, normal map
+  assets/dinos/*.glb         DINO-ART  one Blender model per species (built by tools/blender/)
+  tools/blender/             DINO-ART  export-reference.mjs + build_dinos.py: the Blender build
   src/creatures/creature.js  SIMULATION
   src/creatures/ecosystem.js SIMULATION
   src/creatures/ai.js        AI
@@ -169,7 +172,7 @@ underfern/
 ## Game design (what we're building)
 
 **Loop.** Title screen with a slow cinematic flight over the island (live world
-behind the menu) → pick one of eight playable species → spawn as a **juvenile** in a
+behind the menu) → pick one of six playable species → spawn as a **juvenile** in a
 safe-ish spot → survive. Keep `food` and `water` up, avoid or fight predators,
 **grow** (≈20–50 real minutes to adulthood when fed and watered). Getting bigger
 makes you stronger and lets you take bigger prey (carnivores) or shrug off
@@ -210,35 +213,30 @@ autosaves to `localStorage` so "Continue" resumes a living character.
   from the distance; herbivores near a carnivore's call get nervous.
 - **Crouch** = slower and harder for AI to notice. **Rest** = lie down to regen
   faster (vulnerable).
-- **Swimming**: water deeper than ~0.8× hip height → swim. Good swimmers
-  (Ceratosaurus, Spinosaurus) are fast in water.
+- **Swimming**: water deeper than ~0.8× hip height → swim (species `swim` and
+  `speed.swim` set how well).
 - **Day/night**: a full day is `TIME.dayLengthSec` (16 min). Nights are dark but
   moonlit; carnivores roam more at night, herbivores rest more.
 
-**Species** (`species.js`). Playable, in menu order:
+**Species** (`species.js`): six, three carnivores and three herbivores, all playable. In menu order:
 
 | id | name | diet | adult length/mass | role |
 | --- | --- | --- | --- | --- |
 | `dryosaurus` | Dryosaurus | herbivore | 3.5 m / 90 kg | tiny, very fast, fragile; herds |
 | `utahraptor` | Utahraptor | carnivore | 6 m / 500 kg | agile pack hunter, bleed bites |
-| `ceratosaurus` | Ceratosaurus | carnivore | 7 m / 900 kg | ambusher, excellent swimmer |
 | `stegosaurus` | Stegosaurus | herbivore | 9 m / 4.5 t | slow, tail-spike swipes cause heavy bleed |
 | `allosaurus` | Allosaurus | carnivore | 9.5 m / 2.3 t | Jurassic apex predator |
 | `brontosaurus` | Brontosaurus | herbivore | 22 m / 15 t | hatches tiny, grows into the biggest thing on the island |
 | `tyrannosaurus` | Tyrannosaurus rex | carnivore | 12 m / 8 t | hardest bite (pierces armour), best nose; slow, tires fast; slowest to grow |
-| `spinosaurus` | Spinosaurus | carnivore | 14 m / 7 t | sail-backed water's-edge ambusher; best swimmer, slow on land |
-
-NPC-only: `camptosaurus` (common herding prey, 6 m / 700 kg) and `diplodocus`
-(gentle 26 m giant, rare, tail whip when threatened). The two apex newcomers also
-spawn wild: rare (`spawnWeight` 0.07 / 0.12), solitary, capped by `maxAlive` (T. rex 2,
-occasionally a pair; Spinosaurus 1, near fresh water and the shore).
+Dryosaurus is the commonest spawn (`spawnWeight` 2.2: the staple prey). T. rex
+spawns wild too: rare (`spawnWeight` 0.1), solitary, capped by `maxAlive` 2
+(occasionally a pair). Ceratosaurus, Spinosaurus, Camptosaurus and Diplodocus
+have left the island (0.23); a saved life of one is let go.
 
 The island is out of time: the Morrison Formation animals (Allosaurus,
-Stegosaurus, Dryosaurus, Ceratosaurus, Camptosaurus, the sauropods; Late
-Jurassic, ~150 Ma) share it with Utahraptor (Cedar Mountain Formation, Utah,
-Early Cretaceous), Spinosaurus (Kem Kem / Bahariya, North Africa, 99–93 Ma) and
-Tyrannosaurus rex (Hell Creek Formation, 68–66 Ma). Allosaurus is Utah's state
-fossil.
+Stegosaurus, Dryosaurus, Brontosaurus; Late Jurassic, ~150 Ma) share it with
+Utahraptor (Cedar Mountain Formation, Utah, Early Cretaceous) and Tyrannosaurus
+rex (Hell Creek Formation, 68–66 Ma). Allosaurus is Utah's state fossil.
 
 ---
 
@@ -771,7 +769,7 @@ more than 90 m from the camera.
 
 ```js
 export const SPECIES;            // { [id]: SpeciesDef }
-export const PLAYABLE;           // ["dryosaurus","utahraptor","ceratosaurus","stegosaurus","allosaurus","brontosaurus","tyrannosaurus","spinosaurus"]
+export const PLAYABLE;           // ["dryosaurus","utahraptor","stegosaurus","allosaurus","brontosaurus","tyrannosaurus"]
 export function getSpecies(id)   // → SpeciesDef (throws on unknown id)
 export function growthScale(species, growth) // → juvenileScale..1 (eased)
 export function growthStage(growth)          // → "juvenile" | "subadult" | "adult"
@@ -814,15 +812,17 @@ export function growthStage(growth)          // → "juvenile" | "subadult" | "a
 (jaw-muscle bulge), `head.eye.fwd` (gaze turned forward), `head.teeth.thick` (round crowns),
 `features.bosses` / `features.nasalBumps` (skull knobs) and `body.juvenile` (`{ legs, head: [length,
 depth, width] }` hatchling proportions, fading linearly with growth) on the T. rex;
-`head.teeth.conical / rosette / size`, `arms.fingers[].claw / r`, `swimNeck` (neck pitch while
-swimming) and `features.sail` (`{ profile: [[z, height]], spines, thick, rake, bones }`: a skinned
-membrane on its own bones that sways, leans out of turns, folds over in death and grows from 45 %
-height) on the Spinosaurus; `colors.pupil` ("slit" | "round").
+`colors.pupil` ("slit" | "round"). The builder still understands `head.teeth.conical / rosette / size`,
+`arms.fingers[].claw / r`, `swimNeck` and `features.sail` (a skinned membrane on its own bones), which
+no current species uses.
 
 ### `creatures/dinoModel.js` (DINO-ART)
 
 ```js
 export function createDinoModel(species, { seed = 1, variant = 0 } = {}) // → DinoModel
+export function loadDinoModels(ids) // → Promise<{ loaded, failed }>: the Blender models (dinoAssets.js); never rejects
+export function prewarmDinoGeometry(ids) // build the procedural meshes now (a no-op for loaded Blender models)
+export function exportDinoReference(id) // tooling: rig, landmarks and procedural mesh as JSON (tools/blender)
 export class DinoModel {
   object;                 // THREE.Group; origin on the ground under the hips; faces +Z; built at ADULT size (m)
   setScale(s)
@@ -843,23 +843,38 @@ export class DinoModel {
                           //   lookYaw,        // head turn, radians (±1)
                           //   hurt            // 0..1 red flash
                           // }
+  stats                   // { triangles: [lod0, lod1], drawCalls, source: "blender" | "procedural" }
   dispose()
 }
 ```
-Procedural, **smooth, organic** meshes on a joint hierarchy (hips → spine → chest →
+**The meshes are made in Blender** (`tools/blender/build_dinos.py`, README "Models") and
+loaded by `creatures/dinoAssets.js` from `assets/dinos/<id>.glb`: an armature named after the
+game's bones, `lod0` and `lod1` skinned meshes (and `feathers` on the Utahraptor), and the
+skin material's normal map (WebP, tangent space, glTF uv; `EXT_texture_webp`). Vertex data:
+POSITION, NORMAL, TANGENT, TEXCOORD_0, COLOR_0 (fixed colours: teeth, claws, eyes), `_SKIN`
+→ `aSkin` (skin palette, pattern mask, accent, scale detail), `_SURF` → `aSurf` (roughness,
+eye glint, **baked ambient occlusion**), JOINTS_0 / WEIGHTS_0 (remapped to the rig by bone
+name). Coordinates are the game's (y up, +z toward the snout, adult metres); the GLB is
+written without the Y-up conversion. `World.create` starts the downloads first and waits
+for them at "Waking the dinosaurs"; a model made before they arrive, a species whose file
+fails, a world built synchronously (unit tests) or `?models=procedural` uses the procedural
+mesh below, which also stays the block-in, weight source and rig for the Blender build.
+The skin shader reads the normal map (on top of its scale bump) and darkens indirect light
+(and 35 % of the direct) by the baked occlusion.
+
+The procedural meshes: **smooth, organic** meshes on a joint hierarchy (hips → spine → chest →
 neck → head/jaw; tail chain; 2 or 4 legs with thigh/shin/foot; arms). Recommended:
 loft the body/neck/tail as one continuous skin along a spine curve from varying
 elliptical cross-sections (plus lofted limbs and a sculpted head/jaw), smooth normals,
 **smooth skin weights** blended across neighbouring bones (organic bending, no
 cracks), one `SkinnedMesh` per dinosaur (one draw call); roughly 6–15k triangles
-(diplodocus up to ~20k). Skin detail via a shared procedural texture/shader (scales,
+(Blender models: ~9–17k at LOD0, ~2.5–4k at LOD1). Skin detail via a shared procedural texture/shader (scales,
 bands/stripes/spots, countershading, darker dorsal, slight sheen on wet), eyes with
 a highlight, teeth on carnivores, claws. Procedural animation:
 gait cycles by distance travelled, tail sway, breathing, head bob, jaw open on
 bite/call, lie down on rest, fall on side when dead. Each species must read
-clearly from a third-person camera (stego plates & thagomizer, the spinosaur sail
-and croc snout, the rex's deep skull, cerato nasal horn, allo brow crests, raptor
-feathers + sickle claw, diplodocus neck). Colour variants per individual (seeded).
+clearly from a third-person camera (stego plates & thagomizer, the rex's deep
+skull, allo brow crests, raptor feathers + sickle claw, the sauropod's neck). Colour variants per individual (seeded).
 
 ### `creatures/creature.js` (SIMULATION)
 
@@ -977,7 +992,7 @@ Herbivores keep a daily round when leading a herd (fresh water at dawn, open pla
 the forest edge at evening, once each per day), graze, drink, herd (cohesion around the leader,
 which may be a full-grown player; defenders with young in the herd form a ring between them
 and a predator, tails out, while the young huddle inside it), rest at night, flee
-from threatening carnivores (bigger ones flee less; Stegosaurus/Diplodocus/Brontosaurus
+from threatening carnivores (bigger ones flee less; Stegosaurus/Brontosaurus
 turn and fight when attacked or cornered). Carnivores roam, hunt when hungry
 (prefer prey they can handle, avoid big herds), eat carcasses, attack the player
 based on aggression/relative size, packs coordinate loosely. Everyone avoids
@@ -1010,11 +1025,11 @@ multiplies its smell range and how far it follows its nose to a carcass (T. rex 
 
 **Hunting styles** (`HUNT_STYLE` per carnivore: stalk → chase distance, creep distance,
 roar odds, chase time, ambush freeze). Allosaurus yields to anything over 1.8× its
-mass, so both newcomers send it off its kill. Water hunters (`style.water`,
-Spinosaurus) prefer quarry that is drinking, wading or swimming, lose interest in
-anything over half their mass (`style.bigPrey`) and back away rather than trade
-blows when a herbivore that big turns on them, and patrol river and lake banks
-(`waterAffinity`): most roams end at a bank, and destinations near fresh water win.
+mass, so a T. rex sends it off its kill. The styles also take `water` (prefer
+quarry that is drinking, wading or swimming) and `bigPrey` (lose interest in
+anything over half their mass, and back away from a herbivore that big that turns
+on them), and species `waterAffinity` sends a hunter's roams to river and lake
+banks; no current species uses them.
 
 ### `player/input.js` (PLAYER)
 

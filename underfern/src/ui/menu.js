@@ -330,25 +330,6 @@ const PLANS = {
     g.near += hindLeg(52, -27, 1, 5);
     g.near += '<path class="sil-line" d="M54.6,-3.4q2.6,-2.6 4,0.2" stroke-width="1.15"/>';
   },
-  ceratosaurus(g) {
-    g.top = 46;
-    g.far += hindLeg(45, -28, 1.04, 6, -3.5) + limb([[66.5, -25.6], [67.6, -21], [70, -20]], [1.9, 1.4]);
-    // A deep, crocodile-like tail: a swimmer's tail.
-    const spine = [
-      [0, -22.5, 0.4, 0.5], [12, -24.8, 1.9, 2.3], [25, -27.2, 3.1, 4.2], [36, -29.2, 4, 6],
-      [46, -29.6, 4.4, 10], [56, -28.8, 4, 11], [64, -28.4, 3.3, 7.8], [70, -31.2, 2.6, 4.3],
-      [74.5, -35.8, 2.2, 2.9], [78.5, -38.2, 2.5, 3], [85, -38.4, 3.1, 3.4], [92, -37.6, 2.3, 2.7],
-      [98, -36.6, 1.2, 1.3], [100, -36.4, 0.2, 0.2],
-    ];
-    for (let i = 0; i < 11; i++) {
-      const x = 22 + i * 4.2;
-      g.body += `<circle cx="${f1(x)}" cy="${f1(backAt(spine, x) + 0.1)}" r="1.1"/>`;
-    }
-    g.body += loft(spine);
-    g.body += poly([[91.6, -39.4], [93.6, -43.6], [95.6, -39.2]]);
-    g.body += poly([[81.4, -40.6], [82.8, -42.8], [84.6, -40.8]]) + eye(84, -39.6);
-    g.near += hindLeg(49, -28, 1.04, 6.2) + limb([[67, -25], [68.6, -20.4], [71.4, -19.4]], [2, 1.5]);
-  },
   stegosaurus(g) {
     g.top = 62;
     g.far += columnLeg(43, -40, 7.6, 2.5) + columnLeg(63, -31, 4.8, -1.2);
@@ -405,64 +386,8 @@ const PLANS = {
     g.body += smoothClosed([[87.6, -40.7], [89, -41.7], [91.4, -41.6], [93, -40.3]]) + eye(91.2, -39.2, 0.75);
     g.near += hindLeg(49.5, -30, 1.08, 7.4) + limb([[70.4, -23.4], [69.6, -19.6], [72.2, -18.2], [73.8, -17.8]], [1.7, 1.25, 0.9]);
   },
-  spinosaurus(g) {
-    // Long and low: short legs, a croc snout held level, a deep oar of a tail,
-    // and the sail — a membrane drawn dim, like the far limbs, over bone-coloured spines.
-    g.top = 37;
-    g.far += hindLeg(49.5, -16.4, 0.6, 4.6, -3) + limb([[67.4, -16.6], [66, -12.6], [69, -11.4], [70.8, -9.4]], [2, 1.5, 1]);
-    const spine = [
-      [0, -11.1, 0.2, 0.2], [9.6, -12.9, 2.4, 1.9], [18.2, -14.6, 3.6, 2.9], [27.1, -16.4, 4, 3.4],
-      [35.7, -17.9, 3.9, 3.6], [43.6, -18.8, 3.6, 4], [52.5, -19.4, 3.1, 6], [57.9, -19.4, 3, 7.1],
-      [63.2, -19.1, 2.9, 7.4], [68.2, -19, 2.6, 6.1], [72.1, -19.6, 2.1, 3.9], [76.1, -21, 1.6, 2.4],
-      [80, -22.1, 1.3, 1.8], [83.9, -22.9, 1.1, 1.4], [88.5, -22.9, 2.1, 1.9], [89.6, -22.75, 2.2, 2.3],
-      [90.8, -22.6, 1.9, 1.4], [92.5, -22.35, 1.75, 0.95], [94.2, -22.1, 1.15, 0.8], [96.8, -21.75, 0.75, 0.62],
-      [98.3, -21.55, 0.85, 1], [99.3, -21.4, 0.55, 0.6], [100, -21.3, 0.2, 0.2],
-    ];
-    // Sail: [x, height above the back] — a rounded "M", tallest over the hips, raked back a little.
-    const sail = [[35.1, 0], [37.9, 0.9], [41.4, 3.2], [45.4, 6.8], [49.6, 10.1], [53.4, 11.4], [56.4, 10.7], [60.4, 9.3], [63.9, 10.1], [66.5, 8.4], [69.7, 3.9], [72.9, 0]];
-    const top = sail.map(([x, h]) => [x - h * 0.1, backAt(spine, x) - h]);
-    const root = sail.slice().reverse().map(([x]) => [x, backAt(spine, x) + 1.6]);
-    g.far += smoothClosed(top.concat(root));
-    // Spines first, so the back covers their roots.
-    for (let i = 1; i < 16; i++) {
-      const x = lerp(36.5, 71.5, i / 16);
-      let h = 0;
-      for (let k = 0; k < sail.length - 1; k++) {
-        if (x >= sail[k][0] && x <= sail[k + 1][0]) h = lerp(sail[k][1], sail[k + 1][1], (x - sail[k][0]) / (sail[k + 1][0] - sail[k][0]));
-      }
-      const y0 = backAt(spine, x);
-      g.body += `<path class="sil-line" d="M${f1(x)},${f1(y0 + 0.5)}L${f1(x - h * 0.1)},${f1(y0 - h + 0.6)}" stroke-width="0.55"/>`;
-    }
-    g.body += loft(spine) + eye(90.4, -24.1, 0.5);
-    g.near += hindLeg(52.5, -16.4, 0.6, 4.8) + limb([[68.2, -16.8], [66.9, -12.7], [69.8, -11.6], [71.6, -9.5]], [2.2, 1.6, 1.1]);
-    g.near += '<path class="sil-line" d="M71.2,-10.2q2.2,0.4 2.3,2.7" stroke-width="0.9"/>'; // the hooked thumb claw
-  },
-  camptosaurus(g) {
-    g.top = 40;
-    g.far += columnLeg(44, -27, 6.6, 2.4) + columnLeg(64, -21, 3.4, -0.6);
-    g.body += loft([
-      [0, -19, 0.4, 0.4], [12, -22, 1.5, 1.8], [25, -26, 3, 3.8], [37, -29.6, 4.8, 6.8],
-      [47, -30.4, 5.6, 10.6], [57, -29, 5, 11], [65, -26.6, 3.8, 6.8], [71, -27.4, 2.6, 3.4],
-      [76, -30.2, 2.3, 2.7], [81, -31.8, 2.7, 2.8], [87, -31.2, 2.3, 2.2], [91.5, -30, 1.3, 1.3],
-      [93.5, -29.6, 0.2, 0.2],
-    ]);
-    g.body += eye(84.5, -32.6, 0.55);
-    g.near += columnLeg(48, -27, 7, 2.4) + columnLeg(67, -21, 3.6, -0.6);
-  },
-  diplodocus(g) {
-    g.top = 46;
-    g.far += columnLeg(36, -21, 5.2, 1.4) + columnLeg(50, -20, 4.6, -0.6);
-    g.body += loft([
-      [0, -10, 0.15, 0.15], [8, -12, 0.4, 0.4], [16, -15, 0.9, 0.9], [24, -19, 1.8, 1.9],
-      [31, -23, 3, 3.6], [37, -25.6, 4, 6.4], [43, -25.8, 4.2, 7.4], [49, -24.6, 3.6, 6.2],
-      [55, -25, 2.4, 3], [62, -28, 1.7, 2.1], [69, -32, 1.3, 1.6], [76, -36, 1.1, 1.3],
-      [83, -39.4, 1, 1.2], [88, -41, 1.1, 1.2], [91.5, -41, 0.9, 0.9], [93.5, -40.4, 0.2, 0.2],
-    ]);
-    g.body += eye(89.6, -41.6, 0.4);
-    g.near += columnLeg(39, -21, 5.6, 1.4) + columnLeg(53, -20, 4.8, -0.6);
-  },
   brontosaurus(g) {
-    // Heavier than Diplodocus: a deep, slab-sided neck rising from high
+    // A heavy sauropod: a deep, slab-sided neck rising from high
     // shoulders, a barrel torso, stocky columns and a shorter whip tail.
     g.top = 47;
     g.far += columnLeg(38, -22, 6.6, 1.2) + columnLeg(53, -21.5, 6.2, -0.4);
@@ -493,8 +418,8 @@ function scaleBar(x, h, w) {
 /** Pick a body plan for an id we have no bespoke drawing for. */
 function fallbackPlan(def) {
   if (def?.diet === "carnivore") return (def.mass || 0) < 700 ? "utahraptor" : "allosaurus";
-  if ((def?.mass || 0) > 8000) return "diplodocus";
-  return (def?.mass || 0) > 400 ? "camptosaurus" : "dryosaurus";
+  if ((def?.mass || 0) > 8000) return "brontosaurus";
+  return (def?.mass || 0) > 1000 ? "stegosaurus" : "dryosaurus";
 }
 
 /**

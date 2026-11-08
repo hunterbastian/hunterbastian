@@ -16,7 +16,7 @@ import { Atmosphere } from "./atmosphere.js";
 import { Impacts } from "./impacts.js";
 import { Ecosystem } from "../creatures/ecosystem.js";
 import { SPECIES } from "../creatures/species.js";
-import { prewarmDinoGeometry } from "../creatures/dinoModel.js";
+import { prewarmDinoGeometry, loadDinoModels } from "../creatures/dinoModel.js";
 
 /** Resolve after the browser has had a chance to paint (keeps loading UI alive). */
 const nextFrame = () =>
@@ -69,10 +69,13 @@ export class World {
   static async create(opts, onProgress = () => {}) {
     const world = new World({ ...opts, deferred: true });
     const steps = world._steps();
+    // Start every download now (the dinosaur models), so it overlaps the island's build.
+    const loads = new Map(steps.filter((s) => s.load).map((s) => [s, s.load()]));
     let done = 0;
     for (const step of steps) {
       onProgress(done / steps.length, step.label);
       await nextFrame();
+      if (loads.has(step)) await loads.get(step);
       step.run();
       done += step.weight;
     }
@@ -219,6 +222,8 @@ export class World {
       {
         label: "Waking the dinosaurs",
         weight: 0.15,
+        // The Blender models (assets/dinos); a world built synchronously keeps the procedural ones.
+        load: () => loadDinoModels(Object.keys(SPECIES)),
         run: () => {
           // Build every species' shared skin once now, not as a hitch on first spawn.
           prewarmDinoGeometry(Object.keys(SPECIES));
