@@ -787,12 +787,12 @@ const SUITES = [
         },
       },
       {
-        name: "settings (pause → Settings): Retro SD draws ~448 lines at a whole multiple; then Pixel and its size slider",
+        name: "settings (pause → Settings): Retro SD draws ~448 lines at a whole multiple; Storybook turns its look on (no brushwork or ink on Low); then Pixel and its size slider",
         async run({ page, errors }) {
           await page.locator(".pause__item[data-act='settings']").click({ timeout: 60_000 });
           const opts = page.locator(".style-opt");
           await opts.first().waitFor({ state: "visible", timeout: 60_000 });
-          expect((await opts.count()) === 4, `Settings should offer four styles, found ${await opts.count()}`);
+          expect((await opts.count()) === 5, `Settings should offer five styles, found ${await opts.count()}`);
           await page.locator(".style-opt:has(input[value='sd'])").click({ timeout: 60_000 });
           await frames(page, 2);
           const sd = await page.evaluate(() => {
@@ -807,6 +807,20 @@ const SUITES = [
           const lum = (c) => 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2];
           expect(lum(st.frame) > 25, `the SD frame should hold the picture, got mean ${st.frame}`);
           await shot(page, "touch-retro-sd");
+          // Storybook: its pass, its look in the materials, and on Low no brushwork or ink.
+          await page.locator(".style-opt:has(input[value='story'])").click({ timeout: 60_000 });
+          await frames(page, 2);
+          const story = await page.evaluate(async () => {
+            const { LOOK } = await import("/src/world/look.js");
+            const p = __underfern.retro;
+            return { style: __underfern.style, post: p && p.constructor.name, stats: p ? p.stats() : null, look: LOOK.uLookStory.value.toArray(), quality: __underfern.quality };
+          });
+          expect(story.style === "story" && story.post === "StorybookPass", `picking Storybook should switch to its pass, got ${JSON.stringify(story)}`);
+          expect(story.look[0] === 1 && story.look[1] === 1 && story.look[2] === 1, `Storybook should turn its look on in the materials, got ${story.look}`);
+          expect(story.stats.height <= 720, `Storybook draws at most 720 rows on Low, got ${story.stats.height}`);
+          expect(story.quality !== "low" || (!story.stats.brush && !story.stats.ink), `no brushwork or ink on Low, got ${JSON.stringify(story.stats)}`);
+          expect(lum(story.stats.scene) > 25, `the Storybook frame should hold the picture, got mean ${story.stats.scene}`);
+          await shot(page, "touch-storybook");
           // Battery saver: a switch, saved on the device.
           await page.locator(".switch[data-act='battery']").click({ timeout: 60_000 });
           const bat = await page.evaluate(() => ({
@@ -815,8 +829,12 @@ const SUITES = [
           }));
           expect(bat.on === "true" && bat.saved === true, `Battery saver should switch on and be saved, got ${JSON.stringify(bat)}`);
           await page.locator(".style-opt:has(input[value='pixel'])").click({ timeout: 60_000 });
-          const after = await page.evaluate(() => ({ style: __underfern.style, post: !!__underfern.retro }));
+          const after = await page.evaluate(async () => {
+            const { LOOK } = await import("/src/world/look.js");
+            return { style: __underfern.style, post: !!__underfern.retro, look: LOOK.uLookStory.value.x };
+          });
           expect(after.style === "pixel" && !after.post, `picking Pixel should switch styles and drop the post pass, got ${JSON.stringify(after)}`);
+          expect(after.look === 0, `leaving Storybook should turn its look off, got ${after.look}`);
           const slider = page.locator("input[type=range][id$='-pix']").first();
           await slider.waitFor({ state: "visible", timeout: 60_000 });
           const rowsAt = (v) =>
@@ -836,7 +854,7 @@ const SUITES = [
           await frames(page, 1);
           await shot(page, "touch-settings");
           await expectClean(page, errors);
-          return `Retro SD ${st.width}×${st.height} ×${st.scale}; pixel rows: fine ${fine} · in between ${mid} · chunky ${chunky}`;
+          return `Retro SD ${st.width}×${st.height} ×${st.scale}; Storybook ${story.stats.width}×${story.stats.height} (${story.quality}); pixel rows: fine ${fine} · in between ${mid} · chunky ${chunky}`;
         },
       },
     ],

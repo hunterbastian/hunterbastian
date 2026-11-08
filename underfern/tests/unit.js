@@ -23,7 +23,9 @@ import { weatherForDay, WEATHER_KINDS } from "../src/world/sky.js";
 import { isRotated, appSize, toApp, onAppResize } from "../src/core/screen.js";
 import { Input } from "../src/player/input.js";
 import { ThirdPersonCamera } from "../src/player/camera.js";
-import { speciesSilhouette } from "../src/ui/menu.js";
+import { speciesSilhouette, normalizeSettings, STYLES } from "../src/ui/menu.js";
+import { StorybookPass, STORY } from "../src/world/storybook.js";
+import { LOOK } from "../src/world/look.js";
 
 /* --- Tiny harness --------------------------------------------------------- */
 
@@ -118,6 +120,22 @@ test("screen: a desktop window isn't turned; the app frame is the viewport", () 
 });
 
 /* --- player/input.js (touch layer) ---------------------------------------- */
+
+test("storybook: a saved Storybook choice sticks; brushwork on High only, ink everywhere but Low; its look is off by default", () => {
+  assert(STYLES.includes("story"), "Storybook is one of the styles");
+  assert.equal(normalizeSettings({ style: "story" }).style, "story", "a saved Storybook choice is kept:");
+  assert.equal(normalizeSettings({ style: "nonsense" }).style, "retro", "an unknown style falls back to Retro HD:");
+  assert.equal(migrateSettings({ style: "story", styleVersion: 2 }), null, "Storybook isn't migrated away:");
+  const pass = new StorybookPass({});
+  pass.setQuality("high");
+  assert(pass.brush && pass.ink && pass.composite.defines.BRUSH === 1 && pass.composite.defines.INK === 1, "High: brushwork and ink");
+  pass.setQuality("low");
+  assert(!pass.brush && !pass.ink && pass.composite.defines.BRUSH === 0 && pass.composite.defines.INK === 0, "Low: neither");
+  assert(STORY.ink > 0 && STORY.ink < 0.85, `ink a touch lighter than the look study (${STORY.ink})`);
+  pass.dispose();
+  // main.js turns it on only in the Storybook style; until then every material runs as before.
+  assert.equal(LOOK.uLookStory.value.x + LOOK.uLookStory.value.y + LOOK.uLookStory.value.z, 0, "the storybook look starts off:");
+});
 
 test("settings: Retro HD becomes the default once; a Pixel choice made since sticks", () => {
   const moved = migrateSettings({ style: "pixel", pixelSize: 0.75, muted: true });

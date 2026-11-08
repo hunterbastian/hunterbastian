@@ -291,6 +291,15 @@ Open **Settings** from the title screen or the pause menu. Settings are saved on
 device.
 
 - **Graphics style:**
+  - **Storybook**: the island as a painted picture book, in the spirit of the
+    soft open country of *Breath of the Wild*:
+    - **In every surface's own shader** (free, phones included): a lush palette
+      with spring greens, warm light and cool shade; a painted middle distance
+      that turns blue in layers; and light that falls in three soft bands.
+    - **In a short finishing pass:** soft ink on silhouettes, fading with
+      distance (not on Low), and brushwork, a Kuwahara filter that flattens
+      texture noise into patches of colour (High only).
+    - It draws up to 1080 rows (720 on Low), stretched smoothly.
   - **Retro HD** (default): a sub-HD frame (720 rows on High, 540 on Low, fewer if
     the screen has fewer), soft quincunx-style anti-aliasing, bloom, a desaturated
     and bronzed grade, film grain and a little lens fringing at the corners, then a
@@ -305,10 +314,11 @@ device.
   - **Pixel**: low-resolution render with a crisp nearest-neighbour upscale.
 - **Pixel size:** *Fine*, *In between* (default) or *Chunky*, applied live.
   Pixels stay square and even on any screen.
-- All four styles have the same lighting, mist, haze and colour grade. They are
-  computed in each surface's own shader rather than in a post-processing pass (Retro
-  HD and Retro SD add their own short finishing passes on top), so
-  they cost nothing extra on a phone.
+- All five styles share the same lighting, mist, haze and colour grade. They are
+  computed in each surface's own shader rather than in a post-processing pass, so
+  they cost nothing extra on a phone. Storybook adds its palette, painted
+  distance and soft bands there too. Retro HD, Retro SD and Storybook add their
+  own short finishing passes on top.
 - **Quality:**
   - *Auto* picks *Low* on phones, small screens and ≤ 4-core machines (lighter
     terrain, sparser vegetation, no grass or shadows, fewer dinosaurs) and *High*
@@ -336,7 +346,7 @@ URL parameters, handy for sharing a moment or testing:
 | `?creative=1` | with `?species`: Creative mode (full grown, can't be hurt, never saved) |
 | `?pos=x,z` | spawn position in metres |
 | `?t=0..1` | time of day (0 midnight, 0.25 sunrise, 0.5 noon, 0.75 sunset); pauses the clock |
-| `?style=retro\|sd\|detailed\|pixel` · `?pixel=0..1` | render style · pixel size |
+| `?style=retro\|story\|sd\|detailed\|pixel` · `?pixel=0..1` | render style · pixel size |
 | `?quality=low\|high` | force a quality profile |
 | `?adaptive=0\|1` · `?scale=0.4..1` | dynamic resolution off / on (it is off under automation) · pin the render scale |
 | `?seed=N` | a different island |
@@ -398,6 +408,8 @@ there is one and otherwise falls back to the global install.
     - the joystick and the pause button
     - the post pass blooming a daytime frame
     - switching to Retro SD (a whole-multiple canvas over about 448 lines)
+    - switching to Storybook: its pass, its look on in the materials, and no
+      brushwork or ink on Low
     - switching to Pixel and using its size slider
   - an upright iPhone: the game turns sideways, the drawing buffer stays
     landscape, and pushing the stick toward the phone's right edge (the app's

@@ -53,6 +53,9 @@ export const LOOK = {
   uLookScreen: { value: new THREE.Vector4(1 / 1280, 1 / 720, 0.16, 0) },
   // Wind for grass gusts: xy unit direction it blows toward, z strength 0..1, w phase (m travelled)
   uLookWind: { value: new THREE.Vector4(1, 0, 0.4, 0) },
+  // The Storybook style (0 in every other style): x lush palette, y painted
+  // distance, z soft cel bands — each 0..1. main.js sets it with the style.
+  uLookStory: { value: new THREE.Vector4(0, 0, 0, 0) },
 };
 
 /* --- GLSL ------------------------------------------------------------------ */
@@ -71,6 +74,7 @@ uniform vec3 uLookShadowTint;
 uniform vec3 uLookHighTint;
 uniform vec4 uLookScreen;
 uniform vec4 uLookWind;
+uniform vec4 uLookStory;
 `;
 
 /**
@@ -142,6 +146,14 @@ vec3 lookAtmosphere(vec3 col, vec3 wp, vec3 eye, float linFog, vec3 fogCol) {
   float az = dot(hv, hs) * 0.5 + 0.5;
   vec3 horizon = mix(fogCol, uLookHazeGlow.rgb, az * az * az * uLookHazeGlow.a);
   vec3 haze = mix(uLookAerial, horizon, smoothstep(0.15, 0.95, linFog));
+  // Storybook: past ~140 m the land takes on the aerial blue in layers, well
+  // before the far haze, so ridges stack like cut paper.
+  if (uLookStory.y > 0.0) {
+    float sd = length(wp - eye);
+    float sa = 1.0 - exp(-max(sd - 140.0, 0.0) / 650.0);
+    float sl = dot(col, vec3(0.2126, 0.7152, 0.0722));
+    col = mix(col, uLookAerial * (0.82 + 0.32 * sl), sa * 0.55 * uLookStory.y);
+  }
   return mix(col, haze, linFog);
 }
 
@@ -204,9 +216,22 @@ vec3 lookGrade(vec3 c) {
   float pl = sqrt(l);
   vec3 tint = mix(uLookShadowTint, uLookHighTint, smoothstep(0.18, 0.78, pl));
   c *= mix(vec3(1.0), tint, uLookGrade.y);
+  // Storybook: lusher colour — more vibrance, greens toward spring green,
+  // warmer light and cooler shade.
+  if (uLookStory.x > 0.0) {
+    float sl = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    float ss = max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b));
+    c = max(mix(vec3(sl), c, 1.0 + uLookStory.x * 0.85 * (1.0 - ss)), 0.0);
+    float green = smoothstep(0.0, 0.05, c.g - max(c.r, c.b));
+    c += uLookStory.x * green * vec3(0.03, 0.05, -0.012) * smoothstep(0.0, 0.06, sl);
+    vec3 st = mix(vec3(0.93, 0.98, 1.08), vec3(1.06, 1.01, 0.93), smoothstep(0.12, 0.72, sqrt(sl)));
+    c = max(c * mix(vec3(1.0), st, uLookStory.x), 0.0); // (the S below takes a square root)
+  }
   // A soft S around mid grey.
   vec3 s = sqrt(c);
   s = s + uLookGrade.z * (s - 0.5) * (1.0 - abs(2.0 * s - 1.0));
+  // Storybook: a little airy lift, like light paper under the paint.
+  s = mix(s, s * 0.94 + 0.06, uLookStory.x);
   return s * s;
 }
 `;
@@ -246,6 +271,10 @@ export function patchLook(shader, { wrap = 0.45, rim = 0, fill = 1 } = {}) {
 		// and fill what it misses with the cool sky bounce.
 		float lookNL = dot( geometryNormal, directLight.direction );
 		float lookWrapNL = saturate( ( lookNL + LOOK_WRAP ) / ( 1.0 + LOOK_WRAP ) );
+		// Storybook: the light falls in three soft bands, as a painter would lay it.
+		float lookBandT = lookWrapNL * 3.0;
+		float lookBand = ( floor( lookBandT ) + smoothstep( 0.3, 0.7, fract( lookBandT ) ) ) / 3.0;
+		lookWrapNL = mix( lookWrapNL, lookBand, uLookStory.z );
 		reflectedLight.directDiffuse += lookWrapNL * ( 1.0 - 0.3 * LOOK_WRAP ) * directLight.color * BRDF_Lambert( material.diffuseColor );
 		reflectedLight.directDiffuse += ( 1.0 - lookWrapNL * lookShadow ) * LOOK_FILL * uLookFill * BRDF_Lambert( material.diffuseColor );
 	}`,

@@ -28,7 +28,9 @@ export const GAME = {
 // Render styles (same assets): "retro" draws a sub-HD frame through a bloom /
 // grain / grade pass (world/retro.js) and lets the browser upscale it smoothly;
 // "sd" draws a ~448-line frame through a GameCube/PS2-style stack and a CRT
-// (world/retro-sd.js);
+// (world/retro-sd.js); "story" (Storybook) turns on a painted look in the
+// materials and draws up to 1080 rows through a brushwork / soft-ink pass
+// (world/storybook.js);
 // "detailed" draws at full resolution; "pixel" draws the 3D scene at a few
 // hundred rows and upscales it with nearest-neighbour filtering.
 export const STYLE = {
@@ -37,6 +39,8 @@ export const STYLE = {
   retroRows: { high: 720, low: 540 },
   // Lines the Retro SD frame aims for (rounded so each is a whole number of device pixels).
   sdRows: 448,
+  // Rows the Storybook frame is drawn at, at most (its brushwork and ink run per pixel).
+  storyRows: { high: 1080, low: 720 },
   // Rows of game pixels at the chunkiest pixel size; "in between" (0.5) sits
   // halfway (geometrically) between this and the full render resolution.
   pixelHeight: { high: 300, low: 230 },

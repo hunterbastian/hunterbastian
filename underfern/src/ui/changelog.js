@@ -4,6 +4,18 @@
 /** @type {{ v: string, date: string, title: string, notes: string[] }[]} */
 export const CHANGELOG = [
   {
+    v: "0.20",
+    date: "2026-11-08",
+    title: "Storybook",
+    notes: [
+      "A new graphics style in Settings: Storybook, the island as a painted picture book.",
+      "Lush spring greens, warm light and cool blue shade.",
+      "Hills and ridges turn blue in layers as they fall away, and light falls in soft bands.",
+      "Soft ink on silhouettes, fading with distance (not on Low quality).",
+      "Brushwork that turns leaves and turf into patches of paint (High quality only).",
+    ],
+  },
+  {
     v: "0.19",
     date: "2026-11-08",
     title: "The Heart Lake",

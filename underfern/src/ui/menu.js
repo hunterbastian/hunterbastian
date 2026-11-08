@@ -529,7 +529,7 @@ export function speciesSilhouette(species, { scale = true } = {}) {
 export const DEFAULT_SETTINGS = Object.freeze({ style: "retro", pixelSize: 0.5, quality: "auto", muted: false, batterySaver: false, sensitivity: 1, styleVersion: 2 });
 
 /** The render styles, in the order Settings lists them. */
-export const STYLES = ["retro", "sd", "detailed", "pixel"];
+export const STYLES = ["retro", "story", "sd", "detailed", "pixel"];
 
 /** Words for the pixel-size slider (0 fine … 1 chunky). */
 export const pixelSizeLabel = (v) => (v < 0.34 ? "Fine" : v < 0.67 ? "In between" : "Chunky");
@@ -566,11 +566,15 @@ const BAYER4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
  * The SD preview paints it at half size, dithers it to 5 bits, doubles it back
  * up softly and draws scanlines over it.
  * @param {HTMLCanvasElement} canvas
- * @param {"retro" | "sd" | "detailed" | "pixel"} mode
+ * @param {"retro" | "story" | "sd" | "detailed" | "pixel"} mode
  */
 function paintVista(canvas, mode) {
   if (mode === "sd") {
     paintSD(canvas);
+    return;
+  }
+  if (mode === "story") {
+    paintStory(canvas);
     return;
   }
   const ctx = canvas.getContext("2d");
@@ -685,6 +689,119 @@ function paintVista(canvas, mode) {
     }
   }
   ctx.putImageData(img, 0, 0);
+}
+
+/**
+ * The Storybook preview (2D, once): a bright morning over layered hills — a
+ * deep sky and cumulus, ridges going blue with distance, each lit at its
+ * crest and falling into shade, conifers and a sauropod, all edged in a soft
+ * cool ink.
+ */
+function paintStory(canvas) {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const w = canvas.width;
+  const h = canvas.height;
+  const sky = ctx.createLinearGradient(0, 0, 0, h * 0.62);
+  sky.addColorStop(0, "#2f7fd6");
+  sky.addColorStop(0.6, "#8cc4ee");
+  sky.addColorStop(1, "#e3f1f4");
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, w, h);
+  const rng = makeRng(hash("vista-story", 3));
+  // Cumulus: clusters of soft white puffs with a cool underside.
+  for (let c = 0; c < 3; c++) {
+    const cx = w * (0.15 + 0.32 * c + rng() * 0.1);
+    const cy = h * (0.16 + rng() * 0.12);
+    for (let i = 0; i < 6; i++) {
+      const px = cx + (rng() - 0.5) * w * 0.12;
+      const py = cy + (rng() - 0.5) * h * 0.06;
+      const r = h * (0.05 + rng() * 0.05);
+      ctx.fillStyle = "rgba(196, 220, 238, 0.9)";
+      ctx.beginPath();
+      ctx.arc(px, py + r * 0.25, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+      ctx.beginPath();
+      ctx.arc(px, py, r * 0.92, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  const ink = "rgba(28, 46, 58, 0.45)";
+  const ridge = (base, amp, lit, shade, freq, trees = 0, treeCol = "#2d5e3a") => {
+    const ph = rng() * 10;
+    const ys = [];
+    for (let i = 0; i <= 48; i++) {
+      const t = i / 48;
+      ys.push(h * (base - amp * (0.55 * Math.sin(t * freq + ph) + 0.3 * Math.sin(t * freq * 2.3 + ph * 1.7) + 0.15 * Math.sin(t * freq * 5.1))));
+    }
+    const path = () => {
+      ctx.beginPath();
+      ctx.moveTo(0, h);
+      for (let i = 0; i <= 48; i++) ctx.lineTo((i / 48) * w, ys[i]);
+      ctx.lineTo(w, h);
+      ctx.closePath();
+    };
+    // Lit at the crest, falling into shade below it.
+    const top = Math.min(...ys);
+    const fill = ctx.createLinearGradient(0, top, 0, top + h * 0.22);
+    fill.addColorStop(0, lit);
+    fill.addColorStop(0.55, lit);
+    fill.addColorStop(1, shade);
+    path();
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.strokeStyle = ink;
+    ctx.lineWidth = Math.max(1, h / 140);
+    ctx.beginPath();
+    for (let i = 0; i <= 48; i++) (i ? ctx.lineTo : ctx.moveTo).call(ctx, (i / 48) * w, ys[i]);
+    ctx.stroke();
+    for (let i = 0; i < trees; i++) {
+      const t = rng();
+      const x = t * w;
+      const y = ys[Math.round(t * 48)] + h * 0.012;
+      const th = h * (0.06 + rng() * 0.07);
+      const tw = th * 0.34;
+      ctx.fillStyle = treeCol;
+      ctx.beginPath();
+      ctx.moveTo(x - tw, y);
+      ctx.lineTo(x, y - th);
+      ctx.lineTo(x + tw, y);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = ink;
+      ctx.stroke();
+    }
+  };
+  ridge(0.5, 0.1, "#a9c4e0", "#93b0d2", 6);
+  ridge(0.6, 0.08, "#86b3a8", "#6f9c98", 8, 14, "#5f8f8a");
+  ridge(0.74, 0.07, "#8cc152", "#62a03f", 6, 10);
+  // A sauropod on the near hill.
+  const k = h / 100;
+  const bx = w * 0.34;
+  const by = h * 0.78;
+  ctx.fillStyle = "#3f5a3a";
+  ctx.strokeStyle = "#3f5a3a";
+  ctx.beginPath();
+  ctx.ellipse(bx, by - 7 * k, 9 * k, 4.2 * k, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.lineCap = "round";
+  ctx.lineWidth = 2.2 * k;
+  ctx.beginPath();
+  ctx.moveTo(bx + 7 * k, by - 9 * k);
+  ctx.quadraticCurveTo(bx + 14 * k, by - 18 * k, bx + 19 * k, by - 21 * k);
+  ctx.moveTo(bx - 8 * k, by - 7 * k);
+  ctx.quadraticCurveTo(bx - 16 * k, by - 4 * k, bx - 24 * k, by - 3 * k);
+  for (const dx of [-5, -2, 4, 7]) {
+    ctx.moveTo(bx + dx * k, by - 6 * k);
+    ctx.lineTo(bx + dx * k, by);
+  }
+  ctx.stroke();
+  const fg = ctx.createLinearGradient(0, h * 0.86, 0, h);
+  fg.addColorStop(0, "#72ad43");
+  fg.addColorStop(1, "#4f8a33");
+  ctx.fillStyle = fg;
+  ctx.fillRect(0, h * 0.9, w, h * 0.1);
 }
 
 /** The SD preview (2D, once): half-size frame, 5-bit dither, soft 2× and scanlines. */
@@ -1230,6 +1347,12 @@ export class Menu {
           <fieldset class="field">
             <legend class="field__label">Graphics style</legend>
             <div class="style-pick">
+              <label class="style-opt style-opt--feature">
+                <input type="radio" name="${id}-style" value="story" />
+                <span class="style-opt__img"><canvas width="672" height="240" aria-hidden="true"></canvas></span>
+                <span class="style-opt__name">Storybook</span>
+                <span class="style-opt__desc">Lush colour, painted distance, soft light and ink — the island as a picture book.</span>
+              </label>
               <label class="style-opt">
                 <input type="radio" name="${id}-style" value="retro" />
                 <span class="style-opt__img"><canvas width="192" height="100" aria-hidden="true"></canvas></span>
@@ -1306,7 +1429,8 @@ export class Menu {
     this._soundBtn = layer.querySelector('[data-act="sound"]');
     this._batteryBtn = layer.querySelector('[data-act="battery"]');
     this._qualityHint = layer.querySelector('[data-hint="quality"]');
-    const [retro, sd, detailed, pixel] = layer.querySelectorAll(".style-opt canvas");
+    const [story, retro, sd, detailed, pixel] = layer.querySelectorAll(".style-opt canvas");
+    paintVista(story, "story");
     paintVista(retro, "retro");
     paintVista(sd, "sd");
     paintVista(detailed, "detailed");

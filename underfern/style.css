@@ -1590,6 +1590,15 @@ button:disabled {
   height: 100%;
 }
 
+/* Storybook: the newest style, a wide banner across the top of the picker. */
+.style-opt--feature {
+  grid-column: 1 / -1;
+}
+
+.style-opt--feature .style-opt__img {
+  aspect-ratio: 672 / 240;
+}
+
 .style-opt__img--pixel canvas {
   image-rendering: pixelated;
   image-rendering: crisp-edges;
@@ -4416,13 +4425,17 @@ button:disabled {
 
   /* Phones on their side: the names say enough, and dropping the blurbs
      brings the Pixel size slider up into view without scrolling. Names only,
-     the four styles fit on one row. */
+     the five styles fit on one row. */
   .style-opt__desc {
     display: none;
   }
 
   .style-pick {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .style-opt--feature {
+    grid-column: auto;
   }
 
   .style-opt__name {

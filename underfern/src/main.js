@@ -14,9 +14,10 @@ import { clamp } from "./core/math.js";
 import { DynamicResolution } from "./core/dynres.js";
 import { makeRng, hash } from "./core/rng.js";
 import { World } from "./world/world.js";
-import { setLookScreen } from "./world/look.js";
+import { LOOK, setLookScreen } from "./world/look.js";
 import { RetroPass } from "./world/retro.js";
 import { RetroSDPass } from "./world/retro-sd.js";
+import { StorybookPass } from "./world/storybook.js";
 import { PLAYABLE, getSpecies } from "./creatures/species.js";
 import { Input } from "./player/input.js";
 import { ThirdPersonCamera } from "./player/camera.js";
@@ -85,7 +86,7 @@ const quality = QUALITY[qualityName];
 
 function resolveStyle() {
   const forced = params.get("style");
-  if (["retro", "sd", "pixel", "detailed"].includes(forced)) return forced;
+  if (["retro", "story", "sd", "pixel", "detailed"].includes(forced)) return forced;
   return settings.style || STYLE.default;
 }
 let style = resolveStyle();
@@ -130,9 +131,10 @@ function renderScale() {
 // Set when the canvas must be drawn even though nothing moves (see frame()).
 let redraw = true;
 
-// The post pass of the style drawn through one (Retro HD, Retro SD), made the
-// first time that style is drawn and dropped when another is picked.
-const POST = { retro: RetroPass, sd: RetroSDPass };
+// The post pass of the style drawn through one (Retro HD, Retro SD,
+// Storybook), made the first time that style is drawn and dropped when
+// another is picked.
+const POST = { retro: RetroPass, sd: RetroSDPass, story: StorybookPass };
 let retro = null;
 let sdSize = null; // Retro SD: { w, h, k } — source lines and screen pixels per line
 
@@ -179,6 +181,16 @@ function resize() {
     renderer.setPixelRatio(1);
     renderer.setSize(Math.max(1, Math.round((w * dpr) / k)), Math.max(1, Math.round(rows)), false);
     canvas.style.imageRendering = "";
+  } else if (style === "story") {
+    // Storybook: up to 1080 rows (720 on Low) — its brushwork and ink run per
+    // pixel — stretched smoothly to the window.
+    const dpr = window.devicePixelRatio || 1;
+    const nativeRows = h * Math.min(dpr, quality.pixelRatioCap);
+    const rows = Math.max(120, Math.min(nativeRows, STYLE.storyRows[qualityName] || 720) * scale);
+    const k = (h * dpr) / rows;
+    renderer.setPixelRatio(1);
+    renderer.setSize(Math.max(1, Math.round((w * dpr) / k)), Math.max(1, Math.round(rows)), false);
+    canvas.style.imageRendering = "";
   } else if (style === "sd") {
     // About 448 lines, at a whole number of device pixels per line so the
     // scanlines are even; the canvas is that multiple of the source, and CSS
@@ -207,6 +219,11 @@ function resize() {
     retro = null;
   }
   if (Post) retro ??= new Post(renderer);
+  retro?.setQuality?.(qualityName);
+  // The Storybook look lives mostly in the materials: palette, painted
+  // distance and cel bands, on only in that style.
+  const story = style === "story" ? 1 : 0;
+  LOOK.uLookStory.value.set(story, story, story, 0);
   if (style === "sd") {
     retro.setSize(sdSize.w, sdSize.h, sdSize.k);
     setLookScreen(sdSize.w, sdSize.h); // the scene is drawn at the source size
@@ -864,7 +881,7 @@ window.__underfern = {
   redraw: () => {
     redraw = true;
   },
-  /** The Retro HD / Retro SD post pass (null in the other styles). */
+  /** The Retro HD / Retro SD / Storybook post pass (null in the other styles). */
   get retro() {
     return retro;
   },

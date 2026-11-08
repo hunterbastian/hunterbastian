@@ -50,7 +50,21 @@ working (add, don't rename) and note it in your report.
   colossal fossils, sea stacks, a stone arch, basalt columns, glowing fungi and
   fireflies. The look lives **in the materials** (`world/look.js`), never in a
   post-processing pass, so it costs the same in every render style.
-- **Four render styles, same assets.** `"sd"` ("Retro SD", a GameCube / PS2 game on
+- **Five render styles, same assets.**
+  - `"story"` ("Storybook", a painted picture book in the spirit of *Breath of the
+    Wild*'s open country, its own look):
+    - Most of it is in the materials, switched on by `LOOK.uLookStory`
+      (x palette, y painted distance, z cel bands, each 0..1; 0 in every other
+      style, set by `main.js`). `lookGrade` adds vibrance, pushes greens toward
+      spring green, warms light and cools shade, and lifts the S-curve a little.
+      `lookAtmosphere` mixes `uLookAerial` in from ~140 m (scale 650 m). The wrap
+      lighting is stepped into three soft bands.
+    - `world/storybook.js` then draws the scene (≤ 1080 rows, 720 on Low) into a
+      target with a depth texture, posing as an XR target as the retro passes do.
+      One composite adds a Kuwahara brushwork pass (64 taps; High only), soft ink
+      where linear depth jumps (5 taps, fading over 180–650 m; not on Low;
+      `STORY.ink` 0.72 toward a cool 0.42/0.46/0.56) and a cleaner sky.
+  - `"sd"` ("Retro SD", a GameCube / PS2 game on
   a CRT, after gsimone's breakdown: `world/retro-sd.js` draws ~448 lines at a whole
   number of device pixels per line; the canvas is that multiple of the source, so the
   final pass can draw even scanlines. The stack, in order:
@@ -118,6 +132,7 @@ underfern/
   src/world/look.js     ATMOSPHERE  the painterly look: shared uniforms + shader hooks patched into every lit material
   src/world/retro.js    INTEGRATION the Retro HD render style's post pass: bloom, soften, fringe, grade, grain
   src/world/retro-sd.js INTEGRATION the Retro SD render style: Kawase bloom, DOF, sun shafts, 5-bit dither, deflicker, composite + CRT
+  src/world/storybook.js INTEGRATION the Storybook render style's pass: brushwork (High), soft ink (not Low), sky
   src/world/landmarks.js TERRAIN    colossal fossils and stone wonders: placement, meshes, colliders
   src/world/underfern.js TERRAIN    the Underfern: the island's one giant tree fern (placement, geometry, glow, motes)
   src/world/atmosphere.js ATMOSPHERE fireflies and motes, light shafts, peak wisps and spindrift, cave fungi
