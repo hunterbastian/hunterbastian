@@ -53,10 +53,95 @@ export const LOOK = {
   uLookScreen: { value: new THREE.Vector4(1 / 1280, 1 / 720, 0.16, 0) },
   // Wind for grass gusts: xy unit direction it blows toward, z strength 0..1, w phase (m travelled)
   uLookWind: { value: new THREE.Vector4(1, 0, 0.4, 0) },
-  // The Storybook style (0 in every other style): x lush palette, y painted
+  // The Storybook style (0 in every other style): x palette, y painted
   // distance, z soft cel bands — each 0..1. main.js sets it with the style.
   uLookStory: { value: new THREE.Vector4(0, 0, 0, 0) },
+  // Its colour grade (setStoryGrade fills these from STORY_GRADES):
+  // x vibrance, y extra S contrast, z desaturation, w extra vignette
+  uLookSG: { value: new THREE.Vector4() },
+  // Split tone: shade and light multipliers.
+  uLookSGShade: { value: new THREE.Vector3(1, 1, 1) },
+  uLookSGLight: { value: new THREE.Vector3(1, 1, 1) },
+  // Greens nudged (added, linear) where they lie in shade and in sun.
+  uLookSGGreenShade: { value: new THREE.Vector3() },
+  uLookSGGreenLit: { value: new THREE.Vector3() },
+  // Toe, in perceptual space: x scale, yzw lift.
+  uLookSGToe: { value: new THREE.Vector4(1, 0, 0, 0) },
+  // Painted distance: x pull toward the horizon colour, y desaturation; tint.
+  uLookSGHaze: { value: new THREE.Vector4() },
+  uLookSGHazeTint: { value: new THREE.Vector3(1, 1, 1) },
+  // Sky (the Storybook pass): x desaturation, yzw added; tint.
+  uLookSGSky: { value: new THREE.Vector4() },
+  uLookSGSkyTint: { value: new THREE.Vector3(1, 1, 1) },
 };
+
+/**
+ * Storybook's colour grades. The painted light, ink and brushwork stay the
+ * same; the colour around them changes:
+ *   jungle  — a humid jungle film: deep emerald greens, golden-amber light over
+ *             teal-green shade, a firm filmic S, wet grey-green distance.
+ *   fantasy — dark fantasy: a muted, earthy palette (khaki and olive greens),
+ *             gold light over cool grey-blue shade lifted into haze, a golden
+ *             misty distance and a heavier vignette.
+ *   picture — the bright picture book: spring greens, warm light and cool
+ *             shade, an airy lift and a blue painted distance.
+ */
+export const STORY_GRADES = {
+  jungle: {
+    sg: [0.5, 0.14, 0, 0],
+    shade: [0.9, 1.0, 0.98],
+    light: [1.09, 1.0, 0.86],
+    greenShade: [-0.006, 0.016, 0.01],
+    greenLit: [0.03, 0.03, -0.012],
+    toe: [0.97, 0.022, 0.03, 0.028],
+    haze: [0.55, 0.4, 0, 0],
+    hazeTint: [0.97, 1.02, 0.96],
+    sky: [0.18, 0.02, 0.02, 0.01],
+    skyTint: [1.03, 1.01, 0.95],
+  },
+  fantasy: {
+    sg: [0.05, 0.16, 0.3, 0.12],
+    shade: [0.88, 0.95, 1.06],
+    light: [1.13, 1.0, 0.78],
+    greenShade: [0.006, -0.008, -0.004],
+    greenLit: [0.03, 0.006, -0.02],
+    toe: [0.94, 0.034, 0.036, 0.044],
+    haze: [0.75, 0.55, 0, 0],
+    hazeTint: [1.05, 1.0, 0.88],
+    sky: [0.38, 0.035, 0.028, 0.012],
+    skyTint: [1.07, 1.0, 0.84],
+  },
+  picture: {
+    sg: [0.85, 0, 0, 0],
+    shade: [0.93, 0.98, 1.08],
+    light: [1.06, 1.01, 0.93],
+    greenShade: [0.03, 0.05, -0.012],
+    greenLit: [0.03, 0.05, -0.012],
+    toe: [0.94, 0.06, 0.06, 0.06],
+    haze: [0, 0, 0, 0],
+    hazeTint: [1, 1, 1],
+    sky: [0, 0.015, 0.02, 0.035],
+    skyTint: [0.93, 1.0, 1.08],
+  },
+};
+export const STORY_GRADE_DEFAULT = "jungle";
+
+/** Fill the Storybook grade uniforms from one of STORY_GRADES (unknown → the default). */
+export function setStoryGrade(name) {
+  const g = STORY_GRADES[name] || STORY_GRADES[STORY_GRADE_DEFAULT];
+  LOOK.uLookSG.value.fromArray(g.sg);
+  LOOK.uLookSGShade.value.fromArray(g.shade);
+  LOOK.uLookSGLight.value.fromArray(g.light);
+  LOOK.uLookSGGreenShade.value.fromArray(g.greenShade);
+  LOOK.uLookSGGreenLit.value.fromArray(g.greenLit);
+  LOOK.uLookSGToe.value.fromArray(g.toe);
+  LOOK.uLookSGHaze.value.fromArray(g.haze);
+  LOOK.uLookSGHazeTint.value.fromArray(g.hazeTint);
+  LOOK.uLookSGSky.value.fromArray(g.sky);
+  LOOK.uLookSGSkyTint.value.fromArray(g.skyTint);
+  return STORY_GRADES[name] ? name : STORY_GRADE_DEFAULT;
+}
+setStoryGrade(STORY_GRADE_DEFAULT);
 
 /* --- GLSL ------------------------------------------------------------------ */
 
@@ -75,6 +160,14 @@ uniform vec3 uLookHighTint;
 uniform vec4 uLookScreen;
 uniform vec4 uLookWind;
 uniform vec4 uLookStory;
+uniform vec4 uLookSG;
+uniform vec3 uLookSGShade;
+uniform vec3 uLookSGLight;
+uniform vec3 uLookSGGreenShade;
+uniform vec3 uLookSGGreenLit;
+uniform vec4 uLookSGToe;
+uniform vec4 uLookSGHaze;
+uniform vec3 uLookSGHazeTint;
 `;
 
 /**
@@ -146,13 +239,16 @@ vec3 lookAtmosphere(vec3 col, vec3 wp, vec3 eye, float linFog, vec3 fogCol) {
   float az = dot(hv, hs) * 0.5 + 0.5;
   vec3 horizon = mix(fogCol, uLookHazeGlow.rgb, az * az * az * uLookHazeGlow.a);
   vec3 haze = mix(uLookAerial, horizon, smoothstep(0.15, 0.95, linFog));
-  // Storybook: past ~140 m the land takes on the aerial blue in layers, well
-  // before the far haze, so ridges stack like cut paper.
+  // Storybook: past ~140 m the land sinks into the grade's haze in layers,
+  // well before the far haze, so ridges stack like cut paper — the aerial
+  // blue, pulled toward the horizon colour, dulled and tinted by the grade.
   if (uLookStory.y > 0.0) {
     float sd = length(wp - eye);
     float sa = 1.0 - exp(-max(sd - 140.0, 0.0) / 650.0);
     float sl = dot(col, vec3(0.2126, 0.7152, 0.0722));
-    col = mix(col, uLookAerial * (0.82 + 0.32 * sl), sa * 0.55 * uLookStory.y);
+    vec3 wet = mix(uLookAerial, fogCol, uLookSGHaze.x);
+    wet = mix(wet, vec3(dot(wet, vec3(0.2126, 0.7152, 0.0722))), uLookSGHaze.y) * uLookSGHazeTint;
+    col = mix(col, wet * (0.84 + 0.3 * sl), sa * 0.55 * uLookStory.y);
   }
   return mix(col, haze, linFog);
 }
@@ -166,7 +262,7 @@ float lookHazeDepth(float depth, float worldY) {
 
 vec3 lookFinish(vec3 col) {
   vec2 uv = gl_FragCoord.xy * uLookScreen.xy - 0.5;
-  float vig = 1.0 - uLookScreen.z * smoothstep(0.18, 0.62, dot(uv, uv) * 1.6);
+  float vig = 1.0 - (uLookScreen.z + uLookSG.w * uLookStory.x) * smoothstep(0.18, 0.62, dot(uv, uv) * 1.6);
   return col * vig;
 }
 `;
@@ -216,22 +312,24 @@ vec3 lookGrade(vec3 c) {
   float pl = sqrt(l);
   vec3 tint = mix(uLookShadowTint, uLookHighTint, smoothstep(0.18, 0.78, pl));
   c *= mix(vec3(1.0), tint, uLookGrade.y);
-  // Storybook: lusher colour — more vibrance, greens toward spring green,
-  // warmer light and cooler shade.
+  // Storybook: its colour grade (STORY_GRADES) — vibrance and desaturation,
+  // greens nudged in shade and in sun, then a split tone.
   if (uLookStory.x > 0.0) {
     float sl = dot(c, vec3(0.2126, 0.7152, 0.0722));
     float ss = max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b));
-    c = max(mix(vec3(sl), c, 1.0 + uLookStory.x * 0.85 * (1.0 - ss)), 0.0);
-    float green = smoothstep(0.0, 0.05, c.g - max(c.r, c.b));
-    c += uLookStory.x * green * vec3(0.03, 0.05, -0.012) * smoothstep(0.0, 0.06, sl);
-    vec3 st = mix(vec3(0.93, 0.98, 1.08), vec3(1.06, 1.01, 0.93), smoothstep(0.12, 0.72, sqrt(sl)));
+    c = max(mix(vec3(sl), c, 1.0 + uLookStory.x * (uLookSG.x * (1.0 - ss) - uLookSG.z)), 0.0);
+    float green = smoothstep(0.0, 0.05, c.g - max(c.r, c.b)) * smoothstep(0.0, 0.05, sl);
+    float lit = smoothstep(0.08, 0.45, sl);
+    c += uLookStory.x * green * mix(uLookSGGreenShade, uLookSGGreenLit, lit);
+    vec3 st = mix(uLookSGShade, uLookSGLight, smoothstep(0.12, 0.72, sqrt(sl)));
     c = max(c * mix(vec3(1.0), st, uLookStory.x), 0.0); // (the S below takes a square root)
   }
   // A soft S around mid grey.
   vec3 s = sqrt(c);
   s = s + uLookGrade.z * (s - 0.5) * (1.0 - abs(2.0 * s - 1.0));
-  // Storybook: a little airy lift, like light paper under the paint.
-  s = mix(s, s * 0.94 + 0.06, uLookStory.x);
+  // Storybook: the grade's own S and toe (shadows lifted into its tint).
+  s = mix(s, s + uLookSG.y * (s - 0.5) * (1.0 - abs(2.0 * s - 1.0)), uLookStory.x);
+  s = mix(s, s * uLookSGToe.x + uLookSGToe.yzw, uLookStory.x);
   return s * s;
 }
 `;

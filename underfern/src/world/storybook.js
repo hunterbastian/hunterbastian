@@ -13,13 +13,14 @@
 //       small patches of colour;
 //     · soft ink (not on Low): a thin, cool, dark line where the depth jumps,
 //       fading out with distance so far hills stay soft;
-//     · a cleaner, bluer sky.
+//     · the sky, as the colour grade has it (look.js STORY_GRADES).
 //
 // Like the retro passes, the scene target poses as an XR target so the
 // materials tone-map, grade and haze exactly as they do on screen.
 
 import * as THREE from "three";
 import { VERT, target, fullScreenQuad } from "./retro.js";
+import { LOOK } from "./look.js";
 
 /** Tuning (display-referred). */
 export const STORY = {
@@ -33,7 +34,7 @@ export const STORY = {
   inkFade: [180, 650],
   // Brushwork mix (High only).
   brush: 0.8,
-  // Sky: how much bluer and cleaner.
+  // Sky: how much of the grade's sky treatment to apply.
   sky: 1,
 };
 
@@ -46,6 +47,8 @@ uniform vec4 uInk;      // x strength, y edge start, z edge full, w unused
 uniform vec3 uInkColor;
 uniform vec2 uInkFade;  // metres
 uniform vec2 uFx;       // x brush mix, y sky
+uniform vec4 uLookSGSky;     // the grade's sky: x desaturation, yzw added
+uniform vec3 uLookSGSkyTint;
 varying vec2 vUv;
 
 float depthAt(vec2 uv) {
@@ -105,8 +108,9 @@ void main() {
     c = mix(c, c * uInkColor, edge * uInk.x);
   }
 #endif
-  // A cleaner, bluer sky.
-  c = mix(c, c * vec3(0.93, 1.0, 1.08) + vec3(0.015, 0.02, 0.035), sky * uFx.y);
+  // The sky, as the grade has it (paler and warmer, or cleaner and bluer).
+  float sl = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  c = mix(c, mix(c, vec3(sl), uLookSGSky.x) * uLookSGSkyTint + uLookSGSky.yzw, sky * uFx.y);
   gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
 }
 `;
@@ -129,6 +133,9 @@ export class StorybookPass {
         uInkColor: { value: new THREE.Vector3() },
         uInkFade: { value: new THREE.Vector2() },
         uFx: { value: new THREE.Vector2() },
+        // The grade's sky, shared with the materials' grade (look.js).
+        uLookSGSky: LOOK.uLookSGSky,
+        uLookSGSkyTint: LOOK.uLookSGSkyTint,
       },
       vertexShader: VERT,
       fragmentShader: COMPOSITE_FRAG,

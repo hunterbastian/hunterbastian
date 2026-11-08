@@ -14,7 +14,7 @@ import { clamp } from "./core/math.js";
 import { DynamicResolution } from "./core/dynres.js";
 import { makeRng, hash } from "./core/rng.js";
 import { World } from "./world/world.js";
-import { LOOK, setLookScreen } from "./world/look.js";
+import { LOOK, setLookScreen, setStoryGrade } from "./world/look.js";
 import { RetroPass } from "./world/retro.js";
 import { RetroSDPass } from "./world/retro-sd.js";
 import { StorybookPass } from "./world/storybook.js";
@@ -90,6 +90,9 @@ function resolveStyle() {
   return settings.style || STYLE.default;
 }
 let style = resolveStyle();
+// Storybook's colour grade (?grade= wins over the saved setting).
+const applyGrade = () => setStoryGrade(params.get("grade") || settings.grade);
+applyGrade();
 
 /* ----------------------------------------------------------------------- */
 /* Renderer, scene, camera                                                   */
@@ -515,6 +518,10 @@ menu.onSettingsChange = (next) => {
     resize();
   } else if (style === "pixel" && settings.pixelSize !== prev.pixelSize) {
     resize();
+  }
+  if (settings.grade !== prev.grade) {
+    applyGrade();
+    redraw = true;
   }
   if (settings.quality !== prev.quality) resize(); // dynamic resolution follows the quality setting
   if (settings.quality !== prev.quality && params.get("quality") === null) {

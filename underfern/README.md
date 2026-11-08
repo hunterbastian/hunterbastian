@@ -293,9 +293,19 @@ device.
 - **Graphics style:**
   - **Storybook**: the island as a painted picture book, in the spirit of the
     soft open country of *Breath of the Wild*:
-    - **In every surface's own shader** (free, phones included): a lush palette
-      with spring greens, warm light and cool shade; a painted middle distance
-      that turns blue in layers; and light that falls in three soft bands.
+    - **In every surface's own shader** (free, phones included): the colour
+      grade, a painted middle distance that sinks into the grade's haze in
+      layers, and light that falls in three soft bands.
+    - **Colour grade** (Settings, under Storybook):
+      - *Jungle film* (default): a humid, cinematic grade in the spirit of
+        Jurassic Park and The Isle. Deep emerald greens, golden light over
+        teal-green shade, a firm filmic contrast and a wet, misty distance.
+      - *Dark fantasy*: in the spirit of Dark Souls and Elden Ring. A muted,
+        earthy palette with khaki and olive greens, gold light over cool grey
+        shade lifted into haze, a golden misty distance and a heavier
+        vignette.
+      - *Picture book*: the bright first grade, with spring greens and a blue
+        painted distance.
     - **In a short finishing pass:** soft ink on silhouettes, fading with
       distance (not on Low), and brushwork, a Kuwahara filter that flattens
       texture noise into patches of colour (High only).
@@ -346,7 +356,7 @@ URL parameters, handy for sharing a moment or testing:
 | `?creative=1` | with `?species`: Creative mode (full grown, can't be hurt, never saved) |
 | `?pos=x,z` | spawn position in metres |
 | `?t=0..1` | time of day (0 midnight, 0.25 sunrise, 0.5 noon, 0.75 sunset); pauses the clock |
-| `?style=retro\|story\|sd\|detailed\|pixel` · `?pixel=0..1` | render style · pixel size |
+| `?style=retro\|story\|sd\|detailed\|pixel` · `?pixel=0..1` · `?grade=jungle\|fantasy\|picture` | render style · pixel size · Storybook's colour grade |
 | `?quality=low\|high` | force a quality profile |
 | `?adaptive=0\|1` · `?scale=0.4..1` | dynamic resolution off / on (it is off under automation) · pin the render scale |
 | `?seed=N` | a different island |

@@ -4,6 +4,17 @@
 /** @type {{ v: string, date: string, title: string, notes: string[] }[]} */
 export const CHANGELOG = [
   {
+    v: "0.21",
+    date: "2026-11-08",
+    title: "Colour grades",
+    notes: [
+      "Storybook gets a colour grade in Settings.",
+      "Jungle film, the new default: deep humid greens, golden light over teal shade, a filmic contrast and a wet, misty distance.",
+      "Dark fantasy: muted, earthy colour, gold light over cool grey shade, a golden haze and a heavier vignette.",
+      "Picture book: the bright first look, with spring greens and a blue painted distance.",
+    ],
+  },
+  {
     v: "0.20",
     date: "2026-11-08",
     title: "Storybook",

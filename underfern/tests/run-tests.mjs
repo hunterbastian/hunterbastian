@@ -821,6 +821,15 @@ const SUITES = [
           expect(story.quality !== "low" || (!story.stats.brush && !story.stats.ink), `no brushwork or ink on Low, got ${JSON.stringify(story.stats)}`);
           expect(lum(story.stats.scene) > 25, `the Storybook frame should hold the picture, got mean ${story.stats.scene}`);
           await shot(page, "touch-storybook");
+          // Its colour grade: only live in Storybook; Dark fantasy applies and is saved.
+          const gradeOn = await page.evaluate(() => !document.querySelector('[data-field="grade"]').classList.contains("is-disabled"));
+          expect(gradeOn, "the colour grade should be live while Storybook is picked");
+          await page.locator(".segmented:has(input[value='fantasy']) label:has(input[value='fantasy'])").click({ timeout: 60_000 });
+          const graded = await page.evaluate(async () => {
+            const { LOOK } = await import("/src/world/look.js");
+            return { sg: LOOK.uLookSG.value.toArray(), saved: JSON.parse(localStorage.getItem("underfern.settings.v1") || "{}").grade };
+          });
+          expect(graded.saved === "fantasy" && graded.sg[2] > 0.2, `picking Dark fantasy should apply and save it, got ${JSON.stringify(graded)}`);
           // Battery saver: a switch, saved on the device.
           await page.locator(".switch[data-act='battery']").click({ timeout: 60_000 });
           const bat = await page.evaluate(() => ({

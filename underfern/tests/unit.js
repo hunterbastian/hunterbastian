@@ -23,9 +23,9 @@ import { weatherForDay, WEATHER_KINDS } from "../src/world/sky.js";
 import { isRotated, appSize, toApp, onAppResize } from "../src/core/screen.js";
 import { Input } from "../src/player/input.js";
 import { ThirdPersonCamera } from "../src/player/camera.js";
-import { speciesSilhouette, normalizeSettings, STYLES } from "../src/ui/menu.js";
+import { speciesSilhouette, normalizeSettings, STYLES, GRADES } from "../src/ui/menu.js";
 import { StorybookPass, STORY } from "../src/world/storybook.js";
-import { LOOK } from "../src/world/look.js";
+import { LOOK, STORY_GRADES, setStoryGrade } from "../src/world/look.js";
 
 /* --- Tiny harness --------------------------------------------------------- */
 
@@ -133,6 +133,17 @@ test("storybook: a saved Storybook choice sticks; brushwork on High only, ink ev
   assert(!pass.brush && !pass.ink && pass.composite.defines.BRUSH === 0 && pass.composite.defines.INK === 0, "Low: neither");
   assert(STORY.ink > 0 && STORY.ink < 0.85, `ink a touch lighter than the look study (${STORY.ink})`);
   pass.dispose();
+  // Its colour grades: jungle film (the default), dark fantasy and the picture book.
+  assert.equal(normalizeSettings({}).grade, "jungle", "the default grade:");
+  assert.equal(normalizeSettings({ grade: "fantasy" }).grade, "fantasy", "a saved grade is kept:");
+  assert.equal(normalizeSettings({ grade: "noir" }).grade, "jungle", "an unknown grade falls back:");
+  for (const g of GRADES) assert(STORY_GRADES[g], `${g} has its numbers`);
+  assert.equal(setStoryGrade("fantasy"), "fantasy", "setStoryGrade applies a known grade:");
+  const fantasy = LOOK.uLookSG.value.toArray();
+  assert(fantasy[2] > 0.2 && fantasy[3] > 0, "dark fantasy desaturates and deepens the vignette");
+  assert(LOOK.uLookSGLight.value.z < 0.85, "dark fantasy's light is gold");
+  assert.equal(setStoryGrade("noir"), "jungle", "an unknown grade falls back to the jungle film:");
+  assert(LOOK.uLookSG.value.y > 0.1 && LOOK.uLookSGShade.value.x < 0.95, "the jungle film has a firm S and teal-green shade");
   // main.js turns it on only in the Storybook style; until then every material runs as before.
   assert.equal(LOOK.uLookStory.value.x + LOOK.uLookStory.value.y + LOOK.uLookStory.value.z, 0, "the storybook look starts off:");
 });

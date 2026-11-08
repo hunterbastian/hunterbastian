@@ -55,10 +55,17 @@ working (add, don't rename) and note it in your report.
     Wild*'s open country, its own look):
     - Most of it is in the materials, switched on by `LOOK.uLookStory`
       (x palette, y painted distance, z cel bands, each 0..1; 0 in every other
-      style, set by `main.js`). `lookGrade` adds vibrance, pushes greens toward
-      spring green, warms light and cools shade, and lifts the S-curve a little.
-      `lookAtmosphere` mixes `uLookAerial` in from ~140 m (scale 650 m). The wrap
-      lighting is stepped into three soft bands.
+      style, set by `main.js`). The wrap lighting is stepped into three soft
+      bands.
+    - Its colour comes from a grade: `STORY_GRADES` (`jungle` default,
+      `fantasy`, `picture`) fill the `uLookSG*` uniforms through
+      `setStoryGrade(name)` (`settings.grade`, `?grade=`). `lookGrade` applies
+      the grade's vibrance and desaturation, its green nudges in shade and in
+      sun, its split tone, its extra S and toe. `lookAtmosphere` mixes in the
+      grade's haze from ~140 m (scale 650 m): `uLookAerial` pulled toward the
+      horizon, desaturated and tinted. `lookFinish` adds the grade's extra
+      vignette, and the Storybook pass treats the sky with the grade's sky
+      numbers (shared uniforms).
     - `world/storybook.js` then draws the scene (≤ 1080 rows, 720 on Low) into a
       target with a depth texture, posing as an XR target as the retro passes do.
       One composite adds a Kuwahara brushwork pass (64 taps; High only), soft ink
