@@ -491,23 +491,31 @@ const SUITES = [
           await waitState(page, "playing");
           const style = await page.evaluate(() => [__underfern.style, document.getElementById("game").dataset.style]);
           expect(style[0] === "detailed" && style[1] === "detailed", `expected the detailed style, got ${style}`);
-          // Spawns sit near a lake: sprint the camera-relative way with dry, gentle ground ahead.
-          const key = await page.evaluate(() => {
-            const t = __underfern.world.terrain;
-            const p = __underfern.player.position;
-            const yaw = __underfern.controller.camera.yaw;
-            const ways = [["KeyW", 0], ["KeyS", Math.PI], ["KeyA", Math.PI / 2], ["KeyD", -Math.PI / 2]];
-            for (const [k, off] of ways) {
-              const a = yaw + off;
+          // Spawns sit near a lake, facing anywhere: turn the animal and the camera
+          // toward dry, gentle ground first, so this measures the sprint, not a turn.
+          const key = "KeyW";
+          await page.evaluate(() => {
+            const u = __underfern;
+            const t = u.world.terrain;
+            const p = u.player;
+            const pos = p.position;
+            let best = p.heading;
+            for (let i = 0; i < 16; i++) {
+              const a = p.heading + (i % 2 ? 1 : -1) * Math.ceil(i / 2) * (Math.PI / 8);
               let ok = true;
               for (let d = 4; d <= 40 && ok; d += 4) {
-                const x = p.x + Math.sin(a) * d;
-                const z = p.z + Math.cos(a) * d;
+                const x = pos.x + Math.sin(a) * d;
+                const z = pos.z + Math.cos(a) * d;
                 if (t.isWater(x, z) || t.slopeAt(x, z) > 0.25) ok = false;
               }
-              if (ok) return k;
+              if (ok) {
+                best = a;
+                break;
+              }
             }
-            return "KeyW";
+            p.heading = best;
+            u.controller.camera.yaw = best;
+            u.advance(0.1);
           });
           const r = await driveWithKeys(page, ["ShiftLeft", key], 2.5);
           expect(r.dist > 3, `allosaurus moved only ${r.dist.toFixed(2)} m sprinting for 2.5 s (${key})`);
