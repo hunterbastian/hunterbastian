@@ -278,8 +278,9 @@ const ZONE_NOTE = {
   lowlands: "The Lowlands — lakes, rivers and deep forest",
   highlands: "The Highlands — open tableland and mesas",
   mountains: "The Mountains — rock, snow and the high passes",
+  heart: "The Heart Lake — still water in the mountains' ring",
 };
-const ZONE_ICON = { shore: "waves", lowlands: "leaf", highlands: "mesa", mountains: "peak" };
+const ZONE_ICON = { shore: "waves", lowlands: "leaf", highlands: "mesa", mountains: "peak", heart: "drop" };
 
 /* ----------------------------------------------------------------------- */
 /* Save / load                                                               */

@@ -28,7 +28,7 @@ const BIOME_NAME = {
 };
 const UPLAND_M = 45; // plains above this read as "Upland meadow"
 /** The island's rings, as the readout names them (terrain.zoneAt). */
-const ZONE_NAME = { shore: "The Shore", lowlands: "The Lowlands", highlands: "The Highlands", mountains: "The Mountains" };
+const ZONE_NAME = { shore: "The Shore", lowlands: "The Lowlands", highlands: "The Highlands", mountains: "The Mountains", heart: "The Heart Lake" };
 const MARKER_COLOR = {
   water: "#3f8f98",
   plant: "#6d8a3a",

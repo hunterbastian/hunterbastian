@@ -54,8 +54,11 @@ const RIVER_HEAD = 95; // design metres over which a spring's gully deepens into
 // The island climbs in rings: shore (the coastal belt, COAST_W), lowlands,
 // highlands from about here inland (design metres, the edge wandering ±75 m),
 // and the mountains at the heart.
-const HIGHLAND_IN0 = 260;
-const HIGHLAND_IN1 = 360;
+// The mountain ring's breach (radians of arc left open), where the heart
+// lake's river runs out.
+const RING_GAP = 1.5;
+const HIGHLAND_IN0 = 230;
+const HIGHLAND_IN1 = 330;
 
 const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
 
@@ -493,8 +496,8 @@ const LAYERS = 6;
 // World metres covered by one repeat of each layer (near scale).
 const LAYER_TILE = [2.6, 2.8, 3.0, 6.5, 3.6, 4.2];
 /** Metres above the sea where the massif's snow caps begin (a dusting reaches lower). */
-/** The island's rings, from the sea inward (see Terrain.zoneAt). */
-export const ZONES = ["shore", "lowlands", "highlands", "mountains"];
+/** The island's rings, from the sea inward, and the basin at its heart (see Terrain.zoneAt). */
+export const ZONES = ["shore", "lowlands", "highlands", "mountains", "heart"];
 export const SNOW_LINE = 145;
 // Detail normal strength per layer (height units → slope).
 const LAYER_BUMP = [5, 5, 5, 8, 4, 3];
@@ -1687,6 +1690,8 @@ export class Terrain {
     this.rivers = [];
     /** Mesas and buttes: [{ kind, x, z, r, top, base, reach, ramp: { x0, z0, x1, z1, width } | null }]. */
     this.mesas = [];
+    /** The heart lake inside the mountains' ring: { x, z, r } (also in `lakes`, flagged `heart`). */
+    this.heartLake = null;
     /** Generation statistics (timings, land fraction, counts) for debugging. */
     this.stats = {};
     /** Circles findSpawnPoint keeps out of (landmarks): [{ x, z, r }]. */
@@ -1722,7 +1727,7 @@ export class Terrain {
     this._paint(g);
     timings.paint = now() - t;
     // The rings (zoneAt) read the layout's highland and mountain masks.
-    this._zones = { lgrid: g.lgrid, hm: g.lHm, mm: g.lMm, k: g.k };
+    this._zones = { lgrid: g.lgrid, hm: g.lHm, mm: g.lMm, basin: g.lBasin, k: g.k };
 
     // Everything above works relative to the sea; store absolute heights.
     if (seaLevel !== 0) {
@@ -1955,10 +1960,10 @@ export class Terrain {
 
   /**
    * Which ring of the island (x, z) is in: "shore" (the coastal belt),
-   * "lowlands", "highlands" (the tableland round the mountains) or
-   * "mountains" (the range at the heart, and anything above ~105 m). Null on
-   * water.
-   * @returns {"shore" | "lowlands" | "highlands" | "mountains" | null}
+   * "lowlands", "highlands" (the tableland round the mountains),
+   * "mountains" (the ring of the range, and anything above ~105 m) or
+   * "heart" (the basin inside the ring, round the heart lake). Null on water.
+   * @returns {"shore" | "lowlands" | "highlands" | "mountains" | "heart" | null}
    */
   zoneAt(x, z) {
     const Z = this._zones;
@@ -1966,7 +1971,9 @@ export class Terrain {
     const dx = x / Z.k;
     const dz = z / Z.k;
     const h = this.heightAt(x, z) - this.seaLevel;
-    if (h > 105 || this._lsample(Z, Z.mm, dx, dz) > 0.3) return "mountains";
+    if (h > 105) return "mountains";
+    if (h < 60 && this._lsample(Z, Z.basin, dx, dz) > 0.5) return "heart";
+    if (this._lsample(Z, Z.mm, dx, dz) > 0.3) return "mountains";
     if (this._lsample(Z, Z.hm, dx, dz) > 0.5) return "highlands";
     if (this.coastAt(x, z) > 0.02) return "shore";
     return "lowlands";
@@ -2314,7 +2321,7 @@ export class Terrain {
       lgrid: { n: LAYOUT_RES + 1, origin: -DESIGN_SIZE / 2, step: DESIGN_SIZE / LAYOUT_RES },
       field: {
         c: 0.5, m: 0.5, wa: 0.5, wb: 0.5, cb: 0.5, mtn: 0.5, hm: 0.5, mm: 0.5, sw: 0.5, cliff: 0.5,
-        cliffN: 0.5, swN: 0.5, pn: 0.5, mesaN: 0.5,
+        cliffN: 0.5, swN: 0.5, pn: 0.5, mesaN: 0.5, basin: 0.5, basinFloor: 0.5, troughFloor: 0.5,
         preWa: 0.5, preWb: 0.5, preCb: 0.5, preCliffN: 0.5, preSwN: 0.5, prePn: 0.5, preMesaN: 0.5,
       },
     };
@@ -2341,36 +2348,38 @@ export class Terrain {
       g.bays.push({ x: Math.cos(a) * d, z: Math.sin(a) * d, r: R * rand(rng, 0.13, 0.2), depth: rand(rng, 0.16, 0.26) });
     }
 
-    // Mountain spine: a bent quadratic Bézier through the island's heart, so
-    // the mountains are the core the highlands, lowlands and shores ring.
-    const ra = rng() * TAU;
-    const rc = R * rand(rng, 0, 0.08);
-    const cx = Math.cos(ra) * rc;
-    const cz = Math.sin(ra) * rc;
-    const dirA = ra + Math.PI / 2 + rand(rng, -0.4, 0.4);
-    const halfLen = R * rand(rng, 0.3, 0.36);
-    const bend = R * rand(rng, -0.12, 0.12);
-    const ax = cx - Math.cos(dirA) * halfLen;
-    const az = cz - Math.sin(dirA) * halfLen;
-    const bx = cx + Math.cos(dirA) * halfLen;
-    const bz = cz + Math.sin(dirA) * halfLen;
-    const qx = cx + Math.cos(ra) * bend * 2;
-    const qz = cz + Math.sin(ra) * bend * 2;
+    // The mountains: a ring round the island's heart, breached on one side —
+    // a caldera holding the heart lake. The spine runs along the crest from
+    // one side of the breach round to the other. (Five draws, as the older
+    // straight spine took, so the rest of the layout keeps its sequence.)
+    const ra = rng() * TAU; // the breach faces this way
+    const rc = R * rand(rng, 0, 0.05);
+    const cx = -Math.cos(ra) * rc;
+    const cz = -Math.sin(ra) * rc;
+    const ovalA = ra + Math.PI / 2 + rand(rng, -0.4, 0.4);
+    const ringR = R * rand(rng, 0.27, 0.3);
+    const ecc = rand(rng, -0.1, 0.1);
     const spine = [];
-    const SPINE_PTS = 28;
+    const SPINE_PTS = 64;
     for (let i = 0; i <= SPINE_PTS; i++) {
-      const t = i / SPINE_PTS;
-      const a0 = (1 - t) * (1 - t);
-      const a1 = 2 * (1 - t) * t;
-      const a2 = t * t;
-      spine.push(a0 * ax + a1 * qx + a2 * bx, a0 * az + a1 * qz + a2 * bz);
+      const a = ra + RING_GAP / 2 + (i / SPINE_PTS) * (TAU - RING_GAP);
+      const ux = Math.cos(a);
+      const uz = Math.sin(a);
+      const along = ux * Math.cos(ovalA) + uz * Math.sin(ovalA);
+      const rr = ringR * (1 + ecc * (2 * along * along - 1));
+      spine.push(cx + ux * rr, cz + uz * rr);
     }
     g.spine = spine;
     g.spineLen = polylineLength(spine);
-    g.rangeWidth = rand(rng, 100, 125);
+    g.rangeWidth = rand(rng, 74, 88);
     g.spineReach = g.rangeWidth * 3.4 + 90;
-    // One flank of the range is a steep escarpment, the other a long slope.
-    g.steepSide = rng() < 0.5 ? 1 : -1;
+    // The ring's inner flank is the steep one: the caldera's walls (side +1
+    // of the spine is its inside). The draw keeps the sequence.
+    rng();
+    g.steepSide = 1;
+    // The basin inside the ring: its floor runs out to about basinR, where
+    // the inner walls start up.
+    g.ring = { x: cx, z: cz, r: ringR, breach: ra, basinR: ringR - g.rangeWidth * 0.74 * 1.55 * 0.7 };
 
     // Islets: small rocky outcrops in open water, placed on the bare coast field.
     g.islets = [];
@@ -2403,6 +2412,7 @@ export class Terrain {
     g.lHm = new Float32Array(LN * LN);
     g.lMm = new Float32Array(LN * LN);
     g.lSw = new Float32Array(LN * LN);
+    g.lBasin = new Float32Array(LN * LN);
     // Low-frequency inputs of the height function, kept so the vertices can
     // interpolate them (Catmull-Rom, C1 — no shading creases) instead of
     // re-evaluating a dozen noise octaves each.
@@ -2430,6 +2440,7 @@ export class Terrain {
         g.lSwN[i] = f.swN;
         g.lPn[i] = f.pn;
         g.lMesaN[i] = f.mesaN;
+        g.lBasin[i] = f.basin;
         if (rest[i] + mtn[i] > maxTotal) {
           maxTotal = rest[i] + mtn[i];
           maxIdx = i;
@@ -2642,6 +2653,8 @@ export class Terrain {
     let mm = 0;
     let rough = 0;
     let sw = 0;
+    let basin = 0; // 0..1 into the heart's basin, inside the mountains' ring
+    let trough = 0; // 0..1 into the trough out through the ring's breach
     if (m < 0) {
       // Sea floor: a shallow shelf off the beaches, then a drop to the deep.
       const mo = -m;
@@ -2680,6 +2693,30 @@ export class Terrain {
         hm = Math.max(hm, smoothstep(w * 2.6, w * 1.0, dd));
       }
       hm *= fall;
+      // The heart: inside the mountains' ring the ground sinks to a basin
+      // a few metres above the water, with the heart lake in the middle.
+      if (g.ring) {
+        const rg = g.ring;
+        const dc = Math.hypot(x - rg.x, z - rg.z) + 18 * g.nDetail(x * 0.012 + 17.1, z * 0.012 - 4.3);
+        basin = smoothstep(rg.basinR + 40, rg.basinR - 25, dc);
+        if (basin > 0) {
+          hm *= 1 - basin;
+          f.basinFloor = 3.2 + 4 * smoothstep(0.35, 1, dc / rg.basinR) + 0.8 * g.nDetail(x * 0.03 - 9.7, z * 0.03);
+        }
+        // The breach: a broad trough out of the basin through the gap in the
+        // ring, climbing gently to the highlands' edge — the lake's river
+        // runs out this way, and it's the easy way in.
+        const ang = Math.atan2(z - rg.z, x - rg.x);
+        const da = Math.abs(Math.atan2(Math.sin(ang - rg.breach), Math.cos(ang - rg.breach)));
+        trough =
+          (1 - smoothstep(RING_GAP * 0.16, RING_GAP * 0.34, da)) *
+          smoothstep(rg.basinR * 0.6, rg.basinR, dc) *
+          (1 - smoothstep(rg.r + 110, rg.r + 200, dc));
+        if (trough > 0) {
+          hm *= 1 - trough;
+          f.troughFloor = 4.5 + Math.max(0, dc - rg.basinR) * 0.12;
+        }
+      }
       if (hm > 0) {
         // Tableland stepped into plateaus: gentle swells in most places,
         // mesa-like escarpments where the mesa noise says so.
@@ -2695,8 +2732,10 @@ export class Terrain {
         const terr = (fl + smoothstep(0.5 - sharp, 0.5 + sharp, tq - fl)) * step - wander;
         h = lerp(hb, terr, hm * (0.3 + 0.62 * mesa));
       }
+      if (basin > 0) h = lerp(h, f.basinFloor, basin);
+      if (trough > 0 && f.troughFloor < h) h = lerp(h, f.troughFloor, trough);
       if (sd < 1e8) {
-        mtn = this._mountain(g, x, z, wx, wz, sd, dd, st, side, w, wa, wb) * smoothstep(0, 14, m);
+        mtn = this._mountain(g, x, z, wx, wz, sd, dd, st, side, w, wa, wb) * smoothstep(0, 14, m) * (1 - trough);
         mm = f.mm;
         rough = f.rough;
       }
@@ -2727,6 +2766,7 @@ export class Terrain {
     f.swN = swN;
     f.pn = pn;
     f.mesaN = mesaN;
+    f.basin = basin;
     return h;
   }
 
@@ -2772,7 +2812,7 @@ export class Terrain {
     for (let i = 0; i < butteCount; i++) plan.push("butte");
     // The highland tableland, as layout cells, to draw a mesa's site from.
     const highCells = [];
-    for (let i = 0; i < LN * LN; i++) if (g.lHm[i] >= 0.6 && mtn[i] < 0.3 && g.lC[i] * R > 120) highCells.push(i);
+    for (let i = 0; i < LN * LN; i++) if (g.lHm[i] >= 0.6 && mtn[i] < 2 && g.lC[i] * R > 120 && g.lBasin[i] < 0.05) highCells.push(i);
 
     for (const kind of plan) {
       const mesa = kind === "mesa";
@@ -2792,7 +2832,7 @@ export class Terrain {
           x = Math.cos(a) * dd;
           z = Math.sin(a) * dd;
         }
-        const r = mesa ? rand(rng, 40, 60) : rand(rng, 10, 16);
+        const r = mesa ? rand(rng, 34, 58) : rand(rng, 10, 16);
         const H = mesa ? rand(rng, 24, 36) : rand(rng, 38, 58);
         const talus = mesa ? 0.42 : 0.3;
         const wall = mesa ? Math.max(3, H * 0.11) : Math.max(2.2, H * 0.07);
@@ -2808,7 +2848,7 @@ export class Terrain {
         if (g.routes.some((rt) => this._polyDist(rt.pts, x, z) < reach + rt.fw + 25) && ++rej.route) continue;
         const i0 = idx(x, z);
         const h0 = rest[i0];
-        if ((h0 < 2.5 || h0 > 95 || mtn[i0] > 0.3 || g.lSw[i0] > 0.2) && ++rej.site) continue;
+        if ((h0 < 2.5 || h0 > 95 || mtn[i0] > 2 || g.lSw[i0] > 0.2 || g.lBasin[i0] > 0.05) && ++rej.site) continue;
         if ((wantHigh ? g.lHm[i0] < 0.6 : g.lHm[i0] > (mesa ? 1 : 0.35)) && ++rej.zone) continue;
         let lo = h0;
         let hi = h0;
@@ -2819,7 +2859,9 @@ export class Terrain {
             const px = x + Math.cos(t) * rr;
             const pz = z + Math.sin(t) * rr;
             const j = idx(px, pz);
-            if (inland(px, pz) < 30 || mtn[j] > 0.4 || g.lSw[j] > 0.35) ok = false;
+            if (inland(px, pz) < 30 || g.lSw[j] > 0.35 || g.lBasin[j] > 0.05) ok = false;
+            // Mountain foothills may run under the scree, not under the mesa.
+            if (rr <= r + wamp && mtn[j] > 3) ok = false;
             if (!mesa && g.lHm[j] > 0.45) ok = false;
             if (rr <= r + wamp) {
               lo = Math.min(lo, rest[j]);
@@ -2863,7 +2905,7 @@ export class Terrain {
             const fz = z + uz * (r + wamp + rampLen);
             if (inland(fx, fz) < 25) continue;
             const jf = idx(fx, fz);
-            if (mtn[jf] > 0.3 || g.lSw[jf] > 0.35 || Math.abs(rest[jf] - M.base) > 6) continue;
+            if (mtn[jf] > 2 || g.lSw[jf] > 0.35 || Math.abs(rest[jf] - M.base) > 6) continue;
             // Nor cross a terrace step on its way: the ground all along its
             // line stays level with the base, so the ramp ends on the ground.
             let low = Infinity;
@@ -3058,6 +3100,9 @@ export class Terrain {
     const avoid = [];
     for (const o of g.lookouts) avoid.push({ x: o.x, z: o.z, r: 60 });
     for (const p of g.passes) avoid.push({ x: p.x, z: p.z, r: 70 });
+    // None in the heart's basin or at the foot of the ring's steep inner wall
+    // (the same smearing as below).
+    if (g.ring) avoid.push({ x: g.ring.x, z: g.ring.z, r: g.ring.basinR + 45 });
     // No caves in mesas or buttes: a sheer wall above a mouth smears into its
     // approach on a coarse mesh, and a butte is too slender to hollow.
     for (const M of g.mesas) {
@@ -3904,7 +3949,6 @@ export class Terrain {
     const L = g.lgrid;
     const LN = L.n;
     const H = g.lH;
-    const target = randInt(rng, 3, 5);
 
     // Candidate sites: well inland, out of the mountains, low ground preferred.
     const pickSites = (minCoast, maxHigh, maxH) => {
@@ -3922,10 +3966,32 @@ export class Terrain {
     };
 
     const lakes = [];
+    // The heart lake, in the basin inside the mountains' ring (its own
+    // stream; its banks reach no further than the basin, so they never cut
+    // into the ring's walls).
+    if (g.ring) {
+      const hr = makeRng(hash("underfern-heart-lake", this.seed));
+      const rg = g.ring;
+      const r = rg.basinR * rand(hr, 0.42, 0.5);
+      const lobes = [{ x: rg.x, z: rg.z, r, aspect: rand(hr, 0.78, 0.95), angle: hr() * Math.PI }];
+      for (let q = 0, extra = randInt(hr, 1, 2); q < extra; q++) {
+        const a = hr() * TAU;
+        const d = r * rand(hr, 0.3, 0.5);
+        lobes.push({ x: rg.x + Math.cos(a) * d, z: rg.z + Math.sin(a) * d, r: r * rand(hr, 0.4, 0.55), aspect: rand(hr, 0.75, 0.95), angle: hr() * Math.PI });
+      }
+      for (const lobe of lobes) {
+        lobe.ca = Math.cos(lobe.angle);
+        lobe.sa = Math.sin(lobe.angle);
+      }
+      let reach = 0;
+      for (const lobe of lobes) reach = Math.max(reach, Math.hypot(lobe.x - rg.x, lobe.z - rg.z) + lobe.r / lobe.aspect);
+      lakes.push({ id: 0, x: rg.x, z: rg.z, r, depth: rand(hr, 6, 9), lobes, reach: Math.min(reach * 1.15 + 45, rg.basinR - 5), heart: true });
+    }
+    const target = randInt(rng, 3, 5) + lakes.length;
     const tryFill = (cands) => {
       for (const c of cands) {
         if (lakes.length >= target) break;
-        const r = lakes.length === 0 ? rand(rng, 70, 92) : rand(rng, 40, 66);
+        const r = lakes.every((o) => o.heart) ? rand(rng, 70, 92) : rand(rng, 40, 66);
         if (lakes.some((o) => Math.hypot(o.x - c.x, o.z - c.z) < o.r + r + 190)) continue;
         if (this._mesaClear(g, c.x, c.z) < r * 1.5 + 30) continue;
         // Keep basins out of the range's footprint.
@@ -3984,8 +4050,10 @@ export class Terrain {
     this.lakes = lakes.map((lk) => {
       let area = 0;
       for (const lobe of lk.lobes) area = Math.max(area, lobe.r * lobe.r * lobe.aspect);
-      return { x: lk.x * k, z: lk.z * k, r: Math.sqrt(area) * k * 1.15 };
+      return { x: lk.x * k, z: lk.z * k, r: Math.sqrt(area) * k * 1.15, heart: !!lk.heart };
     });
+    /** The heart lake in the mountains' ring (or null): { x, z, r }. */
+    this.heartLake = this.lakes.find((lk) => lk.heart) || null;
   }
 
   /** Index box [ix0, ix1, iz0, iz1] of grid points within `reach` of (x, z). */
@@ -4103,7 +4171,16 @@ export class Terrain {
         (sg) => Math.hypot(sg.pts[sg.pts.length - 2] - pts[pts.length - 2], sg.pts[sg.pts.length - 1] - pts[pts.length - 1]) < 60
       );
 
-    // River 1: spring → a lake → out to the sea.
+    // River 1: the heart lake's outlet, out through the breach in the ring to
+    // the sea (failing a heart lake: a spring → a lake → out to the sea).
+    const heart = g.lakes.find((lk) => lk.heart);
+    if (heart) {
+      const outlet = search([nodeAt(heart.x, heart.z)], isOcean, null);
+      if (outlet && outlet.length > 4) {
+        segments.push({ pts: toDesign(outlet), w0: 14, w1: 24, d0: 2.2, d1: 2.8, mouth: true });
+        riverCount++;
+      }
+    }
     for (let li = 0; li < g.lakes.length && riverCount === 0; li++) {
       const lk = g.lakes[li];
       const cands = springs
@@ -4125,7 +4202,7 @@ export class Terrain {
 
     // Further rivers: a spring straight to the sea, or into any lake on the way.
     const anyLake = (node) => g.lLakeId[lIdx(node)] >= 0 || isOcean(node);
-    for (let attempt = 0; attempt < 18 && riverCount < 2; attempt++) {
+    for (let attempt = 0; attempt < 18 && riverCount < (heart ? 3 : 2); attempt++) {
       const pool = springs.filter((s) => farFromUsed(s, 380));
       if (!pool.length) break;
       const s = pool[randInt(rng, 0, pool.length - 1)];
@@ -5411,6 +5488,20 @@ export class Terrain {
       ctx.strokeText(label, lx, ly);
       ctx.fillStyle = INK;
       ctx.fillText(label, lx, ly);
+      ctx.textAlign = "start";
+    }
+
+    // The heart lake, named in the plate's italic.
+    if (this.heartLake) {
+      const hl = this.heartLake;
+      ctx.textBaseline = "middle";
+      ctx.textAlign = "center";
+      ctx.font = `italic ${Math.round(12.5 * u)}px "Fraunces", Georgia, serif`;
+      ctx.lineWidth = 3.2 * u;
+      ctx.strokeStyle = "rgba(226, 236, 236, 0.85)";
+      ctx.strokeText("The Heart Lake", P(hl.x), P(hl.z));
+      ctx.fillStyle = "rgba(28, 52, 62, 0.92)";
+      ctx.fillText("The Heart Lake", P(hl.x), P(hl.z));
       ctx.textAlign = "start";
     }
 

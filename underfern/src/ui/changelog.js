@@ -4,6 +4,17 @@
 /** @type {{ v: string, date: string, title: string, notes: string[] }[]} */
 export const CHANGELOG = [
   {
+    v: "0.19",
+    date: "2026-11-08",
+    title: "The Heart Lake",
+    notes: [
+      "A lake at the heart of the island: still water in a forested basin, with the peaks all round it.",
+      "The mountains now ring the basin like the rim of a crater, open on one side.",
+      "The lake's river runs out through that gap in a gorge to the sea. Walk up it, or come over a pass, to drink there.",
+      "The HUD names the Heart Lake when you reach its basin, and the map marks it.",
+    ],
+  },
+  {
     v: "0.18",
     date: "2026-11-06",
     title: "The island in rings",

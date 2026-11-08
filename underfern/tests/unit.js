@@ -532,7 +532,9 @@ test("massif: horn peaks near maxHeight, 1–2 passes, lookouts high on the ridg
   for (const p of t.peaks) assert.range(p.h, 90, t.maxHeight * 1.08, "every summit stands well above the highland");
   assert.range(t.passes.length, 1, 2, "passes");
   for (const p of t.passes) {
-    assert.range(p.h, 25, 110, "a pass sits well below the crest");
+    // A pass through the ring's steep inner wall is graded down toward the
+    // basin floor (a few metres up), so it can sit low: a gorge through the ring.
+    assert.range(p.h, 12, 110, "a pass sits well below the crest");
     assert(t.peaks.every((k) => k.h > p.h + 40), "the summits tower over the pass");
   }
   assert(t.lookouts.length >= 1, "at least one lookout");
@@ -657,7 +659,7 @@ test("mesas & buttes: stand out of the lowlands with sheer sides; every mesa top
   }
 });
 
-test("the island climbs in rings: shore, lowlands, highlands, mountains — each higher and nearer the heart", () => {
+test("the island climbs in rings: shore, lowlands, highlands, mountains — each higher and nearer the heart; the heart lake lies in a basin inside the mountains' ring", () => {
   const t = getHiTerrain();
   const stat = {};
   let mx = 0;
@@ -687,21 +689,38 @@ test("the island climbs in rings: shore, lowlands, highlands, mountains — each
     o.d += Math.hypot(p.x - mx, p.z - mz);
   }
   const share = (k) => stat[k].n / pts.length;
-  for (const k of ZONES) assert(stat[k] && share(k) > 0.07, `${k}: a real share of the island (${((stat[k]?.n || 0) / pts.length * 100).toFixed(0)}%)`);
+  const RINGS = ZONES.filter((k) => k !== "heart");
+  for (const k of RINGS) assert(stat[k] && share(k) > 0.07, `${k}: a real share of the island (${((stat[k]?.n || 0) / pts.length * 100).toFixed(0)}%)`);
+  assert(stat.heart && share("heart") > 0.01, "the heart: a basin inside the mountains' ring");
   for (const k of ZONES) {
     stat[k].h /= stat[k].n;
     stat[k].d /= stat[k].n;
   }
   const line = ZONES.map((k) => `${k} ${stat[k].h.toFixed(0)} m, ${stat[k].d.toFixed(0)} m out`).join(" · ");
-  for (let i = 1; i < ZONES.length; i++) {
-    const [a, b] = [ZONES[i - 1], ZONES[i]];
+  // Inside the ring the ground falls away to the lake: the heart is the
+  // nearest of all to the middle, and low.
+  assert(stat.heart.d < stat.mountains.d - 40, `the heart lies inside the mountains (${line})`);
+  assert(stat.heart.h < stat.mountains.h - 20, `the heart's basin lies low (${line})`);
+  const hl = t.heartLake;
+  assert(hl, "there is a heart lake");
+  assert(Math.hypot(hl.x - mx, hl.z - mz) < 120, `the heart lake is in the middle of the mountains' ring (${Math.hypot(hl.x - mx, hl.z - mz).toFixed(0)} m off)`);
+  assert(t.isFreshWater(hl.x, hl.z), "the heart lake is fresh water");
+  let ringed = 0;
+  for (let k = 0; k < 16; k++) {
+    const a = (k / 16) * Math.PI * 2;
+    if (t.zoneAt(hl.x + Math.cos(a) * hl.r * 1.15, hl.z + Math.sin(a) * hl.r * 1.15) === "heart") ringed++;
+  }
+  assert(ringed >= 12, `the heart lake's shore is in the heart (${ringed}/16)`);
+  for (let i = 1; i < RINGS.length; i++) {
+    const [a, b] = [RINGS[i - 1], RINGS[i]];
     assert(stat[b].h > stat[a].h + 5, `${b} stand higher than the ${a} (${line})`);
     assert(stat[b].d < stat[a].d - 30, `${b} lie nearer the heart than the ${a} (${line})`);
   }
   for (const p of t.peaks) assert.equal(t.zoneAt(p.x, p.z), "mountains", "every summit is in the mountains:");
-  // The lakes lie in the lowlands.
+  // The other lakes lie in the lowlands.
   let low = 0;
-  for (const lk of t.lakes) {
+  const others = t.lakes.filter((lk) => !lk.heart);
+  for (const lk of others) {
     const c = {};
     for (let k = 0; k < 16; k++) {
       const a = (k / 16) * Math.PI * 2;
@@ -710,7 +729,7 @@ test("the island climbs in rings: shore, lowlands, highlands, mountains — each
     }
     if ((c.lowlands || 0) >= Math.max(c.highlands || 0, c.mountains || 0)) low++;
   }
-  assert(low >= Math.ceil(t.lakes.length / 2), `most lakes lie in the lowlands (${low} of ${t.lakes.length})`);
+  assert(low >= Math.ceil(others.length / 2), `most lakes lie in the lowlands (${low} of ${others.length})`);
   assert.equal(t.zoneAt(t.half - 5, t.half - 5), null, "the open sea is in no zone:");
 });
 
@@ -862,7 +881,10 @@ test("caves: a raptor walks into a den; a Brontosaurus (and an adult Allosaurus)
     const raptor = at("utahraptor");
     assert(raptor.standHeight < den.height, `an adult raptor (${raptor.standHeight.toFixed(2)} m) fits a den (${den.height.toFixed(2)} m)`);
     walkAlong(raptor, intoCave(den), 25);
-    assert(t.inCave(raptor.position.x, raptor.position.z), "the raptor made it inside");
+    assert(
+      t.inCave(raptor.position.x, raptor.position.z),
+      `the raptor made it inside (den ${den.id} at ${e.x.toFixed(0)}, ${e.z.toFixed(0)}; stopped at ${raptor.position.x.toFixed(1)}, ${raptor.position.z.toFixed(1)}, ${Math.hypot(raptor.position.x - e.x, raptor.position.z - e.z).toFixed(1)} m from the mouth, grade ${(raptor._grade || 0).toFixed(2)})`
+    );
     assert(raptor.position.y < t.ceilingAt(raptor.position.x, raptor.position.z), "…and stands under the roof, on the floor");
     const sh = t.shelterAt(raptor.position.x, raptor.position.z);
     assert(sh > 0.05 && raptor._shade < 1 - 0.5 * sh, `the den darkens it (shelter ${sh.toFixed(2)}, shade ${raptor._shade.toFixed(2)}, ${Math.hypot(raptor.position.x - e.x, raptor.position.z - e.z).toFixed(1)} m in)`);

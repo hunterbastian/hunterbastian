@@ -282,7 +282,8 @@ export class Terrain {
   findSpawnPoint(rng, { biomes, minHeight = 1, maxSlope = 0.35, near, tries = 300 } = {}) // → {x, z} | null
                       // near = { x, z, minR, maxR } restricts to a ring; never inside a keep-out
   coastAt(x, z)       // 0..1 how far into the coastal belt: 1 on the open sand, ~0.5 in the dunes, 0 inland
-  zoneAt(x, z)        // the island's ring: "shore" | "lowlands" | "highlands" | "mountains" (ZONES), null on water
+  zoneAt(x, z)        // the island's ring: "shore" | "lowlands" | "highlands" | "mountains" | "heart" (ZONES), null on water
+  heartLake;          // { x, z, r } the lake in the basin inside the mountains' ring (also in `lakes`, flagged `heart`)
   mesas;              // [{ kind: "mesa" | "butte", x, z, r /* rim radius */, top, base /* above the sea */,
                       //   reach /* scree apron */, rim: [{ x, z }] /* 48 points */,
                       //   ramp: { x0, z0 /* at the rim */, x1, z1 /* at the foot */, width } | null }]
@@ -344,17 +345,35 @@ offshore islets are welcome. **Three living biomes**:
 - **Shore**: the coastal belt (`coastAt` > 0).
 - **Lowlands**: everything else short of the highlands.
 - **Highlands**: tableland where the highland mask `hm` passes 0.5. `hm` rises
-  over `HIGHLAND_IN0`–`HIGHLAND_IN1` (260–360 design m inland, its edge wandering
+  over `HIGHLAND_IN0`–`HIGHLAND_IN1` (230–330 design m inland, its edge wandering
   ±75 m with `nPlateau`) and along the range. It lifts the ground 26–40 m and
   steps it into 13 m terraces and escarpments.
 - **Mountains**: the mountain mask over 0.3, or anything above 105 m.
+- **Heart**: the basin inside the ring (`lBasin` over 0.5, below 60 m).
 
-The spine runs through the island's heart (within 0.08 R of the centre,
-0.6–0.72 R long), so the massif is a compact core.
+The mountains are a ring round the island's heart, a caldera breached on one
+side:
+- The spine is an arc of radius 0.27–0.3 R, slightly oval, about the island's
+  centre (within 0.05 R). `RING_GAP` (1.5 rad) is left open, facing the
+  breach. Its inner flank is the steep side (side +1 of a counter-clockwise
+  spine), and the ends taper as a straight spine's do.
+- Inside, `_macro` sinks the ground (basin 0..1 out to `ring.basinR`, about the
+  foot of the inner wall) to a floor 3–7 m above the water. There's no
+  tableland there.
+- A trough (`trough`) runs out through the breach. It climbs at 0.12 to the
+  highlands' edge and keeps the mountain layer out of the gap.
+- `_placeLakes` puts the heart lake there first, from its own stream. It is
+  0.42–0.5 × `basinR` across, 6–9 m deep, and its banks reach no further than
+  the basin, so they never cut the walls. The other 3–5 lakes follow.
+- River 1 is the heart lake's outlet: Dijkstra to the sea, out through the
+  breach. Up to two spring-fed rivers follow.
+- Caves keep out of the basin and the foot of its walls.
+- A pass through the ring's steep inner wall is graded down toward the basin
+  floor, so it can sit low (a gorge through the ring).
 
 `zoneAt` reads the layout's `hm` / `mm` masks (kept as `_zones`). Typically the
-shore is ~25% of the land, the lowlands ~35%, the highlands ~28% and the
-mountains ~12%.
+shore is ~25% of the land, the lowlands ~35%, the highlands ~19–27%, the
+mountains ~12–14% and the heart ~4%.
 
 Lakes keep to the lowlands (`hm` ≤ 0.25 first). River springs sit at the
 highlands' edge (`hm` 0.15–0.8, 14–60 m). Mesas are drawn from highland cells

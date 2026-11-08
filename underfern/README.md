@@ -184,7 +184,11 @@ as you cross into it (the map's readout does too):
    the forest, about a third.
 3. **The Highlands**: open tableland of upland meadow at 40–80 m, stepped into
    terraces and escarpments, with the mesas standing on it.
-4. **The Mountains** at the heart: the massif, its passes and its lookouts.
+4. **The Mountains**: a ring of peaks round the middle of the island, with its
+   passes and lookouts. The ring is breached on one side.
+5. **The Heart Lake** inside the ring: a still lake in a forested basin with
+   the peaks all round it. Its river runs out through the breach in a gorge to
+   the sea. Walk up the gorge, or come over a pass, to drink there.
 
 The island has three living biomes around a central **massif**:
 - **Coast**: a wide belt of beach, dunes held by marram grass, and salt grass with
@@ -194,7 +198,7 @@ The island has three living biomes around a central **massif**:
 - **Forest**: dark conifer and araucaria woods, wet and fern-filled in the lowlands.
 
 Freshwater lakes lie in the lowlands, and rivers rise at the highlands' edge and
-run down to them or to the sea. The massif has three or four horn
+run down to them or to the sea. The massif is a ring with three or four horn
 peaks up to about 190 m, snow-capped and joined by a jagged ridge. Its sides are
 bands of layered rock, and the cliffs are too steep to climb. One or two pass
 valleys cut right through the range, and switchback trails climb to **lookouts**
@@ -238,7 +242,7 @@ shafts through the skylight, and deep in, glowing lichen and pale fungi are the 
 light. Nothing spawns there.
 
 The map (M) marks:
-- the summits, with their heights;
+- the summits, with their heights, and the Heart Lake by name;
 - the mesas and buttes, their rims hachured like cliffs, with the height of
   each top and a mesa's ramp;
 - the passes and the trails to the lookouts;
@@ -378,7 +382,8 @@ there is one and otherwise falls back to the global install.
     and guard break; bleed and crush buildup
   - the rings: shore, lowlands, highlands and mountains each a real share of the
     island, each higher and nearer the heart than the last; every summit in the
-    mountains, the lakes in the lowlands
+    mountains, the other lakes in the lowlands; the heart lake fresh, in the
+    middle of the mountains' ring, in a low basin
   - mesas and buttes: tall, level-topped and sheer, every mesa top walkable up
     its ramp, no butte climbable, the same at any resolution
 - **Smoke tests** play the real game:
