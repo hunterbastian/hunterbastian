@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b1018" />
+  <title>ember</title>
+  <meta name="description" content="ember — a very small pixel game about a small light walking a dark path." />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main id="stage">
+    <canvas id="game" width="480" height="420" aria-label="ember, a small pixel game. Arrow keys move, Z confirms, X goes back, M toggles sound. On touch screens, tap to choose and drag to move."></canvas>
+    <p id="live" class="sr-only" aria-live="polite"></p>
+  </main>
+  <noscript><p class="noscript">ember needs JavaScript to run.</p></noscript>
+  <script src="ember.js" type="module"></script>
+</body>
+</html>

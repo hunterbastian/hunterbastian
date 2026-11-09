@@ -1,0 +1,4 @@
+# generated screenshots / smoke-test output
+*.png
+# ...except the exported sprite sheet
+!sprites/*.png
