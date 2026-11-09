@@ -1,6 +1,6 @@
 GIMP Palette
 Name: ember
-Columns: 15
+Columns: 16
 #
  11  16  24	bg
  24  33  45	night
@@ -11,6 +11,7 @@ Columns: 15
  92 102 119	stoneL
  35  40  50	stoneD
 111 211 196	rune
+ 39  96  95	aur
  46  26  18	deep
 107  58  28	warm
 255 174  87	ember

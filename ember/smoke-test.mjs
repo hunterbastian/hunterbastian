@@ -5,7 +5,9 @@
 //
 // It walks to the first creature and spares it, buys an upgrade at the
 // campfire, strikes down the second, loses to the third (the dragon) and wakes
-// back at the campfire, then checks that warmth builds while the page is closed.
+// back at the campfire. Along the way it reads a runestone into the saga and
+// lights the first hearth. Then it checks that warmth builds while the page
+// is closed.
 //
 // Needs Playwright with Chromium (npm i -g playwright && npx playwright install chromium).
 import { spawn } from "node:child_process";
@@ -35,6 +37,7 @@ const state = () => page.evaluate(() => ({
   calm: ember.foe?.calm, foe: ember.foe?.key, hp: ember.hp, overReady: ember.overReady,
   warmth: ember.save.warmth, met: ember.save.met, friends: ember.save.friends.length,
   dist: ember.save.dist, nextAt: ember.save.nextAt, up: ember.save.up,
+  lore: ember.save.lore, loreSeen: ember.save.loreSeen, lit: ember.save.lit,
 }));
 const wait = (ms) => page.waitForTimeout(ms);
 async function press(key, times = 1) {
@@ -77,7 +80,7 @@ async function walkToNext() {
 
 async function approach() {
   const s = await state();
-  await pick(s.hubSel, 0, 3);
+  await pick(s.hubSel, 0, 4);
   await playUntil((st) => st.scene === "battle" && st.phase === "menu", "battle to start");
 }
 
@@ -114,6 +117,21 @@ try {
   await press("v");
   await wait(200);
 
+  // the first runestone stands halfway to the moth: passing it adds it to the saga
+  check(s.lore === 0, `expected no runestones read yet, got ${s.lore}`);
+  await page.evaluate(() => { ember.save.dist = (ember.save.prevAt + ember.save.nextAt) / 2 - 0.3; });
+  await page.waitForFunction(() => ember.save.lore === 1);
+  await wait(1800);
+  await shot("runestone");
+  await pick((await state()).hubSel, 3, 4); // saga
+  await wait(600);
+  s = await state();
+  check(s.hubPhase === "saga" && s.loreSeen === 1, `expected the saga open with one runestone, got ${JSON.stringify(s)}`);
+  await shot("saga");
+  await press("ArrowRight");
+  await press("x");
+  await wait(300);
+
   // 1. the moth: dim, hum, dim, hold still, then part ways
   await walkToNext();
   await shot("path-arrived");
@@ -137,7 +155,7 @@ try {
 
   // 2. the campfire: buy the first upgrade
   await page.evaluate(() => { ember.save.warmth = 1000; });
-  await pick(s.hubSel, 1, 3);
+  await pick(s.hubSel, 1, 4);
   await wait(600);
   await press("z");
   await wait(300);
@@ -179,7 +197,23 @@ try {
   s = await playUntil((st) => st.scene === "hub", "waking at the campfire");
   check(s.met === 2 && s.friends === 1, `losing shouldn't cost progress, got ${JSON.stringify(s)}`);
 
-  // 5. warmth builds while the page is closed: pretend it was closed an hour
+  // 5. the end of the road: after a winter's fifteen encounters, the first hearth
+  await page.evaluate(() => { ember.save.met = 15; ember.save.dist = ember.save.nextAt; });
+  await wait(400);
+  await shot("path-hearth");
+  await pick((await state()).hubSel, 0, 4);
+  s = await playUntil((st) => st.scene === "hearth", "the hearth scene");
+  await wait(700);
+  await shot("hearth-cold");
+  await press("z", 8);
+  await wait(2600);
+  await shot("hearth-lit");
+  s = await playUntil((st) => st.scene === "hub", "a new winter");
+  check(s.lit === 1, `expected the hearth lit once, got ${s.lit}`);
+  await wait(500);
+  await shot("path-new-winter");
+
+  // 6. warmth builds while the page is closed: pretend it was closed an hour
   const saved = await page.evaluate(() => { ember.save.t = 0; return ember.save.warmth; });
   await context.addInitScript(() => {
     if (sessionStorage.getItem("aged")) return;

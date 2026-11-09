@@ -22,8 +22,9 @@ const TAU = Math.PI * 2;
 const STEP = 1000 / 60;
 const MAX_AWAY = 8 * 3600; // offline warmth is capped at 8 hours
 
-// The whole game uses these fifteen colors and nothing else: a cold blue night,
-// carved runestone greys, glowing teal runes, your warm ember, and a firefly green.
+// The whole game uses these sixteen colors and nothing else: a cold blue night,
+// carved runestone greys, glowing teal runes and aurora, your warm ember, and a
+// firefly green.
 const C = {
   bg: "#0b1018",
   night: "#18212d",
@@ -34,6 +35,7 @@ const C = {
   stoneL: "#5c6677",
   stoneD: "#232832",
   rune: "#6fd3c4",
+  aur: "#27605f",
   deep: "#2e1a12",
   warm: "#6b3a1c",
   ember: "#ffae57",
@@ -233,6 +235,12 @@ const SPR = {
   featherR: ["...##", "..##.", ".##..", "#...."],
   // scenery
   pine: ["..o..", ".o#o.", "..#..", ".o#o.", "o###o", "..#.."],
+  menhir: ["..oo..", ".o##*.", ".###*.", ".###*.", "####*.", "####**", "####**", "####**", "####**", ".###**", ".###**", ".###**", "####**", "####**"],
+  cairn: ["....oo.....", "...o##*....", "..o###**...", ".#####***..", ".######***.", "#######****"],
+  longship: ["*.........................*", "#............#............#", "#............#............#", "##.....ooooooooooooo.....##", ".#.....ooooooooooooo.....#.", ".#.....ooooooooooooo.....#.", ".##..........#..........##.", "..#######################..", "...#####################...", "....###################...."],
+  ruin: ["..........ooo..........", "........oo###oo........", "......oo#######oo......", "....oo####+++####oo....", "..oo######+++######oo..", "oo###################oo", ".#*****#*****#*****#*#.", ".#*****#*+++*#*****#*#.", ".#*****#*+++*#*****#*#.", ".#*****#*+++*#*****#*#."],
+  pillar: [".o.", "o#o", "###", "#*#", "###", "###", "#*#", "###", "###", "###", "###", "###"],
+  dolmen: [".ooooooooooo.", "o###########*", ".###*****###.", "..##.....**..", "..##.....**..", "..##.....**..", "..##.....**..", "..##.....**..", "..##.....**.."],
   shard: [".#.", "#o#", "#o#", ".#."],
   icicle: ["###", "#o#", "#o#", ".#.", ".#.", ".#."],
   flame: ["..#..", ".###.", ".#o#.", "..#.."],
@@ -247,9 +255,10 @@ const ICON = {
   talk: ["#........", "##.......", ".##......", "..##.....", "..####...", "...######", "....#####", ".....####", "......##."],
   mend: ["...###...", "....#....", "...###...", "..#...#..", ".#.....#.", ".#.###.#.", ".#.###.#.", "..#####..", "........."],
   part: ["..#####..", ".#.....#.", "#..###..#", "#.#...#.#", "#.#...#.#", "#.#..##.#", "#.#...#.#", "#.#...#.#", "#########"],
-  approach: [".........", "#...#....", ".#...#...", "..#...#..", "...#...#.", "..#...#..", ".#...#...", "#...#....", "........."],
-  campfire: ["....#....", "...##....", "...###.#.", "..#####..", "..##.##..", ".##...##.", "..#####..", "#.......#", ".#######."],
+  ahead: [".........", "#...#....", ".#...#...", "..#...#..", "...#...#.", "..#...#..", ".#...#...", "#...#....", "........."],
+  camp: ["....#....", "...##....", "...###.#.", "..#####..", "..##.##..", ".##...##.", "..#####..", "#.......#", ".#######."],
   friends: [".........", ".##...##.", "####.####", "#########", "#########", ".#######.", "..#####..", "...###...", "....#...."],
+  saga: ["...###...", "..#####..", ".###.###.", ".##.#.##.", ".###.###.", ".##.#.##.", ".###.###.", ".#######.", "#########"],
 };
 // The calm meter: five runes, after the old Norse alphabet.
 const RUNES = [
@@ -828,6 +837,7 @@ const sfx = {
   out: () => tone(320, 0.7, { type: "triangle", vol: 0.06, slide: -250 }),
   warm: () => chord([392, 494, 587, 784], 0.14, { type: "triangle", vol: 0.04 }),
   buy: () => chord([587, 880], 0.06, { type: "triangle", vol: 0.045 }),
+  rune: () => chord([392, 587], 0.12, { type: "sine", vol: 0.04 }),
 };
 
 function toggleMute() {
@@ -902,7 +912,7 @@ const inRect = (p, r) => p.x >= r.x && p.x < r.x + r.w && p.y >= r.y && p.y < r.
 // One or more lines. Confirm finishes the current line, then moves to the
 // next; `onDone` fires after the last one.
 class Typer {
-  constructor(lines, { voice = "narrator", onDone = null, auto = 0 } = {}) {
+  constructor(lines, { voice = "narrator", onDone = null, auto = 0, quiet = false } = {}) {
     this.lines = Array.isArray(lines) ? lines : [lines];
     this.voice = voice;
     this.onDone = onDone;
@@ -912,7 +922,7 @@ class Typer {
     this.acc = 0;
     this.wait = 0;
     this.done = false;
-    say(this.text);
+    if (!quiet) say(this.text);
   }
   get text() { return this.lines[this.i]; }
   get full() { return this.n >= this.text.length; }
@@ -975,6 +985,10 @@ function newSave() {
     struck: 0,
     up: Object.fromEntries(UPGRADES.map((u) => [u.id, 0])),
     friends: [],
+    lore: 0, // runestones read, in order
+    loreSeen: 0, // how many of those you've looked at in the saga
+    read: -1, // the stretch whose runestone you last read
+    lit: 0, // times you've lit the first hearth
     t: Date.now(),
   };
 }
@@ -985,6 +999,8 @@ function loadSave() {
     if (!raw) return newSave();
     const s = JSON.parse(raw);
     const base = newSave();
+    // saves from before the saga existed: count the runestones already passed
+    if (s.lore == null) s.lore = s.loreSeen = Math.min(15, s.met || 0);
     return { ...base, ...s, up: { ...base.up, ...(s.up || {}) }, friends: Array.isArray(s.friends) ? s.friends.map((f) => (f.key === "owl" ? { ...f, key: "dragon" } : f)) : [] };
   } catch {
     return newSave();
@@ -999,11 +1015,10 @@ function persist() {
 
 const lvl = (id) => S.up[id] || 0;
 const ownGlow = () => 1 + 0.5 * lvl("hearth");
-const warmthRate = () => ownGlow() + S.friends.reduce((sum, f) => sum + f.rate, 0);
+const warmthRate = () => (ownGlow() + S.friends.reduce((sum, f) => sum + f.rate, 0)) * hearthlight();
 const walkSpeed = () => 2 * (1 + 0.2 * lvl("stride")); // meters per second
 const upgradeCost = (u) => Math.round(u.base * Math.pow(u.growth, lvl(u.id)));
 const arrived = () => S.dist >= S.nextAt;
-const night = () => Math.floor(S.met / 3) + 1;
 const rewardMult = (n) => 1 + 0.5 * (n - 1);
 const encounterGap = () => 80 + 10 * Math.min(S.met, 12);
 
@@ -1035,7 +1050,7 @@ const SPECIES = {
     jitter: 1, bob: 1, flap: [0.3, 0.07],
     intro: "a moth flutters out of the dark. it's drawn to your light.",
     acts: [
-      { label: "check", lines: [["{name}. a moth, a long way from home.", "it's cold out here. you're the only warm thing for miles."]] },
+      { label: "check", lines: [["{name}. a moth, a long way from home.", "moths once circled the first hearth. now they chase any light at all."]] },
       {
         label: "dim", dims: true, max: 2, gain: 25,
         lines: [["you dim your glow.", "the moth stops darting around quite so much."], ["you dim yourself even further.", "{name}'s wingbeats slow down."]],
@@ -1077,7 +1092,7 @@ const SPECIES = {
     jitter: 1.4, bob: 1.5, flap: [0.45, 0.12],
     intro: "a firefly zips out of the grass. it thinks it's the brightest thing out here.",
     acts: [
-      { label: "check", lines: [["{name}. a firefly, very proud of its light.", "it doesn't like sharing the dark with you."]] },
+      { label: "check", lines: [["{name}. a firefly, very proud of its light.", "when the hearth went out, fireflies kept its last sparks. it won't let you forget it."]] },
       {
         label: "dim", dims: true, max: 1, gain: 30,
         lines: [["you dim your glow.", "{name} shines brighter by comparison. it looks pleased."]],
@@ -1119,7 +1134,7 @@ const SPECIES = {
     jitter: 0, bob: 0, flap: [0.12, 0.04],
     intro: "an old dragon is curled on a runestone, frost on its horns. it turns toward your light.",
     acts: [
-      { label: "check", lines: [["{name}. an old dragon whose fire went out long ago.", "it has been cold for a very long time."]] },
+      { label: "check", lines: [["{name}. an old dragon. its fire was lit at the first hearth.", "it went out the same night the hearth did."]] },
       {
         label: "warm", max: 2, gain: 20,
         lines: [["you hold your glow out toward {name}.", "the frost on its snout starts to melt."], ["you burn a little brighter, just for {name}.", "it breathes in your warmth, slowly."]],
@@ -1171,10 +1186,127 @@ function newFoe(index) {
 }
 
 /* ----------------------------------------------------------------------- */
+/* The world: the road north, its regions, and the saga carved along it    */
+/* ----------------------------------------------------------------------- */
+// The story: the first hearth burned at the top of the world and kept the
+// north warm. One winter it went out, and the cold came down the mountain.
+// You are its last ember, walking back north to light it again.
+//
+// Everything about the world lives in this section, so it's easy to rewrite.
+// The road has five regions, one per night (three encounters each). Each has
+// its own scenery, weather and three runestones. After the last one comes
+// the hearth itself, and then a new winter starts the road over.
+const REGIONS = [
+  {
+    key: "ashwood", name: "the ashwood",
+    desc: "pines grown on the old hearth's ash. the warm wind ended here.",
+    enter: "snow-heavy pines close in around the road.",
+    ambient: [
+      "snow slides off a branch somewhere behind you.",
+      "the pines creak. they all lean the same way.",
+      "your light throws long shadows between the trunks.",
+    ],
+    snow: 0.35, wind: 0.04, aurora: 0, rise: 30,
+  },
+  {
+    key: "cairnfield", name: "the cairnfield",
+    desc: "standing stones and cairns, one for every torch that failed.",
+    enter: "the pines thin out. standing stones rise from the snow.",
+    ambient: [
+      "someone left a cold torch leaning on a cairn.",
+      "the wind plays a low note across the stones.",
+      "you count the cairns for a while. then you stop.",
+    ],
+    snow: 0.5, wind: 0.12, aurora: 0, rise: 26,
+  },
+  {
+    key: "fjord", name: "the still fjord",
+    desc: "a sea arm frozen in one night, with its ships still in it.",
+    enter: "the road runs out onto the ice of a frozen fjord.",
+    ambient: [
+      "the ice hums under you.",
+      "a longship sits in the ice, its sail frozen stiff.",
+      "green light ripples across the sky.",
+    ],
+    snow: 0.25, wind: 0.02, aurora: 0.9, rise: 40,
+  },
+  {
+    key: "hall", name: "hollow hall",
+    desc: "where the hearth-keepers lived. every door is still open.",
+    enter: "roofs appear through the snow. a village, long empty.",
+    ambient: [
+      "a door bangs in the wind. nobody shuts it.",
+      "there is a bowl on a table, with snow in it.",
+      "the wind is trying very hard to put you out.",
+    ],
+    snow: 1, wind: 0.55, aurora: 0, rise: 30,
+  },
+  {
+    key: "stair", name: "the last stair",
+    desc: "a thousand steps up the mountain. the hearth is at the top.",
+    enter: "the road turns into steps cut in the mountain.",
+    ambient: [
+      "the air is thin and very clear up here.",
+      "each step has a rune on it. most are worn smooth.",
+      "the sky is so close you could light it.",
+    ],
+    snow: 0.3, wind: 0.08, aurora: 1.2, rise: 46,
+  },
+];
+
+// One runestone stands halfway along every stretch of road. Read in order,
+// they tell what happened. Keep each under about sixty characters, so it
+// fits on two lines.
+const SAGA = [
+  // the ashwood
+  "here the last warm wind stopped.",
+  "these pines grew from the hearth's ash. they lean north.",
+  "moths passed here every dusk, flying home to the fire.",
+  // the cairnfield
+  "one stone for each of us who walked north with a torch.",
+  "none of the torches reached the stair.",
+  "a torch is too proud. send something smaller.",
+  // the still fjord
+  "the fjord froze in one night. the ships still wait.",
+  "fireflies carried off the last sparks. ask them nicely.",
+  "the ice sings when something warm walks over it.",
+  // hollow hall
+  "we kept the hearth for nine hundred winters.",
+  "we let it go out once. once was enough.",
+  "the dragon lit its fire at ours. both went out together.",
+  // the last stair
+  "a thousand steps. count them if it keeps you warm.",
+  "it does not need a great fire. it needs one that stays.",
+  "if you are small and still burning: welcome home.",
+];
+
+const WINTER = REGIONS.length * 3; // encounters in one trip up the road
+const CALM = { snow: 0.45, wind: 0 }; // the weather on the title screen
+
+// The hearth is due once a winter's encounters are done and it isn't lit yet.
+const hearthDue = () => S.met > 0 && S.met % WINTER === 0 && S.lit < S.met / WINTER;
+const regionIndex = () => (hearthDue() ? REGIONS.length - 1 : Math.floor(S.met / 3) % REGIONS.length);
+const region = () => REGIONS[regionIndex()];
+const night = () => Math.floor((S.met - (hearthDue() ? 1 : 0)) / 3) + 1;
+const hearthlight = () => 1 + 0.25 * S.lit; // every lighting warms everything by a quarter
+const runestoneAt = () => (hearthDue() ? Infinity : (S.prevAt + S.nextAt) / 2);
+
+// Passing this stretch's runestone reads it into your saga. Returns which
+// one it was, and whether it's new to you.
+function readRunestone() {
+  if (S.read === S.met || S.dist < runestoneAt()) return null;
+  S.read = S.met;
+  const idx = S.met % WINTER;
+  const fresh = idx + 1 > S.lore;
+  if (fresh) S.lore = idx + 1;
+  return { idx, fresh };
+}
+
+/* ----------------------------------------------------------------------- */
 /* Game state                                                              */
 /* ----------------------------------------------------------------------- */
 const MENU = ["strike", "talk", "mend", "part"];
-const HUB_OPTS = ["approach", "campfire", "friends"];
+const HUB_OPTS = ["ahead", "camp", "friends", "saga"];
 const MENU_BOX = { x: 20, y: 190, w: 440, h: 114 };
 const HUB_BOX = { x: 20, y: 252, w: 440, h: 100 };
 const PANEL_BOX = { x: 20, y: 92, w: 440, h: 262 };
@@ -1203,6 +1335,14 @@ const G = {
   campFlash: null,
   walkT: 0,
   arrivedShown: false,
+  banner: null, // the place-name plaque, for a few seconds
+  sagaPage: 0,
+  idleT: 0,
+  lastDialog: null,
+  ambientI: 0,
+  // the first hearth
+  hearthLit: 0,
+  hearthStep: 0,
   // battle
   hp: 20,
   maxHp: 20,
@@ -1234,6 +1374,7 @@ const G = {
   glyphs: [], // free-floating glyphs for the ASCII view, rebuilt every frame
   quiet: [], // rects where the letter field and motes stay out (the arena)
   motes: [],
+  snowN: 20, // how many motes the weather is showing
   shakeX: 0,
   shakeY: 0,
   overReady: false,
@@ -1249,7 +1390,7 @@ function setScene(name) {
 }
 
 // Drifting motes for the ASCII view: o*o clusters and snow.
-for (let i = 0; i < 30; i++) {
+for (let i = 0; i < 56; i++) {
   const big = Math.random() < 0.3;
   G.motes.push({ x: rand(0, W), y: rand(0, H), vy: rand(0.08, 0.25), ph: rand(0, TAU), ch: big ? "o*o" : Math.random() < 0.5 ? "*" : ".", color: Math.random() < 0.5 ? C.ink : C.dim });
 }
@@ -1259,7 +1400,7 @@ for (let i = 0; i < 30; i++) {
 while (G.stars.length < 40) {
   const x = snap(rand(0, W));
   const y = snap(rand(0, 148));
-  if ((x < 180 && y < 90) || (x > 290 && y < 72)) continue;
+  if ((x < 180 && y < 90) || (x > 200 && y < 72)) continue;
   G.stars.push({ x, y, tw: rand(0, TAU), bright: Math.random() < 0.25 });
 }
 
@@ -1331,6 +1472,7 @@ function updateTitle() {
     sfx.select();
     goHub(G.awayMsg || "you keep walking.");
     G.awayMsg = null;
+    showBanner(region().name);
   } else if (pick === 1) {
     G.titleSel = 1;
     G.confirmReset = true;
@@ -1341,11 +1483,17 @@ function updateTitle() {
 
 function startIntro() {
   setScene("intro");
-  G.dialog = new Typer(["the path ahead is dark.", "you are a small light.", "keep walking. you won't be alone for long."], {
+  G.dialog = new Typer([
+    "long ago, the first hearth kept the north warm.",
+    "one winter it went out, and the cold came down the mountain.",
+    "you are its last ember.",
+    "walk north. bring it home.",
+  ], {
     onDone: () => {
       S.started = true;
       persist();
       goHub("you start walking.");
+      showBanner(region().name);
     },
   });
 }
@@ -1369,7 +1517,12 @@ function goHub(msg) {
   G.boxTarget = { ...HUB_BOX };
   G.hubSel = arrived() ? 0 : 1;
   G.arrivedShown = arrived();
-  G.dialog = new Typer(arrived() ? `${msg} something is waiting on the path ahead.` : msg);
+  G.banner = null;
+  const stone = readRunestone(); // one you walked past while you were away
+  let line = msg;
+  if (arrived()) line += hearthDue() ? " the first hearth stands ahead, cold and dark." : " something is waiting on the path ahead.";
+  else if (stone?.fresh) line += " you passed a runestone. it's in your saga now.";
+  G.dialog = new Typer(line);
 }
 
 function updateHub() {
@@ -1382,29 +1535,49 @@ function updateHub() {
       G.particles.push({ x: WALK_X + rand(-3, 3), y: GROUND - 22, vx: rand(-0.1, 0.1), vy: -0.35, g: 0, life: 60, age: 0, size: 2, color: C.ember });
     }
   }
+  const stone = readRunestone();
+  if (stone) {
+    sfx.rune();
+    persist();
+    if (G.hubPhase === "walk") {
+      G.dialog = new Typer(`a runestone. it reads:\n${SAGA[stone.idx]}`);
+      G.dialog.rune = true;
+    }
+  }
   if (arrived() && !G.arrivedShown) {
     G.arrivedShown = true;
     sfx.calm();
     if (G.hubPhase === "walk") {
       G.hubSel = 0;
-      G.dialog = new Typer("something is waiting on the path ahead.");
+      G.dialog = new Typer(hearthDue() ? "the first hearth stands ahead, cold and dark." : "something is waiting on the path ahead.");
     }
   }
+  // after a quiet while, the road gives you something to look at
+  if (G.dialog !== G.lastDialog) {
+    G.lastDialog = G.dialog;
+    G.idleT = 0;
+  }
+  if (!arrived() && G.hubPhase === "walk" && ++G.idleT > 1500) {
+    const lines = region().ambient;
+    G.dialog = new Typer(lines[G.ambientI++ % lines.length], { voice: null, quiet: true });
+  }
+  if (G.banner && ++G.banner.t > 280) G.banner = null;
   if (G.campFlash && --G.campFlash.t <= 0) G.campFlash = null;
   if (G.hubPhase === "camp") return updateCamp();
   if (G.hubPhase === "friends") return updateFriends();
+  if (G.hubPhase === "saga") return updateSaga();
   return updateWalk();
 }
 
 function updateWalk() {
   if (pressed.has("left") || pressed.has("right")) {
-    G.hubSel = (G.hubSel + (pressed.has("left") ? 2 : 1)) % 3;
+    G.hubSel = (G.hubSel + (pressed.has("left") ? HUB_OPTS.length - 1 : 1)) % HUB_OPTS.length;
     sfx.move();
     say(HUB_OPTS[G.hubSel]);
   }
   if (pressed.has("confirm")) return hubChoose(G.hubSel);
   for (const p of taps) {
-    const i = optionAt(p, 3);
+    const i = optionAt(p, HUB_OPTS.length);
     if (i >= 0) {
       G.hubSel = i;
       return hubChoose(i);
@@ -1421,12 +1594,19 @@ function hubChoose(i) {
       return;
     }
     sfx.select();
-    startBattle();
+    if (hearthDue()) startHearth();
+    else startBattle();
   } else {
     sfx.select();
-    G.hubPhase = i === 1 ? "camp" : "friends";
+    G.hubPhase = ["", "camp", "friends", "saga"][i];
     G.boxTarget = { ...PANEL_BOX };
-    say(i === 1 ? "campfire. spend warmth on upgrades." : "friends following you.");
+    G.banner = null;
+    if (i === 3) {
+      G.sagaPage = regionIndex();
+      S.loreSeen = S.lore;
+      persist();
+    }
+    say(i === 1 ? "campfire. spend warmth on upgrades." : i === 2 ? "friends following you." : `your saga. ${sagaPageText(G.sagaPage)}`);
   }
 }
 
@@ -1454,7 +1634,7 @@ function updateCamp() {
         return buy(i);
       }
     }
-    const o = optionAt(p, 3);
+    const o = optionAt(p, HUB_OPTS.length);
     if (o === 1) return leavePanel();
     if (o >= 0) {
       G.hubSel = o;
@@ -1483,11 +1663,90 @@ function buy(i) {
 function updateFriends() {
   if (pressed.has("cancel") || pressed.has("confirm")) return leavePanel();
   for (const p of taps) {
-    const o = optionAt(p, 3);
+    const o = optionAt(p, HUB_OPTS.length);
     if (o === 2 || o < 0) return leavePanel();
     G.hubSel = o;
     return hubChoose(o);
   }
+}
+
+/* --- the saga: what the runestones said ---------------------------------- */
+const SAGA_PAGES = REGIONS.length + 1; // one page per region, then the hearth
+
+function sagaPageText(page) {
+  if (page === REGIONS.length) return `the first hearth. ${S.lit ? "burning." : "cold, for now."} ${S.lore} of ${SAGA.length} runestones read.`;
+  const R = REGIONS[page];
+  const found = SAGA.slice(page * 3, page * 3 + 3).filter((_, k) => page * 3 + k < S.lore);
+  return `${R.name}. ${R.desc} ${found.length ? found.join(" ") : "no runestones read here yet."}`;
+}
+
+function updateSaga() {
+  if (pressed.has("cancel") || pressed.has("confirm")) return leavePanel();
+  let turn = (pressed.has("right") ? 1 : 0) - (pressed.has("left") ? 1 : 0);
+  for (const p of taps) {
+    const o = optionAt(p, HUB_OPTS.length);
+    if (o === 3) return leavePanel();
+    if (o >= 0) {
+      G.hubSel = o;
+      return hubChoose(o);
+    }
+    if (!inRect(p, PANEL_BOX)) return leavePanel();
+    turn = p.x < W / 2 ? -1 : 1;
+  }
+  if (turn) {
+    G.sagaPage = (G.sagaPage + turn + SAGA_PAGES) % SAGA_PAGES;
+    sfx.move();
+    say(sagaPageText(G.sagaPage));
+  }
+}
+
+/* ----------------------------------------------------------------------- */
+/* The first hearth: the end of the road, once a winter                    */
+/* ----------------------------------------------------------------------- */
+const HEARTH_GROUND = 262;
+const HEARTH_BOX = { x: 20, y: 300, w: 440, h: 100 };
+
+function startHearth() {
+  setScene("hearth");
+  G.fade = 1;
+  G.hearthLit = 0;
+  G.hearthStep = 0;
+  G.banner = null;
+  const alone = S.friends.length === 0;
+  G.dialog = new Typer([
+    "the first hearth. cold stone, and very old ash.",
+    alone ? "no one followed you here. it is very quiet." : "everyone who followed you gathers at the rim.",
+    "you step down into the ash.",
+    "it catches.",
+    "all down the mountain, the north remembers what warm was.",
+    "the fire will hold. but embers travel, and a new winter is already waiting down the road.",
+  ], { onDone: finishHearth });
+}
+
+function updateHearth() {
+  const d = G.dialog;
+  d.update();
+  if (d.i >= 2) G.hearthStep = Math.min(40, G.hearthStep + 1);
+  if (d.i >= 3) {
+    if (G.hearthLit === 0) {
+      sfx.warm();
+      if (!REDUCED) G.shake = 3;
+    }
+    G.hearthLit++;
+    if (G.t % 4 === 0) {
+      G.particles.push({ x: W / 2 + rand(-34, 34), y: HEARTH_GROUND - 62, vx: rand(-0.2, 0.2), vy: rand(-1.2, -0.5), g: 0, life: rand(50, 110), age: 0, size: 2, color: C.ember });
+    }
+  }
+  if (confirmed()) d.advance();
+}
+
+function finishHearth() {
+  S.lit++;
+  S.prevAt = S.nextAt;
+  S.nextAt = Math.round(S.dist + encounterGap());
+  persist();
+  goHub(`a new winter begins. everything you gather is ${Math.round((hearthlight() - 1) * 100)}% warmer now.`);
+  showBanner(region().name);
 }
 
 /* ----------------------------------------------------------------------- */
@@ -1709,7 +1968,10 @@ function finishEncounter(msg) {
   S.prevAt = S.nextAt;
   S.nextAt = Math.round(S.dist + encounterGap());
   persist();
-  goHub(msg);
+  if (hearthDue()) return goHub("the stair ends on a wide, flat summit.");
+  if (S.met % 3) return goHub(msg);
+  goHub(region().enter);
+  showBanner(region().name);
 }
 
 /* --- strike -------------------------------------------------------------- */
@@ -2233,14 +2495,18 @@ function dissolveFoe() {
 }
 
 function updateAmbient() {
+  // snow and wind follow the region you're in
+  const sky = G.scene === "hub" || G.scene === "battle" || G.scene === "hearth" ? region() : CALM;
+  G.snowN = Math.round(G.motes.length * Math.min(1, sky.snow));
   if (!REDUCED) {
     for (const m of G.motes) {
-      m.y += m.vy;
-      m.x += Math.sin(G.t * 0.01 + m.ph) * 0.15;
+      m.y += m.vy * (1 + sky.wind);
+      m.x += Math.sin(G.t * 0.01 + m.ph) * 0.15 + sky.wind * 3;
       if (m.y > H + 6) {
         m.y = -6;
         m.x = rand(0, W);
       }
+      if (m.x > W + 8) m.x = -8;
     }
   }
   for (const p of G.particles) {
@@ -2474,7 +2740,7 @@ function outline(b, color) {
 function drawOptionRow(labels, sel, active, { ready = [], off = [] } = {}) {
   labels.forEach((label, i) => {
     const r = optionRect(i, labels.length);
-    const b = drawFrame({ x: r.x + 6, y: r.y, w: r.w - 12, h: r.h });
+    const b = drawFrame({ x: r.x + 4, y: r.y, w: r.w - 8, h: r.h });
     const cx = b.x + b.w / 2;
     const isSel = active && sel === i;
     if (isSel) outline(b, C.rune);
@@ -2487,14 +2753,16 @@ function drawOptionRow(labels, sel, active, { ready = [], off = [] } = {}) {
 }
 
 // Snowy mountains standing behind whatever is at `ground`.
-function drawMountains(ground, { scroll = 0, color = C.night } = {}) {
+// `rise` is how tall the peaks are, in pixels.
+function drawMountains(ground, { scroll = 0, color = C.night, rise = 30 } = {}) {
   const gp = ground / PX;
   for (let xp = 0; xp < BW; xp++) {
     const wx = xp + Math.floor(scroll);
     const tri = Math.abs((((wx + 17) % 64) + 64) % 64 - 32);
-    const top = Math.round(gp - 30 + tri * 0.75 + Math.sin(wx * 0.11) * 2);
+    const top = Math.round(gp - rise + (tri * (rise - 6)) / 32 + Math.sin(wx * 0.11) * 2);
     fillPx(xp * PX, top * PX, PX, (gp - top) * PX, color);
-    if (top < gp - 20) fillPx(xp * PX, top * PX, PX, Math.max(1, Math.round((gp - 20 - top) * 0.35)) * PX, C.ink);
+    const line = gp - rise + 10;
+    if (top < line) fillPx(xp * PX, top * PX, PX, Math.max(1, Math.round((line - top) * 0.35)) * PX, C.ink);
   }
 }
 
@@ -2517,6 +2785,162 @@ function drawNameplate(f) {
   RUNES.forEach((rows, i) => drawBitmap(rows, 203 + i * 16, 170, { color: i < lit ? (ready ? C.ember : C.rune) : C.stone }));
 }
 
+/* --- the world: sky, scenery, landmarks ---------------------------------- */
+// Northern lights: curtains of teal that sway slowly. `cy` is their middle.
+function drawAurora(cy, strength = 1) {
+  const t = REDUCED ? 0 : G.t;
+  const c0 = cy / PX;
+  for (let x = 0; x < BW; x++) {
+    const mid = c0 + Math.sin(x * 0.045 + t * 0.004) * 5 + Math.sin(x * 0.012 + 1 + t * 0.0017) * 8;
+    const curtain = 0.6 + 0.4 * Math.sin(x * 0.35 + Math.sin(x * 0.05 + t * 0.006) * 3);
+    for (let dy = -12; dy <= 7; dy++) {
+      const y = Math.round(mid + dy);
+      const v = (dy < 0 ? 1 + dy / 12 : 1 - dy / 7) * curtain * strength;
+      if (v < BAYER[((y & 3) << 2) | (x & 3)] + 0.5) continue;
+      fillPx(x * PX, y * PX, PX, PX, v > 0.62 ? C.rune : C.aur);
+    }
+  }
+}
+
+// What stands between the mountains and the road. `g` is the ground line
+// and `far` how far the layer has scrolled, so the same code draws the road
+// (scrolling) and the backdrop of a battle (still).
+const ridge = (wx, g, amp = 1) => snap(g - 38 + (Math.sin(wx * 0.013) * 7 + Math.sin(wx * 0.041) * 3) * amp);
+
+function eachCell(far, cell, fn) {
+  for (let c = Math.floor(far / cell) - 1; c <= Math.floor((far + W) / cell) + 1; c++) {
+    fn(c, snap(c * cell - far + hash(c + 3.1) * cell * 0.6));
+  }
+}
+
+function hills(g, far, amp) {
+  for (let x = 0; x < W; x += PX) {
+    const y = ridge(x + far, g, amp);
+    fillPx(x, y, PX, g - y, C.night);
+    if (hash(Math.floor((x + far) / PX)) > 0.55) fillPx(x, y, PX, PX, C.dim);
+  }
+}
+
+// Stand a bitmap on the ridge at x.
+function plant(rows, x, y, colors) {
+  drawBitmap(rows, x, y - rows.length * PX + PX, colors);
+}
+
+const SCENERY = {
+  // snowy pines on rolling hills
+  ashwood(g, far) {
+    hills(g, far, 1);
+    eachCell(far, 34, (c, x) => {
+      if (hash(c + 7.7) < 0.7) plant(SPR.pine, x, ridge(x + far, g), { color: C.moss, color2: C.ink });
+    });
+  },
+  // low downs crowded with standing stones and cairns
+  cairnfield(g, far) {
+    hills(g, far, 0.45);
+    eachCell(far, 44, (c, x) => {
+      const y = ridge(x + far, g, 0.45);
+      const h = hash(c + 1.3);
+      const stone = { color: C.stoneL, color2: C.ink, color3: C.stone };
+      if (h < 0.4) plant(SPR.menhir, x, y, stone);
+      else if (h < 0.7) plant(SPR.cairn, x, y, stone);
+      else if (h < 0.85) plant(SPR.dolmen, x, y, stone);
+    });
+  },
+  // a sheet of ice with long cracks, the moon on it, and ships frozen in
+  fjord(g, far) {
+    const hz = g - 26;
+    fillPx(0, hz, W, g - hz, C.night);
+    for (let x = 0; x < W; x += PX) if (hash(Math.floor((x + far) / PX) + 40) > 0.3) fillPx(x, hz, PX, PX, C.dim);
+    eachCell(far, 28, (c, x) => {
+      fillPx(x, snap(hz + 6 + hash(c + 2.2) * (g - hz - 12)), snap(8 + hash(c + 5.5) * 22), PX, C.faint);
+    });
+    for (let y = hz + 4; y < g - 2; y += 2 * PX) fillPx(snap(332 + hash(y * 0.7) * 10), y, snap(4 + hash(y) * 8), PX, C.dim);
+    eachCell(far, 380, (c, x) => {
+      if (hash(c + 9.1) < 0.8) plant(SPR.longship, x, hz + 4, { color: C.stoneL, color2: C.dim, color3: C.ink });
+    });
+  },
+  // the empty village of the hearth-keepers
+  hall(g, far) {
+    hills(g, far, 0.6);
+    eachCell(far, 36, (c, x) => {
+      if (hash(c + 8.8) < 0.45) fillPx(x, ridge(x + far, g, 0.6) - 6, PX, 6, C.stoneL);
+    });
+    eachCell(far, 104, (c, x) => {
+      if (hash(c + 4.4) < 0.8) plant(SPR.ruin, x, ridge(x + far + 22, g, 0.6) + 2, { color: C.stoneL, color2: C.ink, color3: C.stone, color4: C.bg });
+    });
+  },
+  // flights of steps cut into the mountainside, with a pillar at each landing
+  stair(g, far) {
+    const FLIGHT = 56;
+    for (let x = 0; x < W; x += PX) {
+      const wx = Math.floor((x + far) / PX);
+      const step = Math.floor((((wx % FLIGHT) + FLIGHT) % FLIGHT) / 8);
+      const y = g - 12 - step * 6;
+      fillPx(x, y, PX, g - y, C.night);
+      fillPx(x, y, PX, PX, hash(wx) > 0.5 ? C.ink : C.dim);
+    }
+    for (let c = Math.floor(far / (FLIGHT * PX)) - 1; c <= Math.floor((far + W) / (FLIGHT * PX)) + 1; c++) {
+      plant(SPR.pillar, snap(c * FLIGHT * PX + 50 * PX - far), g - 12 - 36, { color: C.stone, color2: C.ink, color3: C.stoneD });
+    }
+  },
+};
+
+// A runestone you can read. Its carvings light up once you have.
+function bakeRunestone(lit) {
+  const pen = new Pen(20, 30, 10, 28, 1);
+  const body = [[-7, 0], [-8, -12], [-6, -22], [-1, -26], [5, -24], [8, -14], [7, 0]];
+  const mark = lit ? C.rune : C.stoneD;
+  pen.fill(body, C.stone);
+  pen.line([[-6, -11], [-5, -21], [-1, -24]], C.stoneL);
+  pen.line(body, C.stoneD, true);
+  pen.line([[-4, -3], [-4, -16], [0, -19], [4, -15], [4, -3]], mark);
+  pen.line([[-1, -6], [1, -8]], mark);
+  pen.line([[-1, -11], [1, -13]], mark);
+  pen.dot(0, -16, mark);
+  pen.line([[-6, -22], [-1, -26], [5, -24]], C.ink);
+  return pen.canvas();
+}
+
+// The first hearth: a stone bowl on a stepped dais, between two pillars.
+function bakeHearth(lit, k) {
+  const pen = new Pen(Math.ceil(124 * k), Math.ceil(60 * k), Math.ceil(62 * k), Math.ceil(56 * k), k);
+  const mark = lit ? C.rune : C.stoneD;
+  for (const side of [-1, 1]) {
+    pen.shape(mirror([[45, 0], [45, -44], [50, -51], [55, -44], [55, 0]], side), C.stone, C.stoneD);
+    pen.line(mirror([[50, -8], [50, -38]], side), mark);
+    pen.line(mirror([[48, -30], [52, -34]], side), mark);
+    pen.line(mirror([[48, -18], [52, -22]], side), mark);
+    pen.line(mirror([[46, -45], [50, -51], [54, -45]], side), C.ink);
+  }
+  pen.shape([[-42, 0], [-38, -8], [38, -8], [42, 0]], C.stone, C.stoneD);
+  pen.shape([[-32, -8], [-29, -15], [29, -15], [32, -8]], C.stone, C.stoneD);
+  pen.line([[-37, -8], [37, -8]], C.stoneL);
+  pen.line([[-28, -15], [28, -15]], C.stoneL);
+  if (k >= 1) {
+    for (let u = -30; u <= 30; u += 10) {
+      pen.line([[u, -2], [u, -6]], mark);
+      pen.line([[u, -5], [u + 3, -3]], mark);
+    }
+  }
+  pen.shape([[-20, -15], [-28, -28], [28, -28], [20, -15]], C.stone, C.stoneD);
+  pen.line([[-27, -28], [27, -28]], C.stoneL);
+  if (!lit) pen.fill(qbez([-18, -29], [0, -35], [18, -29]), C.dim); // a mound of old ash
+  return pen.canvas();
+}
+
+// A stone plaque with a place name on it.
+function drawPlaque(label, cy, alpha = 1) {
+  const w = textWidth(label, 2, 1) + 44;
+  ctx.globalAlpha = alpha;
+  drawFrame({ x: W / 2 - w / 2, y: cy - 22, w, h: 44 });
+  ctx.globalAlpha = 1;
+  text(label, W / 2, cy, { scale: 2, align: "center", base: "middle", spacing: 1, shadow: C.stoneD, alpha });
+}
+
+function showBanner(name) {
+  G.banner = { name, t: 0 };
+}
+
 /* --- the path ------------------------------------------------------------ */
 function drawHub() {
   if (G.box.y > 200) drawPath(); // the campfire and friends panels cover the path
@@ -2525,46 +2949,50 @@ function drawHub() {
   text("warmth", 20, 18, { color: C.dim });
   text(fmt(S.warmth), 20, 34, { scale: 2, color: C.ember });
   text(`+${fmtRate(warmthRate())} / s`, 20, 72, { color: C.dim });
-  text(`${fmt(S.dist)} m`, 430, 18, { align: "right" });
-  text(`night ${night()}`, 430, 36, { color: C.dim, align: "right" });
-  text(arrived() ? "something ahead" : `next in ${Math.ceil(S.nextAt - S.dist)} m`, 430, 54, { color: arrived() ? C.ember : C.dim, align: "right" });
+  const left = Math.ceil(S.nextAt - S.dist);
+  const ahead = hearthDue() ? (arrived() ? "the first hearth" : `the hearth in ${left} m`) : arrived() ? "something ahead" : `next in ${left} m`;
+  text(region().name, 396, 18, { align: "right" });
+  text(`night ${night()}`, 396, 36, { color: C.dim, align: "right" });
+  text(ahead, 396, 54, { color: arrived() ? C.ember : C.dim, align: "right" });
+
+  if (G.banner && G.hubPhase === "walk" && G.box.y > 200) {
+    const t = G.banner.t;
+    drawPlaque(G.banner.name, 116, clamp(Math.min(t / 20, (280 - t) / 30), 0, 1));
+  }
 
   const b = drawFrame(G.box);
   withClip(b, () => {
+    const d = G.dialog;
+    const o = { shadow: C.stoneD };
     if (G.hubPhase === "camp") drawCamp(b);
     else if (G.hubPhase === "friends") drawFriends(b);
-    else if (G.dialog) drawTyped(G.dialog.text, G.dialog.n, b.x + 22, b.y + 20, HUB_BOX.w - 44, 24, { shadow: C.stoneD });
+    else if (G.hubPhase === "saga") drawSaga(b);
+    else if (d?.rune) {
+      // a runestone: what it says is in the color of its carvings
+      const [head, body] = d.text.split("\n");
+      drawTyped(head, d.n, b.x + 22, b.y + 20, HUB_BOX.w - 44, 24, o);
+      drawTyped(body, d.n - head.length - 1, b.x + 22, b.y + 44, HUB_BOX.w - 44, 24, { ...o, color: C.rune });
+    } else if (d) drawTyped(d.text, d.n, b.x + 22, b.y + 20, HUB_BOX.w - 44, 24, o);
   });
 
-  drawOptionRow(HUB_OPTS, G.hubPhase === "camp" ? 1 : G.hubPhase === "friends" ? 2 : G.hubSel, true, {
-    ready: [arrived()],
+  const open = ["walk", "camp", "friends", "saga"].indexOf(G.hubPhase);
+  drawOptionRow(HUB_OPTS, open > 0 ? open : G.hubSel, true, {
+    ready: [arrived(), false, false, S.lore > S.loreSeen],
     off: [!arrived()],
   });
 }
 
-const ridgeY = (wx) => snap(176 + Math.sin(wx * 0.013) * 7 + Math.sin(wx * 0.041) * 3);
-
 function drawPath() {
   layer("bg");
+  const R = region();
   const off = S.dist * PX_PER_M;
   const far = off * 0.3;
 
+  if (R.aurora) drawAurora(126, R.aurora);
   drawGlow(338, 100, 12, [C.night]);
   drawSprite(baked("moon", bakeMoon), 338, 100);
-  drawMountains(196, { scroll: (off * 0.12) / PX, color: C.faint });
-
-  // near hills with snowy pines, scrolling slower than the ground
-  for (let x = 0; x < W; x += PX) {
-    const y = ridgeY(x + far);
-    fillPx(x, y, PX, GROUND - y, C.night);
-    if (hash(Math.floor((x + far) / PX)) > 0.55) fillPx(x, y, PX, PX, C.dim);
-  }
-  const tcell = 40;
-  for (let c = Math.floor(far / tcell) - 1; c <= Math.floor((far + W) / tcell) + 1; c++) {
-    if (hash(c + 7.7) > 0.55) continue;
-    const x = snap(c * tcell - far + hash(c + 3.1) * 26);
-    drawBitmap(SPR.pine, x, ridgeY(x + far) - 10, { color: C.moss, color2: C.ink });
-  }
+  drawMountains(196, { scroll: (off * 0.12) / PX, color: C.faint, rise: R.rise });
+  SCENERY[R.key](GROUND, far); // what this region is made of, scrolling slower than the road
 
   const walking = !arrived() && !REDUCED;
   const bob = walking ? -Math.round(Math.abs(Math.sin(G.walkT * 0.18)) * 2) * PX : 0;
@@ -2589,9 +3017,17 @@ function drawPath() {
   }
 
   layer("act");
+  // this stretch's runestone; its carvings light up once you've read it
+  const stoneX = WALK_X + (runestoneAt() - S.dist) * PX_PER_M;
+  if (stoneX > -40 && stoneX < W + 40) {
+    const lit = S.read === S.met;
+    drawSprite(baked(`runestone|${lit}`, () => bakeRunestone(lit)), stoneX, GROUND + 2);
+  }
   const remaining = S.nextAt - S.dist;
-  if (remaining < 26) {
-    drawAhead(ROSTER[S.met % ROSTER.length], WALK_X + 72 + remaining * PX_PER_M, remaining <= 0 ? C.ink : C.dim);
+  if (remaining < 30) {
+    const ax = WALK_X + 72 + remaining * PX_PER_M;
+    if (hearthDue()) drawSprite(baked("hearth|0|0.5", () => bakeHearth(false, 0.5)), ax + 44, GROUND + 2);
+    else drawAhead(ROSTER[S.met % ROSTER.length], ax, remaining <= 0 ? C.ink : C.dim);
   }
 
   // friends trail behind you
@@ -2651,6 +3087,80 @@ function drawFriends(b) {
   }
   text("your own glow", b.x + 48, y, sh);
   text(`+${fmtRate(ownGlow())} / s`, b.x + b.w - 20, y, { color: C.ember, align: "right", ...sh });
+  if (S.lit) {
+    y += 26;
+    text("hearthlight", b.x + 48, y, sh);
+    text(`+${Math.round((hearthlight() - 1) * 100)}% to all of it`, b.x + b.w - 20, y, { color: C.ember, align: "right", ...sh });
+  }
+}
+
+function drawSaga(b) {
+  const sh = { shadow: C.stoneD };
+  const page = G.sagaPage;
+  const x = b.x + 20;
+  let y = b.y + 18;
+  text(`${page + 1} / ${SAGA_PAGES}`, b.x + b.w - 20, y, { color: C.dim, align: "right", ...sh });
+  if (page === REGIONS.length) {
+    text("the first hearth", x, y, { color: C.ember, ...sh });
+    const state = S.lit
+      ? `burning. you have carried the fire home ${S.lit === 1 ? "once" : `${S.lit} times`}, and everything you gather is ${Math.round((hearthlight() - 1) * 100)}% warmer for it.`
+      : "at the top of the last stair. cold, for now.";
+    y += 24;
+    y += drawTyped(state, 999, x, y, b.w - 40, 18, { color: C.dim, ...sh }) * 18 + 14;
+    text(`${S.lore} of ${SAGA.length} runestones read`, x, y, sh);
+    text(`${fmt(S.dist)} m walked · ${S.friends.length} following you`, x, y + 22, sh);
+  } else {
+    const R = REGIONS[page];
+    text(R.name, x, y, { color: C.ember, ...sh });
+    y += 24;
+    y += drawTyped(R.desc, 999, x, y, b.w - 40, 18, { color: C.dim, ...sh }) * 18 + 14;
+    for (let k = 0; k < 3; k++) {
+      const idx = page * 3 + k;
+      const found = idx < S.lore;
+      drawBitmap(RUNES[idx % RUNES.length], x, y, { color: found ? C.rune : C.stoneL });
+      if (found) {
+        y += drawTyped(SAGA[idx], 999, x + 20, y, b.w - 60, 18, sh) * 18 + 14;
+      } else {
+        text("not read yet", x + 20, y, { color: C.stoneL, ...sh });
+        y += 32;
+      }
+    }
+  }
+  text("arrows turn the page", x, b.y + b.h - 24, { color: C.dim, ...sh });
+  text("x back", b.x + b.w - 20, b.y + b.h - 24, { color: C.dim, align: "right", ...sh });
+}
+
+/* --- the first hearth ---------------------------------------------------- */
+function drawHearth() {
+  const lit = G.hearthLit;
+  const glow = clamp(lit / 120, 0, 1);
+  const rim = HEARTH_GROUND - 56;
+  const scale = lit > 60 ? 4 : lit > 0 ? 2 : 1;
+  const ex = W / 2;
+  const ey = lit ? rim - 8 * scale + 6 : lerp(HEARTH_GROUND - 12, rim - 4, G.hearthStep / 40);
+
+  layer("bg");
+  drawAurora(70, 0.9 + 0.6 * glow);
+  drawMountains(HEARTH_GROUND, { rise: 50 });
+  drawSnowLine(HEARTH_GROUND);
+  emberGlow(ex, lit ? rim - 10 : ey, lit ? 1.6 + 2.4 * glow : 1);
+
+  layer("act");
+  drawSprite(baked(`hearth|${lit ? 1 : 0}|1`, () => bakeHearth(lit > 0, 1)), W / 2, HEARTH_GROUND + 2);
+  // everyone who followed you, gathered at the rim
+  S.friends.slice(-10).forEach((f, i) => {
+    const x = W / 2 + (i % 2 ? 1 : -1) * (130 + (i >> 1) * 22);
+    const y = HEARTH_GROUND - 14 + Math.round(Math.sin(G.t * 0.06 + i * 1.7) * 2) * PX;
+    drawMini(f.key, x, y, Math.floor(G.t / 9 + i) % 2);
+  });
+  drawEmber(ex, ey, { scale });
+
+  layer("ui");
+  const b = drawFrame(HEARTH_BOX);
+  withClip(b, () => {
+    drawTyped(G.dialog.text, G.dialog.n, b.x + 22, b.y + 20, HEARTH_BOX.w - 44, 24, { shadow: C.stoneD });
+    if (G.dialog.full) drawNext(b.x + b.w - 22, b.y + b.h - 16);
+  });
 }
 
 /* --- battle -------------------------------------------------------------- */
@@ -2659,7 +3169,10 @@ const BATTLE_GROUND = 142;
 function drawBattle() {
   const f = G.foe;
   layer("bg");
-  drawMountains(BATTLE_GROUND);
+  const R = region();
+  if (R.aurora) drawAurora(40, R.aurora);
+  drawMountains(BATTLE_GROUND, { rise: R.rise });
+  SCENERY[R.key](BATTLE_GROUND, 400 + S.met * 173);
   drawSnowLine(BATTLE_GROUND);
   layer("act");
   const pose = drawFoe(f);
@@ -2907,6 +3420,12 @@ function draw() {
     case "hub": drawHub(); break;
     case "battle": drawBattle(); break;
     case "over": drawOver(); break;
+    case "hearth": drawHearth(); break;
+  }
+  // snow in the pixel view (the ASCII view draws it as glyphs instead)
+  if (G.view !== "ascii" && !(G.scene === "battle" && (G.phase === "enemy" || G.phase === "dodge"))) {
+    layer("bg");
+    for (const m of G.motes.slice(0, G.snowN)) fillPx(snap(m.x), snap(m.y), PX, PX, m.color);
   }
   layer("act");
   drawParticles();
@@ -3019,11 +3538,24 @@ function spriteGroups() {
   light("firefly-far", glowCanvas(8, [C.moss]));
   light("moon", glowCanvas(12, [C.night]));
 
-  const scenery = group("scenery", "moon, pine");
+  const world = group("world", "a runestone unread and read · the first hearth cold, lit, and seen from the road");
+  world("runestone", bakeRunestone(false));
+  world("runestone-read", bakeRunestone(true));
+  world("hearth", bakeHearth(false, 1));
+  world("hearth-lit", bakeHearth(true, 1));
+  world("hearth-far", bakeHearth(false, 0.5));
+
+  const scenery = group("scenery", "moon, pine, standing stone, cairn, dolmen, longship, ruined hall, stair pillar");
   scenery("moon", baked("moon", bakeMoon));
   scenery("pine", bmp(SPR.pine, [C.moss, C.ink]));
+  scenery("standing-stone", bmp(SPR.menhir, [C.stoneL, C.ink, C.stone]));
+  scenery("cairn", bmp(SPR.cairn, [C.stoneL, C.ink, C.stone]));
+  scenery("dolmen", bmp(SPR.dolmen, [C.stoneL, C.ink, C.stone]));
+  scenery("longship", bmp(SPR.longship, [C.stoneL, C.dim, C.ink]));
+  scenery("ruined-hall", bmp(SPR.ruin, [C.stoneL, C.ink, C.stone, C.bg]));
+  scenery("stair-pillar", bmp(SPR.pillar, [C.stone, C.ink, C.stoneD]));
 
-  const icons = group("icons", "tablet icons: strike, talk, mend, part, approach, campfire, friends");
+  const icons = group("icons", "tablet icons: strike, talk, mend, part, ahead, camp, friends, saga");
   for (const [name, rows] of Object.entries(ICON)) icons(name, bmp(rows, [C.dim]));
   icons("strike-selected", bmp(ICON.strike, [C.ember]));
   const runes = group("runes", "the calm meter: unlit, lit, ready to part");
@@ -3195,7 +3727,7 @@ const COLS = BW / CELL;
 const ROWS = BH / CELL;
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace';
 const GLY = {
-  field: "#1d2c42", night: "#34465f", faint: "#435470", stone: "#7d899e", snow: "#eef3f8", white: "#ffffff",
+  aur: "#3c8f86", field: "#1d2c42", night: "#34465f", faint: "#435470", stone: "#7d899e", snow: "#eef3f8", white: "#ffffff",
   body: "#5f6f88", bodyStone: "#8a96aa", moss: "#5f8a35", warm: "#d0782f", deep: "#7c4321",
 };
 
@@ -3276,6 +3808,8 @@ function backgroundGlyph(m, L, x, y, h, cx, cy, quiet, drift) {
   if (has(m, "ink")) return [(m !== BIT.ink && edgeChar(L, x, y)) || pick("*=~+", h), GLY.snow];
   if (has(m, "moss")) return [pick("A^", h), GLY.moss];
   if (has(m, "stone", "stoneL", "stoneD")) return [pick("#=%", h), GLY.stone];
+  if (has(m, "rune")) return [pick("|!|:", h), C.rune]; // aurora, in hanging strokes
+  if (has(m, "aur")) return [pick(":'|", h), GLY.aur];
   if (has(m, "warm")) return [pick(":.", h), GLY.warm];
   if (has(m, "deep")) return [pick(".:", h), GLY.deep];
   if (has(m, "dim")) return [has(m, "night") ? "'" : pick("*.'", h), C.dim];
@@ -3338,14 +3872,15 @@ function drawAscii() {
   const cw = SW / COLS;
   const chh = SH / ROWS;
   const quietAt = (lx, ly) => G.quiet.some((q) => lx >= q.x && lx < q.x + q.w && ly >= q.y && ly < q.y + q.h);
-  // the world's glyphs are rebuilt every other frame; everything that moves
-  // fast (bullets, your ember in the arena, particles) is drawn every frame
+  // the world's glyphs are rebuilt every other frame in a fight and every
+  // third on the road, where things move slowly; everything that moves fast
+  // (bullets, your ember in the arena, particles) is drawn every frame
   const sized = worldGlyphs.canvas.width === SW && worldGlyphs.canvas.height === SH;
   if (!sized) {
     worldGlyphs.canvas.width = SW;
     worldGlyphs.canvas.height = SH;
   }
-  if (!sized || asciiFrame++ % 2 === 0) drawWorldGlyphs(SW, SH, cw, chh, quietAt);
+  if (!sized || asciiFrame++ % (G.scene === "battle" ? 2 : 3) === 0) drawWorldGlyphs(SW, SH, cw, chh, quietAt);
   screen.drawImage(worldGlyphs.canvas, 0, 0);
   drawFreeGlyphs(SW, SH, cw, chh, quietAt);
   drawInterfaceOver(SW, SH);
@@ -3404,7 +3939,7 @@ function drawFreeGlyphs(SW, SH, cw, chh, quietAt) {
   }
   screen.globalAlpha = 1;
   if (G.scene !== "battle" || G.phase !== "dodge") {
-    for (const m of G.motes) {
+    for (const m of G.motes.slice(0, G.snowN)) {
       if (quietAt(m.x, m.y)) continue;
       const img = glyphImage(m.ch, m.color, cw * m.ch.length, chh);
       screen.drawImage(img, Math.round(m.x * sx - img.width / 2), Math.round(m.y * sy - img.height / 2));
@@ -3459,6 +3994,7 @@ function update() {
     case "hub": updateHub(); break;
     case "battle": updateBattle(); break;
     case "over": updateOver(); break;
+    case "hearth": updateHearth(); break;
   }
 }
 
@@ -3492,8 +4028,9 @@ document.addEventListener("visibilitychange", () => {
   hiddenAt = 0;
   const walking = G.scene === "hub";
   const g = catchUp(secs, walking);
+  const stone = walking ? readRunestone() : null;
   if (g >= 1 && secs > 20 && walking && G.hubPhase === "walk") {
-    G.dialog = new Typer(`while you were away, you gathered ${fmt(g)} warmth.`);
+    G.dialog = new Typer(`while you were away, you gathered ${fmt(g)} warmth.${stone?.fresh ? " you passed a runestone. it's in your saga now." : ""}`);
   }
 });
 window.addEventListener("pagehide", () => {

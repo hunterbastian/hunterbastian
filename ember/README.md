@@ -1,17 +1,22 @@
 # ember
 
-A very small pixel game about a small light walking a dark path.
+A very small game about a small light walking north.
 
-Your ember walks the path on its own and gathers **warmth**, even while the page
-is closed. Every so often something is waiting on the path ahead: a moth, a
-firefly, an old frost dragon. Each one is a short turn-based encounter where you dodge its
-attacks inside a box. You can fight it, or calm it down until you can part ways.
+Long ago the first hearth kept the north warm. One winter it went out, and the
+cold came down the mountain. You are its last ember, walking back up the road
+to light it again.
+
+Your ember walks on its own and gathers **warmth**, even while the page is
+closed. Every so often something is waiting on the road ahead: a moth, a
+firefly, an old frost dragon. Each one is a short turn-based encounter where
+you dodge its attacks inside a box. You can fight it, or calm it down until you
+can part ways.
 
 - **Spare it** and it follows your light, adding warmth every second from then on.
 - **Strike it down** and you get one burst of warmth, and it's gone.
 
-Spend warmth at the **campfire** on upgrades. After the dragon, the path loops
-into the next night with tougher creatures that give more warmth.
+Spend warmth at the **campfire** on upgrades. The road runs through five
+regions to the hearth, and **runestones** along it tell what happened here.
 
 No build step and no dependencies, not even a web font. Just open it.
 
@@ -39,9 +44,9 @@ python3 -m http.server 8000
 
 ## How to play
 
-**On the path:** `approach` lights up when you reach the next creature.
-`campfire` lists the upgrades, and `friends` shows who is following you and how
-much warmth each one adds.
+**On the road:** `ahead` lights up when you reach whatever is waiting. `camp`
+lists the campfire upgrades, `friends` shows who is following you and how much
+warmth each one adds, and `saga` holds the runestones you've read.
 
 **In an encounter**, pick one action each turn:
 
@@ -68,6 +73,34 @@ friends, and the creature is still waiting.
 | soft glow | talking calms more |
 | steady hand | slower strike line |
 | long stride | walk faster |
+
+## The world
+
+The road north has five regions. Each lasts one night (three encounters) and
+has its own scenery and weather, on the road and behind every fight.
+
+| night | region | what's there |
+| --- | --- | --- |
+| 1 | the ashwood | snowy pines grown on the hearth's old ash |
+| 2 | the cairnfield | standing stones and cairns, one for every torch that failed |
+| 3 | the still fjord | a sea arm frozen in one night, ships still in it, under an aurora |
+| 4 | hollow hall | the hearth-keepers' empty village, in a blizzard |
+| 5 | the last stair | a thousand steps up the mountain, the aurora close overhead |
+
+- **Runestones.** One stands halfway along every stretch of road. Walking past
+  it reads it: its carvings light up, and its line goes into your **saga**.
+  There are fifteen, three per region, and read in order they tell the story.
+  The `saga` tablet glows when there's a new one. You still collect the ones
+  you pass while the page is closed.
+- **The first hearth.** After the fifth night the road ends at the hearth.
+  Lighting it ends the winter. Everyone you spared is there to see it.
+- **A new winter.** The road then starts over with tougher creatures. Each
+  time you've lit the hearth, everything you gather is 25% warmer.
+- While you walk, the region tells you small things about itself now and then.
+
+All of the world's writing (the region names and descriptions, the runestones,
+the weather) sits in one block near the middle of `ember.js`, under "The
+world", so it's easy to rewrite.
 
 Warmth keeps adding up while the page is closed, for up to 8 hours. Progress
 is saved in your browser's local storage. To reset it, choose `start over` on
@@ -97,6 +130,8 @@ pixels and back. The game remembers your choice.
 - Your glow tints what it touches with orange `: .`.
 - An empty sky fills with a dim field of letters that drifts slowly down, and
   `o*o` motes and snow float over the world.
+- The aurora hangs in teal `| !` strokes, and each region's snow and wind move
+  the motes differently.
 - Bullets and particles skip the grid and are drawn as glyphs at their exact
   positions, sized to match their hitboxes. In the dodge box you're a single
   bright `@`.
@@ -120,13 +155,13 @@ follows a few rules:
 - **Stepped light.** Glows fall off in flat bands with a little Bayer dither
   only where two bands meet, and they move in whole pixels so they don't
   shimmer.
-- **A 15-color palette.** A cold blue night, runestone greys and glowing
-  teal runes, with your ember the only warm thing, plus a firefly green. Anything left over, such as fades, is snapped to
+- **A 16-color palette.** A cold blue night, runestone greys, glowing teal
+  runes and aurora, with your ember the only warm thing, plus a firefly green. Anything left over, such as fades, is snapped to
   the palette with 4 × 4 ordered dithering.
 
 ### Sprite sheet
 
-`sprites/` holds the complete sprite sheet, 196 sprites, exported from the
+`sprites/` holds the complete sprite sheet, 208 sprites, exported from the
 game's own drawing code:
 
 | file | what it is |
@@ -134,7 +169,7 @@ game's own drawing code:
 | `ember-sprites.png` | every sprite and frame packed together, 1 px = 1 game pixel, on transparency |
 | `ember-sprites.json` | each frame's name, position and pivot (the point the game positions it by), in TexturePacker's JSON hash format |
 | `ember-sprites-preview.png` | the same sprites labeled, with the palette, at 4× |
-| `ember-palette.gpl` | the 15 colors, for Aseprite or GIMP |
+| `ember-palette.gpl` | the 16 colors, for Aseprite or GIMP |
 
 Frames are named by group, like `moth/wings-open`, `firefly/wings-up-lit-hit`,
 `dragon/wings-mid-drowsy`, `friends/dragon-b`, `attacks/feather-left` and `font/a`. Open
@@ -147,8 +182,9 @@ node export-sprites.mjs
 ```
 
 
-- `ember.js` — the font, sprites and pixel pen, the ASCII renderer, the save and offline-warmth
-  logic, the creatures and their attack patterns, a fixed-timestep loop
+- `ember.js` — the font, sprites and pixel pen, the ASCII renderer, the save
+  and offline-warmth logic, the world (regions, runestones, the hearth), the
+  creatures and their attack patterns, a fixed-timestep loop
   (60 ticks/s), and all the drawing. Sound is synthesized with the Web Audio API.
 - `style.css` — centers the canvas, keeps its pixels sharp, and turns off page
   scrolling while you drag.
@@ -161,7 +197,8 @@ want to poke at it from the console.
 ## Smoke test
 
 `smoke-test.mjs` plays through the loop with scripted key presses. It spares
-the moth, buys an upgrade, strikes down the firefly, and loses to the dragon. Then
+the moth, buys an upgrade, strikes down the firefly, and loses to the dragon. It
+also reads a runestone into the saga and lights the first hearth. Then
 it checks that warmth built up while the page was closed. It saves screenshots
 and fails on any page error. It needs Playwright with Chromium:
 
