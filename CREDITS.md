@@ -25,3 +25,11 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+## Phyla
+
+`phyla/` vendors [Three.js](https://threejs.org) r169 as `phyla/vendor/three.module.min.js`,
+copyright (c) 2010-2024 three.js authors, released under the MIT License. The full licence
+text is kept beside it in `phyla/vendor/THREE-LICENSE`.
