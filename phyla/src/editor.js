@@ -7,7 +7,7 @@ import { PARTS, PART_LIST, CATEGORIES } from './parts.js';
 import { computeStats, genomeCost, encodeGenome, decodeGenome, randomGenome, randomSkin, isMirrored, MAX_NODES, MIN_NODES, NODE_COST, FREE_NODES } from './genome.js';
 import { PATTERNS } from './skin.js';
 import { partThumb } from './thumbs.js';
-import { el, esc, icon, pips, toast, SOCIAL, FIERCE, DIET } from './ui.js';
+import { el, esc, icon, pips, toast, modal, SOCIAL, FIERCE, DIET } from './ui.js';
 import { clamp, damp, makeRng } from './util.js';
 
 const SWATCHES = ['#7fb069', '#4f8a5b', '#35654d', '#c9a06c', '#d98e4a', '#c2603f', '#a8475a', '#7a4f7c', '#5b6fb0', '#4fa3b8', '#3f6e73', '#8a8f98', '#ece3b8', '#f2f0e6', '#2f3a34', '#e3b23c'];
@@ -443,7 +443,7 @@ export class Editor {
       this.cam.tdist = clamp(this.cam.tdist * (1 + Math.sign(e.deltaY) * 0.1), 2.2, 14);
     }, { passive: false });
     on(window, 'keydown', (e) => {
-      if (e.target.tagName === 'INPUT') return;
+      if (/INPUT|TEXTAREA/.test(e.target.tagName)) return;
       if (e.key === 'Delete' || e.key === 'Backspace') this.removeSelected();
       if (e.key === 'Escape') {
         this.sel = null;
@@ -536,17 +536,36 @@ export class Editor {
 
   _copy() {
     const code = encodeGenome(this.genome);
-    const done = () => toast('Creature code copied. Share it with anyone.');
-    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(code).then(done, () => window.prompt('Copy this code:', code));
-    else window.prompt('Copy this code:', code);
+    const show = () => this._codeDialog('Copy this creature code', code, false);
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(code).then(() => toast('Creature code copied. Share it with anyone.'), show);
+    else show();
   }
 
   _paste() {
-    const code = window.prompt('Paste a creature code:');
-    if (!code) return;
-    const g = decodeGenome(code);
-    if (!g) toast('That code did not hatch into anything.', 'warn');
-    else this._replace(g);
+    this._codeDialog('Paste a creature code', '', true);
+  }
+
+  // In-page dialog for creature codes (system prompts are not always allowed).
+  _codeDialog(title, value, editable) {
+    const m = modal(
+      `<h2>${title}</h2>
+       <textarea class="codebox" id="creature-code" spellcheck="false" autocapitalize="off" ${editable ? 'placeholder="phyla1…"' : 'readonly'}>${esc(value)}</textarea>
+       <div class="row row--end">${editable ? '<button class="btn" data-close>Cancel</button><button class="btn btn--primary" data-ok>Hatch it</button>' : '<button class="btn btn--primary" data-close>Done</button>'}</div>`,
+    );
+    const ta = m.root.querySelector('textarea');
+    ta.focus();
+    if (!editable) ta.select();
+    const ok = m.root.querySelector('[data-ok]');
+    if (ok) {
+      ok.addEventListener('click', () => {
+        const g = decodeGenome(ta.value);
+        if (!g) toast('That code did not hatch into anything.', 'warn');
+        else {
+          m.close();
+          this._replace(g);
+        }
+      });
+    }
   }
 
   _done() {
@@ -764,7 +783,7 @@ export class Editor {
     this.handleGroup.visible = showH;
     if (showH) {
       const pos = this.spineLine.geometry.attributes.position;
-      const size = clamp(cam.dist * 0.032, 0.09, 0.3);
+      const size = clamp(cam.dist * (this.app.touch ? 0.038 : 0.032), 0.09, 0.34); // a little bigger for fingers
       for (let i = 0; i < this.handles.length; i++) {
         const e = c.ex[i + 1];
         const hd = this.handles[i];

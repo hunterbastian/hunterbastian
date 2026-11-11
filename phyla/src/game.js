@@ -221,7 +221,7 @@ export class Game {
       this._off.push(() => t.removeEventListener(ev, fn, opt));
     };
     on(window, 'keydown', (e) => {
-      if (e.target.tagName === 'INPUT' || e.metaKey || e.ctrlKey) return;
+      if (/INPUT|TEXTAREA/.test(e.target.tagName) || e.metaKey || e.ctrlKey) return;
       const k = e.code;
       if (['Tab', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(k)) e.preventDefault();
       if (e.repeat) return;
@@ -239,6 +239,10 @@ export class Game {
       }
     });
     on(window, 'keyup', (e) => this.keys.delete(e.code));
+    // phones close tabs without warning: save whenever the page is hidden
+    on(document, 'visibilitychange', () => {
+      if (document.hidden) this.snapshot();
+    });
     on(window, 'blur', () => this.keys.clear());
     on(cv, 'pointerdown', (e) => {
       cv.setPointerCapture(e.pointerId);
@@ -1105,6 +1109,7 @@ export class Game {
     }
 
     locomote(P, mx, mz, speed, dt, this);
+    if (Math.hypot(P.pos.x, P.pos.z) > 184) this.hint('sea', 'The open sea turns you back. This island is the whole world, for now.');
     P.speedNow = Math.hypot(P.vel.x, P.vel.z);
     P.c.headPos(P.look);
     const tg = this.target;
